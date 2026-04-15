@@ -25,11 +25,11 @@ def write_exif_description(
     Returns:
         None on success, or an error message string on failure.
     """
-    if not is_exiftool_available():
-        return "exiftool is not available on this system"
-
     if description is None and not keywords:
         return None
+
+    if not is_exiftool_available():
+        return "exiftool is not available on this system"
 
     args = ["exiftool", "-overwrite_original"]
 
