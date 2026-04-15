@@ -57,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose per-file output")
     p.add_argument("--cache-dir", help="Geocoding cache directory")
     p.add_argument(
+        "--dedup", action="store_true", help="Detect and skip duplicate images via phash"
+    )
+    p.add_argument(
+        "--dedup-threshold", type=int, default=5, help="Hamming distance threshold (default: 5)"
+    )
+    p.add_argument(
         "--preflight",
         action="store_true",
         help="Run preflight checks for prerequisites and exit",
@@ -105,6 +111,31 @@ def main(argv: list[str] | None = None) -> int:
         print("No image files found.", file=sys.stderr)
         return 0
 
+    # --- dedup ---
+    phash_map: dict[str, str] = {}
+    skipped_dedup: set[str] = set()
+    if args.dedup:
+        from pyimgtag.dedup import compute_phash, find_duplicate_groups
+
+        print("Computing perceptual hashes...", file=sys.stderr)
+        records: list[tuple[str, str]] = []
+        for f in files:
+            h = compute_phash(f)
+            if h is not None:
+                records.append((str(f), h))
+                phash_map[str(f)] = h
+        groups = find_duplicate_groups(records, threshold=args.dedup_threshold)
+        dup_count = 0
+        for group in groups:
+            for path in sorted(group)[1:]:
+                skipped_dedup.add(path)
+                dup_count += 1
+        print(
+            f"Found {len(groups)} duplicate groups ({dup_count} images skipped, "
+            f"keeping 1 per group)",
+            file=sys.stderr,
+        )
+
     # --- init services ---
     ollama = OllamaClient(
         model=args.model, base_url=args.ollama_url, max_dim=args.max_dim, timeout=args.timeout
@@ -120,10 +151,15 @@ def main(argv: list[str] | None = None) -> int:
             if args.limit and stats["processed"] >= args.limit:
                 break
 
+            if str(file_path) in skipped_dedup:
+                stats["skipped_dedup"] += 1
+                continue
+
             result = _process_one(file_path, source_type, args, ollama, geocoder, stats)
             if result is None:
                 continue
 
+            result.phash = phash_map.get(str(file_path))
             results.append(result)
             stats["processed"] += 1
 
@@ -264,6 +300,7 @@ def _new_stats(scanned: int) -> dict:
         "skipped_date": 0,
         "skipped_no_gps": 0,
         "skipped_no_local": 0,
+        "skipped_dedup": 0,
         "model_failures": 0,
         "geocode_failures": 0,
     }
@@ -320,6 +357,7 @@ def _print_summary(stats: dict) -> None:
     print(f"  Skipped (date):   {stats['skipped_date']}", file=sys.stderr)
     print(f"  Skipped (no GPS): {stats['skipped_no_gps']}", file=sys.stderr)
     print(f"  Skipped (no file):{stats['skipped_no_local']}", file=sys.stderr)
+    print(f"  Skipped (dedup):  {stats['skipped_dedup']}", file=sys.stderr)
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
     print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
 

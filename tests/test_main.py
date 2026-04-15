@@ -92,6 +92,22 @@ class TestBuildParser:
         args = build_parser().parse_args(["--input-dir", "/tmp"])
         assert args.preflight is False
 
+    def test_dedup_flag(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp", "--dedup"])
+        assert args.dedup is True
+
+    def test_dedup_flag_default_false(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp"])
+        assert args.dedup is False
+
+    def test_dedup_threshold_default(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp"])
+        assert args.dedup_threshold == 5
+
+    def test_dedup_threshold_custom(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp", "--dedup-threshold", "10"])
+        assert args.dedup_threshold == 10
+
     def test_output_flags(self):
         args = build_parser().parse_args(
             [

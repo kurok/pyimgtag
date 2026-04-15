@@ -55,3 +55,4 @@ class ImageResult:
     nearest_country: str | None = None
     processing_status: str = "ok"
     error_message: str | None = None
+    phash: str | None = None

@@ -25,6 +25,7 @@ _CSV_FIELDS = [
     "nearest_country",
     "processing_status",
     "error_message",
+    "phash",
 ]
 
 
