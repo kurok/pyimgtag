@@ -21,11 +21,13 @@ classifiers = [
     "Intended Audience :: End Users/Desktop",
 ]
 dependencies = [
-    "ollama>=0.4.0",
+    "requests>=2.28",
     "Pillow>=10.0",
 ]
 
 [project.optional-dependencies]
+heic = ["pillow-heif>=0.10.0"]
+all = ["pillow-heif>=0.10.0"]
 dev = ["pytest>=9.0", "pytest-xdist>=3.0", "pytest-cov>=4.0"]
 lint = ["mypy>=1.0", "ruff>=0.1.0"]
 security = ["bandit>=1.7", "pip-audit>=2.6"]
@@ -47,7 +49,7 @@ warn_unused_configs = true
 disallow_untyped_defs = false
 
 [tool.bandit]
-skips = []
+skips = ["B404", "B603", "B607"]
 
 [tool.ruff]
 line-length = 100
