@@ -23,6 +23,13 @@ class TagResult:
     summary: str | None = None
     raw_response: str | None = None
     error: str | None = None
+    scene_category: str | None = None
+    emotional_tone: str | None = None
+    cleanup_class: str | None = None
+    has_text: bool = False
+    text_summary: str | None = None
+    event_hint: str | None = None
+    significance: str | None = None
 
 
 @dataclass
@@ -56,3 +63,10 @@ class ImageResult:
     processing_status: str = "ok"
     error_message: str | None = None
     phash: str | None = None
+    scene_category: str | None = None
+    emotional_tone: str | None = None
+    cleanup_class: str | None = None
+    has_text: bool = False
+    text_summary: str | None = None
+    event_hint: str | None = None
+    significance: str | None = None

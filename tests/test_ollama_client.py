@@ -54,6 +54,54 @@ class TestParseResponse:
         assert r.tags == ["dog"]
         assert r.summary == "a happy dog"
 
+    def test_new_fields_parsed_correctly(self):
+        payload = (
+            '{"tags":["cafe","coffee"],"summary":"a cozy cafe",'
+            '"scene_category":"indoor_home","emotional_tone":"positive",'
+            '"cleanup_class":"keep","has_text":true,"text_summary":"menu board",'
+            '"event_hint":"outing","significance":"medium"}'
+        )
+        r = _parse_response(payload)
+        assert r.scene_category == "indoor_home"
+        assert r.emotional_tone == "positive"
+        assert r.cleanup_class == "keep"
+        assert r.has_text is True
+        assert r.text_summary == "menu board"
+        assert r.event_hint == "outing"
+        assert r.significance == "medium"
+
+    def test_invalid_enum_values_return_none(self):
+        payload = (
+            '{"tags":["test"],"scene_category":"rooftop","emotional_tone":"happy",'
+            '"cleanup_class":"maybe","event_hint":"birthday","significance":"ultra"}'
+        )
+        r = _parse_response(payload)
+        assert r.scene_category is None
+        assert r.emotional_tone is None
+        assert r.cleanup_class is None
+        assert r.event_hint is None
+        assert r.significance is None
+
+    def test_has_text_defaults_to_false_when_missing(self):
+        r = _parse_response('{"tags":["tree"]}')
+        assert r.has_text is False
+        assert r.text_summary is None
+
+    def test_has_text_false_clears_text_summary(self):
+        r = _parse_response('{"tags":["sign"],"has_text":false,"text_summary":"some text"}')
+        assert r.has_text is False
+        assert r.text_summary is None
+
+    def test_new_fields_absent_when_not_provided(self):
+        r = _parse_response('{"tags":["mountain"],"summary":"a peak"}')
+        assert r.scene_category is None
+        assert r.emotional_tone is None
+        assert r.cleanup_class is None
+        assert r.has_text is False
+        assert r.text_summary is None
+        assert r.event_hint is None
+        assert r.significance is None
+
 
 class TestBuildPromptWithContext:
     def test_includes_date(self):

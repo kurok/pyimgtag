@@ -26,6 +26,13 @@ _CSV_FIELDS = [
     "processing_status",
     "error_message",
     "phash",
+    "scene_category",
+    "emotional_tone",
+    "cleanup_class",
+    "has_text",
+    "text_summary",
+    "event_hint",
+    "significance",
 ]
 
 
