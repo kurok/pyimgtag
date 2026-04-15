@@ -9,11 +9,13 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import re
 
 import requests
 from PIL import Image
 
+from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic, sips_available
 from pyimgtag.models import TagResult
 
 try:
@@ -81,18 +83,42 @@ class OllamaClient:
             return TagResult(error=f"Response parse failed: {e}")
 
     def _prepare_image(self, file_path: str) -> str:
-        """Load, resize to *max_dim*, convert to JPEG, and base64-encode."""
-        with Image.open(file_path) as raw:
-            converted = raw.convert("RGB")
-            w, h = converted.size
-            if max(w, h) > self.max_dim:
-                ratio = self.max_dim / max(w, h)
-                converted = converted.resize(
-                    (int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS
-                )
-            buf = io.BytesIO()
-            converted.save(buf, format="JPEG", quality=85)
-            return base64.b64encode(buf.getvalue()).decode("ascii")
+        """Load, resize to *max_dim*, convert to JPEG, and base64-encode.
+
+        HEIC/HEIF files are converted to a temporary JPEG via macOS ``sips``
+        when available, falling back to Pillow with pillow-heif on other
+        platforms.
+        """
+        temp_jpeg: str | None = None
+        open_path = file_path
+
+        if is_heic(file_path) and sips_available():
+            temp_jpeg_path = convert_heic_to_jpeg(file_path)
+            temp_jpeg = str(temp_jpeg_path)
+            open_path = temp_jpeg
+
+        try:
+            with Image.open(open_path) as raw:
+                converted = raw.convert("RGB")
+                w, h = converted.size
+                if max(w, h) > self.max_dim:
+                    ratio = self.max_dim / max(w, h)
+                    converted = converted.resize(
+                        (int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS
+                    )
+                buf = io.BytesIO()
+                converted.save(buf, format="JPEG", quality=85)
+                return base64.b64encode(buf.getvalue()).decode("ascii")
+        finally:
+            if temp_jpeg is not None:
+                try:
+                    os.unlink(temp_jpeg)
+                    # Also remove the temp directory if it is now empty
+                    temp_dir = os.path.dirname(temp_jpeg)
+                    if temp_dir and not os.listdir(temp_dir):
+                        os.rmdir(temp_dir)
+                except OSError:
+                    pass
 
     def close(self) -> None:
         self._session.close()
