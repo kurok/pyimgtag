@@ -13,6 +13,7 @@ from pyimgtag.geocoder import ReverseGeocoder
 from pyimgtag.models import ExifData, ImageResult
 from pyimgtag.ollama_client import OllamaClient
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
+from pyimgtag.preflight import check_ollama, run_preflight
 from pyimgtag.scanner import scan_directory, scan_photos_library
 
 # ------------------------------------------------------------------
@@ -28,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
-    src = p.add_mutually_exclusive_group(required=True)
+    src = p.add_mutually_exclusive_group(required=False)
     src.add_argument("--input-dir", help="Path to an exported image folder")
     src.add_argument("--photos-library", help="Path to an Apple Photos library package")
 
@@ -55,6 +56,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--jsonl-stdout", action="store_true", help="JSONL output to stdout")
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose per-file output")
     p.add_argument("--cache-dir", help="Geocoding cache directory")
+    p.add_argument(
+        "--preflight",
+        action="store_true",
+        help="Run preflight checks for prerequisites and exit",
+    )
 
     return p
 
@@ -65,8 +71,23 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    # --- preflight ---
+    if args.preflight:
+        return _handle_preflight(args)
+
+    # Require a source when not running preflight
+    if not args.input_dir and not args.photos_library:
+        parser.error("one of the arguments --input-dir --photos-library is required")
+
     extensions = {e.strip().lower() for e in args.extensions.split(",")}
+
+    # Quick Ollama connectivity warning before processing
+    ok, msg = check_ollama(args.ollama_url)
+    if not ok:
+        print(f"Warning: {msg}", file=sys.stderr)
 
     # --- scan ---
     try:
@@ -130,6 +151,35 @@ def main(argv: list[str] | None = None) -> int:
     # --- summary ---
     _print_summary(stats)
     return 0
+
+
+# ------------------------------------------------------------------
+# preflight handler
+# ------------------------------------------------------------------
+
+
+def _handle_preflight(args: argparse.Namespace) -> int:
+    """Run preflight checks, print results, and return exit code."""
+    source_path: str | None = None
+    source_type = "directory"
+    if args.input_dir:
+        source_path = args.input_dir
+        source_type = "directory"
+    elif args.photos_library:
+        source_path = args.photos_library
+        source_type = "photos_library"
+
+    results = run_preflight(args.ollama_url, args.model, source_path, source_type)
+
+    print("Preflight checks:")
+    all_passed = True
+    for name, passed, msg in results:
+        label = "[PASS]" if passed else "[FAIL]"
+        print(f"  {label} {msg}")
+        if not passed:
+            all_passed = False
+
+    return 0 if all_passed else 1
 
 
 # ------------------------------------------------------------------

@@ -32,7 +32,7 @@ class TestBuildParser:
 
     def test_requires_source(self):
         with pytest.raises(SystemExit):
-            build_parser().parse_args([])
+            main([])
 
     def test_default_model(self):
         args = build_parser().parse_args(["--input-dir", "/tmp"])
@@ -83,6 +83,14 @@ class TestBuildParser:
     def test_extensions_custom(self):
         args = build_parser().parse_args(["--input-dir", "/tmp", "--extensions", "jpg,png"])
         assert args.extensions == "jpg,png"
+
+    def test_preflight_flag(self):
+        args = build_parser().parse_args(["--preflight"])
+        assert args.preflight is True
+
+    def test_preflight_flag_default_false(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp"])
+        assert args.preflight is False
 
     def test_output_flags(self):
         args = build_parser().parse_args(
