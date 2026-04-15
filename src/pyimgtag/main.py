@@ -14,6 +14,7 @@ from pyimgtag.models import ExifData, ImageResult
 from pyimgtag.ollama_client import OllamaClient
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
 from pyimgtag.preflight import check_ollama, run_preflight
+from pyimgtag.progress_db import ProgressDB
 from pyimgtag.scanner import scan_directory, scan_photos_library
 
 # ------------------------------------------------------------------
@@ -56,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--jsonl-stdout", action="store_true", help="JSONL output to stdout")
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose per-file output")
     p.add_argument("--cache-dir", help="Geocoding cache directory")
+    p.add_argument(
+        "--db", help="Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
+    )
+    p.add_argument(
+        "--no-cache", action="store_true", help="Skip progress database, reprocess all images"
+    )
     p.add_argument(
         "--preflight",
         action="store_true",
@@ -110,6 +117,9 @@ def main(argv: list[str] | None = None) -> int:
         model=args.model, base_url=args.ollama_url, max_dim=args.max_dim, timeout=args.timeout
     )
     geocoder = ReverseGeocoder(cache_dir=args.cache_dir)
+    progress_db: ProgressDB | None = None
+    if not args.no_cache:
+        progress_db = ProgressDB(db_path=args.db)
 
     results: list[ImageResult] = []
     stats = _new_stats(len(files))
@@ -120,9 +130,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.limit and stats["processed"] >= args.limit:
                 break
 
-            result = _process_one(file_path, source_type, args, ollama, geocoder, stats)
+            result = _process_one(
+                file_path, source_type, args, ollama, geocoder, stats, progress_db
+            )
             if result is None:
                 continue
+
+            if progress_db is not None:
+                progress_db.mark_done(file_path, result)
 
             results.append(result)
             stats["processed"] += 1
@@ -139,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         ollama.close()
         geocoder.close()
+        if progress_db is not None:
+            progress_db.close()
 
     # --- output files ---
     if args.output_json:
@@ -194,12 +211,9 @@ def _process_one(
     ollama: OllamaClient,
     geocoder: ReverseGeocoder,
     stats: dict,
+    progress_db: ProgressDB | None = None,
 ) -> ImageResult | None:
     """Process one image.  Returns ``None`` when filtered out."""
-    result = ImageResult(
-        file_path=str(file_path), file_name=file_path.name, source_type=source_type
-    )
-
     # local availability
     try:
         if not file_path.exists() or file_path.stat().st_size == 0:
@@ -208,6 +222,15 @@ def _process_one(
     except OSError:
         stats["skipped_no_local"] += 1
         return None
+
+    # skip already-processed
+    if progress_db is not None and progress_db.is_processed(file_path):
+        stats["skipped_cached"] += 1
+        return None
+
+    result = ImageResult(
+        file_path=str(file_path), file_name=file_path.name, source_type=source_type
+    )
 
     # EXIF
     try:
@@ -264,6 +287,7 @@ def _new_stats(scanned: int) -> dict:
         "skipped_date": 0,
         "skipped_no_gps": 0,
         "skipped_no_local": 0,
+        "skipped_cached": 0,
         "model_failures": 0,
         "geocode_failures": 0,
     }
@@ -320,6 +344,7 @@ def _print_summary(stats: dict) -> None:
     print(f"  Skipped (date):   {stats['skipped_date']}", file=sys.stderr)
     print(f"  Skipped (no GPS): {stats['skipped_no_gps']}", file=sys.stderr)
     print(f"  Skipped (no file):{stats['skipped_no_local']}", file=sys.stderr)
+    print(f"  Skipped (cached): {stats['skipped_cached']}", file=sys.stderr)
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
     print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
 

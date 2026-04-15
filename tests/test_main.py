@@ -92,6 +92,14 @@ class TestBuildParser:
         args = build_parser().parse_args(["--input-dir", "/tmp"])
         assert args.preflight is False
 
+    def test_db_flag(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp", "--db", "/tmp/my.db"])
+        assert args.db == "/tmp/my.db"
+
+    def test_no_cache_flag(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp", "--no-cache"])
+        assert args.no_cache is True
+
     def test_output_flags(self):
         args = build_parser().parse_args(
             [
