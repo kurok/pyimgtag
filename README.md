@@ -16,11 +16,14 @@ Nominatim.  Everything runs on-device -- no cloud, no data leaves your Mac.
 **Key features:**
 
 - One local model call per image, compact prompt, low token usage
+- Rich AI metadata: scene category, emotional tone, cleanup classification, text detection, event hints
 - EXIF GPS as source of truth for location (never guessed from image content)
 - Open reverse geocoding via Nominatim with local disk cache
-- Supports exported folders and Apple Photos library originals (best-effort)
+- Supports exported folders and Apple Photos library originals
+- Apple Photos write-back: push AI tags and descriptions back as keywords/captions
+- Subcommands: `run`, `status`, `reprocess`, `cleanup`, `preflight`
 - Dry-run mode, date/limit filters, JSON/CSV export
-- Never modifies image files (read-only MVP)
+- SQLite progress DB with schema versioning for incremental re-runs
 
 ## Requirements
 
@@ -40,19 +43,28 @@ pip install -e ".[dev]"
 ollama pull gemma4:e4b
 
 # Dry-run on an exported folder, first 20 images
-pyimgtag --input-dir ~/Pictures/exported --limit 20 --dry-run
+pyimgtag run --input-dir ~/Pictures/exported --limit 20 --dry-run
 
 # Single date
-pyimgtag --input-dir ~/Pictures/exported --date 2026-04-01 --dry-run
+pyimgtag run --input-dir ~/Pictures/exported --date 2026-04-01 --dry-run
 
 # Date range with JSON output
-pyimgtag --input-dir ~/Pictures/exported \
+pyimgtag run --input-dir ~/Pictures/exported \
   --date-from 2026-03-01 --date-to 2026-03-31 \
   --output-json results.json
 
-# Photos library (best-effort)
-pyimgtag --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+# Photos library
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
   --limit 50 --dry-run
+
+# Check processing progress
+pyimgtag status
+
+# Re-tag all photos (e.g. after prompt improvements)
+pyimgtag reprocess
+
+# List photos flagged for deletion
+pyimgtag cleanup
 ```
 
 ## Installation
@@ -72,54 +84,119 @@ brew install exiftool
 
 ## Usage
 
-### Input sources
+### Subcommands
+
+pyimgtag uses subcommands. Run `pyimgtag --help` for the full list.
+
+#### `pyimgtag run` — tag images
 
 ```bash
-# Exported image folder (primary)
-pyimgtag --input-dir /path/to/photos
+# Exported image folder
+pyimgtag run --input-dir /path/to/photos
 
-# Apple Photos library package (best-effort, reads originals/)
-pyimgtag --photos-library ~/Pictures/Photos\ Library.photoslibrary
+# Apple Photos library
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary
+
+# With filters
+pyimgtag run --input-dir /path/to/photos \
+  --limit 100 --date-from 2026-03-01 --date-to 2026-03-31
+
+# Write tags back to Apple Photos as keywords
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+  --write-back --limit 10
+
+# Deduplicate by perceptual hash
+pyimgtag run --input-dir /path/to/photos --dedup
+
+# Export to JSON
+pyimgtag run --input-dir /path/to/photos --output-json results.json
 ```
 
-### Filters
+**Run flags:**
+
+| Flag | Description |
+|---|---|
+| `--input-dir PATH` | Exported image folder |
+| `--photos-library PATH` | Apple Photos library package |
+| `--limit N` | Max images to process |
+| `--date YYYY-MM-DD` | Single date filter |
+| `--date-from` / `--date-to` | Date range filter |
+| `--extensions jpg,png` | File types (default: jpg,jpeg,heic,png) |
+| `--skip-no-gps` | Skip images without GPS data |
+| `--dry-run` | Verbose output, no DB writes |
+| `--verbose` / `-v` | Detailed per-file output |
+| `--output-json FILE` | Write results to JSON |
+| `--output-csv FILE` | Write results to CSV |
+| `--jsonl-stdout` | JSONL output to stdout |
+| `--write-back` | Write tags/description back to Apple Photos |
+| `--dedup` | Skip duplicates via perceptual hash |
+| `--dedup-threshold N` | Hamming distance threshold (default: 5) |
+| `--model NAME` | Ollama model (default: gemma4:e4b) |
+| `--ollama-url URL` | Ollama API URL |
+| `--max-dim N` | Max image dimension (default: 1280) |
+| `--timeout N` | Model request timeout in seconds |
+| `--db PATH` | Progress database path |
+| `--no-cache` | Skip progress DB, reprocess all |
+
+#### `pyimgtag status` — check progress
 
 ```bash
---limit N              # Max images to process
---date YYYY-MM-DD      # Single date
---date-from YYYY-MM-DD # Start of range
---date-to YYYY-MM-DD   # End of range
---extensions jpg,png    # File types (default: jpg,jpeg,heic,png)
---skip-no-gps          # Skip images without GPS data
+# Show processing stats
+pyimgtag status
+
+# Output:
+# Progress: 142 / 200 (71%)
+#   ok:      140
+#   error:   2
+#   pending: 58
 ```
 
-### Output
+#### `pyimgtag reprocess` — reset for re-tagging
 
 ```bash
---dry-run              # Verbose per-file output, no writes
---output-json out.json # Write results to JSON
---output-csv out.csv   # Write results to CSV
---jsonl-stdout         # Machine-readable JSONL to stdout
---verbose / -v         # Detailed per-file output
+# Reset everything (e.g. after prompt improvements)
+pyimgtag reprocess
+
+# Reset only failed entries
+pyimgtag reprocess --status error
 ```
 
-### Model options
+#### `pyimgtag cleanup` — find photos to delete
 
 ```bash
---model gemma4:e12b    # Use a different model
---ollama-url http://localhost:11434  # Ollama API URL
---max-dim 1280         # Max image dimension before sending to model
---timeout 120          # Model request timeout (seconds)
+# List photos the AI flagged as "delete"
+pyimgtag cleanup
+
+# Also include "review" (uncertain) candidates
+pyimgtag cleanup --include-review
+
+# Output:
+# Cleanup candidates (delete): 12
+#
+#   [delete]  /path/to/blurry_photo.jpg  | 2026-03-15  | tags: blurry, dark
+#   [delete]  /path/to/screenshot.png    | 2026-04-01  | tags: screenshot, text
 ```
 
-### Sample dry-run output
+#### `pyimgtag preflight` — check prerequisites
+
+```bash
+# Verify Ollama, model, and source path
+pyimgtag preflight --input-dir ~/Pictures/exported
+```
+
+### Sample verbose output
 
 ```
 [1/50] sunset_beach.jpg
   Path:     /Users/me/Pictures/exported/sunset_beach.jpg
   Date:     2026-04-01 14:30:00
   Tags:     sunset, beach, ocean, waves, sand
-  Summary:  sunset at the beach
+  Summary:  golden hour sunset over the Pacific
+  Scene:    outdoor_leisure
+  Tone:     positive
+  Cleanup:  keep
+  Event:    outing
+  Signif.:  high
   GPS:      37.7749, -122.4194
   Location: San Francisco, California, United States
   Status:   ok
@@ -143,31 +220,42 @@ Each result (JSON/CSV) includes:
 | `file_path` | Full path to image |
 | `file_name` | Filename |
 | `source_type` | `directory` or `photos_library` |
-| `is_local` | Whether file is locally available |
 | `image_date` | EXIF or file date |
 | `tags` | 1-5 vision model tags |
-| `scene_summary` | Optional short summary |
+| `scene_summary` | Short scene description |
+| `scene_category` | `indoor_home`, `indoor_work`, `outdoor_leisure`, `outdoor_travel`, `transport`, `other` |
+| `emotional_tone` | `positive`, `neutral`, `negative`, `mixed` |
+| `cleanup_class` | `keep`, `review`, `delete` |
+| `has_text` | Whether image contains readable text |
+| `text_summary` | Extracted text summary (if `has_text`) |
+| `event_hint` | `outing`, `gathering`, `work`, `travel`, `daily`, `other` |
+| `significance` | `high`, `medium`, `low` |
 | `gps_lat` / `gps_lon` | EXIF GPS coordinates |
 | `nearest_place` | Village/town/suburb |
 | `nearest_city` | City |
 | `nearest_region` | State/region |
 | `nearest_country` | Country |
-| `processing_status` | `ok`, `skipped`, or `error` |
+| `processing_status` | `ok` or `error` |
 | `error_message` | Error details if any |
+| `phash` | Perceptual hash (when `--dedup` used) |
 
 ## Architecture
 
 ```
 src/pyimgtag/
-  main.py           CLI entry point and orchestration
-  models.py         Data classes (ExifData, TagResult, GeoResult, ImageResult)
-  scanner.py        Directory and Photos library scanning
-  exif_reader.py    EXIF GPS + date extraction (exiftool + Pillow)
-  ollama_client.py  Ollama vision API client
-  geocoder.py       Nominatim reverse geocoder with disk cache
-  filters.py        Date/GPS filter logic
-  output_writer.py  JSON/CSV/JSONL output
-  cache.py          Simple JSON disk cache
+  main.py              CLI entry point, subcommand dispatch
+  models.py            Data classes (ExifData, TagResult, GeoResult, ImageResult)
+  scanner.py           Directory and Photos library scanning
+  exif_reader.py       EXIF GPS + date extraction (exiftool + Pillow)
+  ollama_client.py     Ollama vision API client (rich structured response)
+  geocoder.py          Nominatim reverse geocoder with disk cache
+  filters.py           Date/GPS filter logic
+  output_writer.py     JSON/CSV/JSONL output
+  progress_db.py       SQLite progress DB with versioned migrations
+  applescript_writer.py  Apple Photos keyword/description write-back
+  dedup.py             Perceptual hash duplicate detection
+  heic_converter.py    HEIC to JPEG conversion (macOS sips)
+  cache.py             Simple JSON disk cache
 ```
 
 ## Development
