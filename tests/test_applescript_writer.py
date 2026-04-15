@@ -97,6 +97,18 @@ class TestBuildApplescript:
         assert 'tell application "Photos"' in script
         assert "end tell" in script
 
+    def test_title_present_when_given(self):
+        script = _build_applescript("img.jpg", ["tag"], None, title="Sunset at beach")
+        assert 'set name of theItem to "Sunset at beach"' in script
+
+    def test_title_absent_when_none(self):
+        script = _build_applescript("img.jpg", ["tag"], None, title=None)
+        assert "set name" not in script
+
+    def test_title_with_quotes_escaped(self):
+        script = _build_applescript("img.jpg", ["tag"], None, title='A "great" shot')
+        assert '\\"great\\"' in script
+
     def test_error_when_no_item_found(self):
         script = _build_applescript("photo.jpg", ["a"], None)
         assert "error" in script
@@ -247,6 +259,36 @@ class TestWriteToPhotos:
         script = captured[0]
         assert "Beautiful sunset over the ocean" in script
         assert "set description" in script
+
+    def test_title_included_when_provided(self):
+        """Title line must appear when title is not None."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos("/path/photo.jpg", ["tag"], None, title="Beach day")
+
+        script = captured[0]
+        assert 'set name of theItem to "Beach day"' in script
+
+    def test_title_omitted_when_none(self):
+        """Title line must not appear when title is None."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos("/path/photo.jpg", ["tag"], None, title=None)
+
+        script = captured[0]
+        assert "set name" not in script
 
     def test_summary_omitted_when_none(self):
         """Description line must not appear when summary is None."""

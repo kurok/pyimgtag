@@ -70,3 +70,29 @@ class ImageResult:
     text_summary: str | None = None
     event_hint: str | None = None
     significance: str | None = None
+
+    def build_description(self) -> str | None:
+        """Build a human-readable description from summary, location, and date.
+
+        Example: "Golden hour sunset over the Pacific. San Francisco, California, US. April 2026."
+        Returns None if no summary is available.
+        """
+        if not self.scene_summary:
+            return None
+
+        parts = [self.scene_summary.rstrip(".") + "."]
+
+        loc_parts = [p for p in [self.nearest_city, self.nearest_region, self.nearest_country] if p]
+        if loc_parts:
+            parts.append(", ".join(loc_parts) + ".")
+
+        if self.image_date:
+            try:
+                from datetime import datetime
+
+                dt = datetime.strptime(self.image_date[:10], "%Y-%m-%d")
+                parts.append(dt.strftime("%B %Y") + ".")
+            except (ValueError, TypeError):
+                pass
+
+        return " ".join(parts)
