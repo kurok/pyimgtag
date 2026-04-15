@@ -1,0 +1,313 @@
+"""Unit tests for the applescript_writer module."""
+
+from __future__ import annotations
+
+import subprocess
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from pyimgtag.applescript_writer import (
+    _build_applescript,
+    _escape_applescript_string,
+    is_applescript_available,
+    write_to_photos,
+)
+
+
+# ---------------------------------------------------------------------------
+# _escape_applescript_string
+# ---------------------------------------------------------------------------
+
+
+class TestEscapeApplescriptString:
+    def test_plain_string_unchanged(self):
+        assert _escape_applescript_string("hello world") == "hello world"
+
+    def test_double_quote_escaped(self):
+        result = _escape_applescript_string('say "hello"')
+        assert '\\"' in result
+        assert '"' not in result.replace('\\"', "")
+
+    def test_backslash_escaped(self):
+        result = _escape_applescript_string("path\\to\\file")
+        assert "\\\\" in result
+
+    def test_newline_replaced_with_space(self):
+        result = _escape_applescript_string("line1\nline2")
+        assert "\n" not in result
+        assert "line1 line2" == result
+
+    def test_crlf_replaced_with_space(self):
+        result = _escape_applescript_string("line1\r\nline2")
+        assert "\r" not in result
+        assert "\n" not in result
+
+    def test_carriage_return_replaced_with_space(self):
+        result = _escape_applescript_string("line1\rline2")
+        assert "\r" not in result
+
+    def test_backslash_before_quote(self):
+        # backslash followed by a quote: both must be escaped
+        result = _escape_applescript_string('a\\"b')
+        assert result == 'a\\\\\\"b'
+
+
+# ---------------------------------------------------------------------------
+# _build_applescript
+# ---------------------------------------------------------------------------
+
+
+class TestBuildApplescript:
+    def test_contains_filename(self):
+        script = _build_applescript("photo.jpg", ["sunset"], None)
+        assert 'whose filename is "photo.jpg"' in script
+
+    def test_contains_tags_list(self):
+        script = _build_applescript("photo.jpg", ["beach", "sunset"], None)
+        assert '{"beach", "sunset"}' in script
+
+    def test_single_tag(self):
+        script = _build_applescript("img.jpg", ["nature"], None)
+        assert '{"nature"}' in script
+
+    def test_description_present_when_summary_given(self):
+        script = _build_applescript("img.jpg", ["tag"], "A nice shot")
+        assert 'set description of theItem to "A nice shot"' in script
+
+    def test_description_absent_when_summary_none(self):
+        script = _build_applescript("img.jpg", ["tag"], None)
+        assert "set description" not in script
+
+    def test_filename_with_spaces(self):
+        script = _build_applescript("my photo 01.jpg", ["tag"], None)
+        assert 'whose filename is "my photo 01.jpg"' in script
+
+    def test_filename_with_quotes_escaped(self):
+        script = _build_applescript('say "hi".jpg', ["tag"], None)
+        assert '\\"' in script
+
+    def test_tag_with_quotes_escaped(self):
+        script = _build_applescript("photo.jpg", ['O"Brien'], None)
+        assert '\\"' in script
+
+    def test_summary_with_quotes_escaped(self):
+        script = _build_applescript("photo.jpg", ["tag"], 'Caption "quoted"')
+        assert '\\"' in script
+
+    def test_tell_application_photos_block(self):
+        script = _build_applescript("photo.jpg", ["a"], None)
+        assert 'tell application "Photos"' in script
+        assert "end tell" in script
+
+    def test_error_when_no_item_found(self):
+        script = _build_applescript("photo.jpg", ["a"], None)
+        assert "error" in script
+
+
+# ---------------------------------------------------------------------------
+# is_applescript_available
+# ---------------------------------------------------------------------------
+
+
+class TestIsApplescriptAvailable:
+    def test_returns_true_when_osascript_found(self):
+        with patch("pyimgtag.applescript_writer.shutil.which", return_value="/usr/bin/osascript"):
+            assert is_applescript_available() is True
+
+    def test_returns_false_when_osascript_not_found(self):
+        with patch("pyimgtag.applescript_writer.shutil.which", return_value=None):
+            assert is_applescript_available() is False
+
+
+# ---------------------------------------------------------------------------
+# write_to_photos — success and failure cases
+# ---------------------------------------------------------------------------
+
+
+def _make_completed_process(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
+    mock = MagicMock(spec=subprocess.CompletedProcess)
+    mock.returncode = returncode
+    mock.stdout = stdout
+    mock.stderr = stderr
+    return mock
+
+
+class TestWriteToPhotos:
+    # Patch both is_applescript_available (True) and subprocess.run for all tests
+    # that test the actual write path.
+
+    def test_success_returns_none(self):
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(0),
+            ):
+                result = write_to_photos("/path/to/photo.jpg", ["beach", "sunset"], "Nice photo")
+                assert result is None
+
+    def test_success_without_summary(self):
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(0),
+            ):
+                result = write_to_photos("/path/to/photo.jpg", ["beach"], None)
+                assert result is None
+
+    def test_failure_nonzero_exit_with_stderr(self):
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(1, stderr="Photos is not running."),
+            ):
+                result = write_to_photos("/path/to/photo.jpg", ["tag"], None)
+                assert result is not None
+                assert "Photos is not running." in result
+
+    def test_failure_nonzero_exit_no_stderr(self):
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(1, stderr=""),
+            ):
+                result = write_to_photos("/path/to/photo.jpg", ["tag"], None)
+                assert result is not None
+                assert "1" in result  # exit code mentioned
+
+    def test_osascript_not_available(self):
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=False):
+            result = write_to_photos("/path/photo.jpg", ["tag"], None)
+            assert result is not None
+            assert "osascript" in result.lower()
+
+    def test_timeout_returns_error(self):
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=30),
+            ):
+                result = write_to_photos("/path/photo.jpg", ["tag"], None)
+                assert result is not None
+                assert "timed out" in result.lower()
+
+    def test_oserror_returns_error(self):
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=OSError("No such file"),
+            ):
+                result = write_to_photos("/path/photo.jpg", ["tag"], None)
+                assert result is not None
+                assert "No such file" in result
+
+    def test_uses_basename_not_full_path(self):
+        """The script sent to osascript must use just the filename, not the full path."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            # cmd = ["/usr/bin/osascript", "-e", <script>]
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos("/some/deep/path/vacation.jpg", ["sun"], None)
+
+        assert captured, "subprocess.run was not called"
+        script = captured[0]
+        assert 'whose filename is "vacation.jpg"' in script
+        # Full path must not appear verbatim in the filename lookup
+        assert "/some/deep/path/" not in script
+
+    def test_tags_formatted_as_applescript_list(self):
+        """Tags must appear as an AppleScript list {"a", "b", "c"}."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos("/path/photo.jpg", ["alpha", "beta", "gamma"], None)
+
+        script = captured[0]
+        assert '{"alpha", "beta", "gamma"}' in script
+
+    def test_summary_included_when_provided(self):
+        """Description line must appear when summary is not None."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos("/path/photo.jpg", ["tag"], "Beautiful sunset over the ocean")
+
+        script = captured[0]
+        assert "Beautiful sunset over the ocean" in script
+        assert "set description" in script
+
+    def test_summary_omitted_when_none(self):
+        """Description line must not appear when summary is None."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos("/path/photo.jpg", ["tag"], None)
+
+        script = captured[0]
+        assert "set description" not in script
+
+    def test_filename_with_spaces(self):
+        """Filenames with spaces must be handled correctly."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos("/path/my vacation photo.jpg", ["beach"], None)
+
+        script = captured[0]
+        assert 'whose filename is "my vacation photo.jpg"' in script
+
+    def test_filename_with_quotes(self):
+        """Filenames with double quotes must be escaped."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos('/path/photo "hdr".jpg', ["tag"], None)
+
+        script = captured[0]
+        # The double quotes in the filename must be escaped
+        assert '\\"hdr\\"' in script
+
+    def test_filename_with_backslash(self):
+        """Filenames with backslashes must be double-escaped."""
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+            with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run):
+                write_to_photos("/path/photo\\backup.jpg", ["tag"], None)
+
+        script = captured[0]
+        assert "\\\\" in script
