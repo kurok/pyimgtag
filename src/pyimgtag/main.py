@@ -251,15 +251,8 @@ def _process_one(
         stats["skipped_no_gps"] += 1
         return None
 
-    tag_result = ollama.tag_image(str(file_path))
-    if tag_result.error:
-        result.processing_status = "error"
-        result.error_message = tag_result.error
-        stats["model_failures"] += 1
-    else:
-        result.tags = tag_result.tags
-        result.scene_summary = tag_result.summary
-
+    # --- reverse geocode (before tagging so context is available) ---
+    geo = None
     if exif.has_gps:
         geo = geocoder.resolve(exif.gps_lat, exif.gps_lon)
         if geo.error:
@@ -269,6 +262,31 @@ def _process_one(
             result.nearest_city = geo.nearest_city
             result.nearest_region = geo.nearest_region
             result.nearest_country = geo.nearest_country
+
+    # --- build context for model ---
+    context: dict = {}
+    if exif.date_original:
+        context["date"] = exif.date_original
+    if exif.has_gps:
+        context["lat"] = exif.gps_lat
+        context["lon"] = exif.gps_lon
+    if geo and not geo.error:
+        if geo.nearest_city:
+            context["city"] = geo.nearest_city
+        if geo.nearest_region:
+            context["region"] = geo.nearest_region
+        if geo.nearest_country:
+            context["country"] = geo.nearest_country
+
+    # --- tag with model ---
+    tag_result = ollama.tag_image(str(file_path), context=context)
+    if tag_result.error:
+        result.processing_status = "error"
+        result.error_message = tag_result.error
+        stats["model_failures"] += 1
+    else:
+        result.tags = tag_result.tags
+        result.scene_summary = tag_result.summary
 
     return result
 
