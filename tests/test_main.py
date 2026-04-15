@@ -32,9 +32,7 @@ class TestBuildParser:
 
     def test_run_mutual_exclusion(self):
         with pytest.raises(SystemExit):
-            build_parser().parse_args(
-                ["run", "--input-dir", "/a", "--photos-library", "/b"]
-            )
+            build_parser().parse_args(["run", "--input-dir", "/a", "--photos-library", "/b"])
 
     def test_run_requires_source(self):
         with pytest.raises(SystemExit):
@@ -88,9 +86,7 @@ class TestBuildParser:
         assert args.dedup is True
 
     def test_run_dedup_threshold(self):
-        args = build_parser().parse_args(
-            ["run", "--input-dir", "/tmp", "--dedup-threshold", "3"]
-        )
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--dedup-threshold", "3"])
         assert args.dedup_threshold == 3
 
     def test_run_db_flag(self):

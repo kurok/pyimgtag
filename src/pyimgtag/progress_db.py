@@ -174,15 +174,16 @@ class ProgressDB:
             else:
                 placeholders = "?"
                 params = ("delete",)
-            rows = self._conn.execute(
-                f"""
-                SELECT file_path, tags, scene_summary, processed_at, cleanup_class
-                FROM processed_images
-                WHERE cleanup_class IN ({placeholders})
-                ORDER BY file_path
-                """,
-                params,
-            ).fetchall()
+            # Parameterized query; placeholders are code-controlled literals
+            query = (  # nosec B608
+                "SELECT file_path, tags, scene_summary, processed_at, cleanup_class "
+                "FROM processed_images "
+                "WHERE cleanup_class IN ("
+                + placeholders  # nosec B608
+                + ") "
+                "ORDER BY file_path"
+            )
+            rows = self._conn.execute(query, params).fetchall()
         except Exception:
             return []
 

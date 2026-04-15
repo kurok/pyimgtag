@@ -93,8 +93,10 @@ def write_to_photos(file_path: str, tags: list[str], summary: str | None) -> str
 
     if proc.returncode != 0:
         stderr = proc.stderr.strip()
-        return f"AppleScript error (exit {proc.returncode}): {stderr}" if stderr else (
-            f"AppleScript failed with exit code {proc.returncode}"
+        return (
+            f"AppleScript error (exit {proc.returncode}): {stderr}"
+            if stderr
+            else (f"AppleScript failed with exit code {proc.returncode}")
         )
 
     return None

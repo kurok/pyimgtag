@@ -151,9 +151,7 @@ class TestProgressDB:
         img_err = tmp_path / "err.jpg"
         img_err.write_bytes(b"\x00" * 10)
         try:
-            db.mark_done(
-                img_ok, ImageResult(file_path=str(img_ok), file_name="ok.jpg", tags=["a"])
-            )
+            db.mark_done(img_ok, ImageResult(file_path=str(img_ok), file_name="ok.jpg", tags=["a"]))
             db.mark_done(
                 img_err,
                 ImageResult(

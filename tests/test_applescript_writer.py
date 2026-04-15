@@ -5,15 +5,12 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from pyimgtag.applescript_writer import (
     _build_applescript,
     _escape_applescript_string,
     is_applescript_available,
     write_to_photos,
 )
-
 
 # ---------------------------------------------------------------------------
 # _escape_applescript_string
