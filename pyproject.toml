@@ -23,6 +23,7 @@ classifiers = [
 dependencies = [
     "requests>=2.28",
     "Pillow>=10.0",
+    "imagehash>=4.3.1",
 ]
 
 [project.optional-dependencies]

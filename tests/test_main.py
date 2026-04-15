@@ -52,14 +52,7 @@ class TestBuildParser:
 
     def test_date_filters(self):
         args = build_parser().parse_args(
-            [
-                "--input-dir",
-                "/tmp",
-                "--date-from",
-                "2026-01-01",
-                "--date-to",
-                "2026-12-31",
-            ]
+            ["--input-dir", "/tmp", "--date-from", "2026-01-01", "--date-to", "2026-12-31"]
         )
         assert args.date_from == "2026-01-01"
         assert args.date_to == "2026-12-31"
@@ -91,6 +84,14 @@ class TestBuildParser:
     def test_preflight_flag_default_false(self):
         args = build_parser().parse_args(["--input-dir", "/tmp"])
         assert args.preflight is False
+
+    def test_dedup_flag(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp", "--dedup"])
+        assert args.dedup is True
+
+    def test_dedup_threshold(self):
+        args = build_parser().parse_args(["--input-dir", "/tmp", "--dedup-threshold", "3"])
+        assert args.dedup_threshold == 3
 
     def test_db_flag(self):
         args = build_parser().parse_args(["--input-dir", "/tmp", "--db", "/tmp/my.db"])

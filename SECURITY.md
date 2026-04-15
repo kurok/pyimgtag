@@ -48,7 +48,7 @@ Alternatively, contact the maintainers directly through GitHub.
 - **CI scanning:** bandit (SAST) and pip-audit (dependency vulnerabilities) run on every push and PR
 - **CodeQL:** required to pass before merging to main
 - **Least-privilege CI:** all workflows use explicit, minimal `GITHUB_TOKEN` permissions
-- **Minimal dependencies:** only `requests`, `Pillow`, and `imagehash` are required at runtime
+- **Minimal dependencies:** only `requests` and `Pillow` are required at runtime
 - **No secrets in code:** pyimgtag does not store or transmit credentials
 - **Local-first design:** image data is never sent to cloud services; only GPS coordinates are sent to Nominatim for reverse geocoding
 - **Trusted publishing:** PyPI releases use OpenID Connect trusted publishing, no long-lived API tokens
