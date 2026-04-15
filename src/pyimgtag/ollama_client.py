@@ -65,7 +65,8 @@ class OllamaClient:
                         {"role": "user", "content": _PROMPT, "images": [img_b64]},
                     ],
                     "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 150},
+                    "think": False,
+                    "options": {"temperature": 0.1, "num_predict": 256},
                 },
                 timeout=self.timeout,
             )
