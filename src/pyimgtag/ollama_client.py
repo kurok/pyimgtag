@@ -81,14 +81,16 @@ class OllamaClient:
 
     def _prepare_image(self, file_path: str) -> str:
         """Load, resize to *max_dim*, convert to JPEG, and base64-encode."""
-        with Image.open(file_path) as img:
-            img = img.convert("RGB")
-            w, h = img.size
+        with Image.open(file_path) as raw:
+            converted = raw.convert("RGB")
+            w, h = converted.size
             if max(w, h) > self.max_dim:
                 ratio = self.max_dim / max(w, h)
-                img = img.resize((int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS)
+                converted = converted.resize(
+                    (int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS
+                )
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=85)
+            converted.save(buf, format="JPEG", quality=85)
             return base64.b64encode(buf.getvalue()).decode("ascii")
 
     def close(self) -> None:
