@@ -39,6 +39,23 @@ class TestScanDirectory:
     def test_empty_dir(self, tmp_path):
         assert scan_directory(tmp_path) == []
 
+    def test_non_recursive(self, tmp_path):
+        (tmp_path / "top.jpg").touch()
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "deep.jpeg").touch()
+        files = scan_directory(tmp_path, recursive=False)
+        names = [f.name for f in files]
+        assert "top.jpg" in names
+        assert "deep.jpeg" not in names
+
+    def test_non_recursive_default_is_recursive(self, tmp_path):
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "deep.jpg").touch()
+        files = scan_directory(tmp_path)
+        assert any(f.name == "deep.jpg" for f in files)
+
 
 class TestScanPhotosLibrary:
     def test_originals_dir(self, tmp_path):
