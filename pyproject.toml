@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyimgtag"
+version = "0.1.0"
+description = "Tag macOS Photos library images using local Gemma model for searchable tags"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [{ name = "pyimgtag contributors" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Operating System :: MacOS",
+    "Intended Audience :: End Users/Desktop",
+]
+dependencies = [
+    "ollama>=0.4.0",
+    "Pillow>=10.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9.0", "pytest-xdist>=3.0", "pytest-cov>=4.0"]
+lint = ["mypy>=1.0", "ruff>=0.1.0"]
+security = ["bandit>=1.7", "pip-audit>=2.6"]
+
+[project.scripts]
+pyimgtag = "pyimgtag.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-n auto"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = false
+warn_unused_configs = true
+disallow_untyped_defs = false
+
+[tool.bandit]
+skips = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
