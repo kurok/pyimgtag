@@ -80,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write description and keywords to image EXIF via exiftool",
     )
+    run_p.add_argument(
+        "--no-recursive",
+        action="store_true",
+        help="Only scan the top-level directory (do not descend into subdirectories)",
+    )
 
     # --- status subcommand ---
     status_p = subparsers.add_parser("status", help="Show progress stats from the DB")
@@ -172,7 +177,7 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
     try:
         if args.input_dir:
             source_type = "directory"
-            files = scan_directory(args.input_dir, extensions)
+            files = scan_directory(args.input_dir, extensions, recursive=not args.no_recursive)
         else:
             source_type = "photos_library"
             files = scan_photos_library(args.photos_library, extensions)

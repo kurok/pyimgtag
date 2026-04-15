@@ -97,6 +97,14 @@ class TestBuildParser:
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--no-cache"])
         assert args.no_cache is True
 
+    def test_run_no_recursive_flag(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--no-recursive"])
+        assert args.no_recursive is True
+
+    def test_run_recursive_by_default(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
+        assert args.no_recursive is False
+
     def test_run_output_flags(self):
         args = build_parser().parse_args(
             [

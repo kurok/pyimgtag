@@ -7,14 +7,25 @@ from pathlib import Path
 DEFAULT_EXTENSIONS = {"jpg", "jpeg", "heic", "png"}
 
 
-def scan_directory(path: str | Path, extensions: set[str] | None = None) -> list[Path]:
-    """Scan a directory recursively for image files, sorted by name."""
+def scan_directory(
+    path: str | Path,
+    extensions: set[str] | None = None,
+    recursive: bool = True,
+) -> list[Path]:
+    """Scan a directory for image files, sorted by name.
+
+    Args:
+        path: Directory to scan.
+        extensions: File extensions to include (without dots).
+        recursive: When True (default), scan subdirectories recursively.
+    """
     exts = extensions or DEFAULT_EXTENSIONS
     root = Path(path).expanduser().resolve()
     if not root.is_dir():
         raise FileNotFoundError(f"Directory not found: {root}")
+    pattern = "*" if not recursive else "**/*"
     return sorted(
-        e for e in root.rglob("*") if e.is_file() and e.suffix.lstrip(".").lower() in exts
+        e for e in root.glob(pattern) if e.is_file() and e.suffix.lstrip(".").lower() in exts
     )
 
 
