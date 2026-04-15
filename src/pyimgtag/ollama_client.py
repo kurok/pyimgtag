@@ -26,12 +26,18 @@ except ImportError:
     pass
 
 _PROMPT = (
-    "Return compact JSON only. "
-    "Identify 1 to 5 major visible tags for this image. "
-    "Use short lowercase nouns or noun phrases. "
-    "Do not guess people names. "
-    "Do not infer exact city from image content. "
-    'Schema: {"tags":["..."], "summary":"..."}'
+    "Return only compact JSON.\n\n"
+    "Tag this image for a photo gallery.\n"
+    "Include only the main visible subject and the most important supporting subjects.\n\n"
+    "Rules:\n"
+    "- 1 to 5 tags maximum\n"
+    "- short lowercase noun phrases\n"
+    "- prefer broad useful tags over overly specific ones\n"
+    "- ignore small background objects\n"
+    "- no names\n"
+    "- no place guesses\n"
+    "- no explanation\n\n"
+    'Schema:\n{"tags": ["..."]}'
 )
 
 
