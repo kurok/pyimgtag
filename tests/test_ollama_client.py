@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pyimgtag.ollama_client import _parse_response
+from pyimgtag.ollama_client import _build_prompt_with_context, _parse_response
 
 
 class TestParseResponse:
@@ -53,3 +53,32 @@ class TestParseResponse:
         r = _parse_response('{"tags":["dog"],"summary":"a happy dog"}')
         assert r.tags == ["dog"]
         assert r.summary == "a happy dog"
+
+
+class TestBuildPromptWithContext:
+    def test_includes_date(self):
+        prompt = _build_prompt_with_context({"date": "2026-01-15 10:30:00"})
+        assert "Date: 2026-01-15 10:30:00" in prompt
+
+    def test_includes_location(self):
+        prompt = _build_prompt_with_context({"city": "Paris", "country": "France"})
+        assert "Location: Paris, France" in prompt
+
+    def test_includes_gps(self):
+        prompt = _build_prompt_with_context({"lat": 48.8566, "lon": 2.3522})
+        assert "GPS: 48.8566, 2.3522" in prompt
+
+    def test_skips_none_fields(self):
+        prompt = _build_prompt_with_context({"date": "2026-01-15", "city": None})
+        assert "Date: 2026-01-15" in prompt
+        assert "Location" not in prompt
+
+    def test_empty_dict_returns_base(self):
+        prompt = _build_prompt_with_context({})
+        assert "Return compact JSON only." in prompt
+        assert "Context" not in prompt
+
+    def test_partial_location(self):
+        prompt = _build_prompt_with_context({"city": "Tokyo"})
+        assert "Location: Tokyo" in prompt
+        assert "- GPS:" not in prompt

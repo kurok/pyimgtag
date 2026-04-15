@@ -25,20 +25,47 @@ try:
 except ImportError:
     pass
 
-_PROMPT = (
-    "Return only compact JSON.\n\n"
-    "Tag this image for a photo gallery.\n"
-    "Include only the main visible subject and the most important supporting subjects.\n\n"
-    "Rules:\n"
-    "- 1 to 5 tags maximum\n"
-    "- short lowercase noun phrases\n"
-    "- prefer broad useful tags over overly specific ones\n"
-    "- ignore small background objects\n"
-    "- no names\n"
-    "- no place guesses\n"
-    "- no explanation\n\n"
-    'Schema:\n{"tags": ["..."]}'
+_PROMPT_BASE = (
+    "Return compact JSON only. "
+    "Identify 1 to 5 major visible tags for this image. "
+    "Use short lowercase nouns or noun phrases. "
+    "Do not guess people names. "
+    "Do not infer exact city from image content. "
+    'Schema: {"tags":["..."], "summary":"..."}'
 )
+
+
+def _build_prompt_with_context(context: dict) -> str:
+    """Build a context-enriched prompt from EXIF/geocoding data."""
+    ctx_lines = []
+    if context.get("date"):
+        ctx_lines.append(f"- Date: {context['date']}")
+    loc_parts = [
+        p for p in [context.get("city"), context.get("region"), context.get("country")] if p
+    ]
+    if loc_parts:
+        ctx_lines.append(f"- Location: {', '.join(loc_parts)}")
+    if context.get("lat") is not None and context.get("lon") is not None:
+        ctx_lines.append(f"- GPS: {context['lat']}, {context['lon']}")
+    if not ctx_lines:
+        return _PROMPT_BASE
+    ctx_block = "\n".join(ctx_lines)
+    return (
+        "Return compact JSON only.\n"
+        "Tag this image for a photo gallery.\n\n"
+        "Context (use to improve tag relevance, not as tags themselves):\n"
+        f"{ctx_block}\n\n"
+        "Rules:\n"
+        "- 1 to 5 tags maximum\n"
+        "- short lowercase noun phrases\n"
+        "- prefer broad useful tags over overly specific ones\n"
+        "- ignore small background objects\n"
+        "- no names\n"
+        "- no place guesses from image content "
+        "(location context above is from GPS metadata)\n"
+        "- no explanation\n\n"
+        'Schema: {"tags":["..."], "summary":"..."}'
+    )
 
 
 class OllamaClient:
@@ -57,20 +84,21 @@ class OllamaClient:
         self.timeout = timeout
         self._session = requests.Session()
 
-    def tag_image(self, file_path: str) -> TagResult:
+    def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
         """Tag an image using the vision model.  One call per image."""
         try:
             img_b64 = self._prepare_image(file_path)
         except Exception as e:
             return TagResult(error=f"Image load failed: {e}")
 
+        prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
         try:
             resp = self._session.post(
                 f"{self.base_url}/api/chat",
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "user", "content": _PROMPT, "images": [img_b64]},
+                        {"role": "user", "content": prompt, "images": [img_b64]},
                     ],
                     "stream": False,
                     "think": False,
@@ -89,12 +117,7 @@ class OllamaClient:
             return TagResult(error=f"Response parse failed: {e}")
 
     def _prepare_image(self, file_path: str) -> str:
-        """Load, resize to *max_dim*, convert to JPEG, and base64-encode.
-
-        HEIC/HEIF files are converted to a temporary JPEG via macOS ``sips``
-        when available, falling back to Pillow with pillow-heif on other
-        platforms.
-        """
+        """Load, resize to *max_dim*, convert to JPEG, and base64-encode."""
         temp_jpeg: str | None = None
         open_path = file_path
 
@@ -119,7 +142,6 @@ class OllamaClient:
             if temp_jpeg is not None:
                 try:
                     os.unlink(temp_jpeg)
-                    # Also remove the temp directory if it is now empty
                     temp_dir = os.path.dirname(temp_jpeg)
                     if temp_dir and not os.listdir(temp_dir):
                         os.rmdir(temp_dir)
@@ -128,11 +150,6 @@ class OllamaClient:
 
     def close(self) -> None:
         self._session.close()
-
-
-# ---------------------------------------------------------------------------
-# response parsing
-# ---------------------------------------------------------------------------
 
 
 def _parse_response(text: str) -> TagResult:
