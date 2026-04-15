@@ -18,13 +18,19 @@ def _escape_applescript_string(value: str) -> str:
     return value
 
 
-def _build_applescript(file_name: str, tags: list[str], summary: str | None) -> str:
-    """Build the AppleScript source to set keywords (and optionally description) on a photo.
+def _build_applescript(
+    file_name: str,
+    tags: list[str],
+    summary: str | None,
+    title: str | None = None,
+) -> str:
+    """Build the AppleScript source to set keywords, description, and title on a photo.
 
     Args:
         file_name: The bare filename (no directory path) used to locate the photo.
         tags: List of keyword strings to set.
         summary: Optional description string. Omitted from the script when None.
+        title: Optional title string. Omitted from the script when None.
 
     Returns:
         AppleScript source string ready to pass to ``osascript -e``.
@@ -40,13 +46,19 @@ def _build_applescript(file_name: str, tags: list[str], summary: str | None) -> 
         safe_summary = _escape_applescript_string(summary)
         description_line = f'\n        set description of theItem to "{safe_summary}"'
 
+    title_line = ""
+    if title is not None:
+        safe_title = _escape_applescript_string(title)
+        title_line = f'\n        set name of theItem to "{safe_title}"'
+
     script = (
         'tell application "Photos"\n'
         f'    set theItems to media items whose filename is "{safe_name}"\n'
         "    if (count of theItems) > 0 then\n"
         "        set theItem to item 1 of theItems\n"
         f"        set keywords of theItem to {tag_list}"
-        f"{description_line}\n"
+        f"{description_line}"
+        f"{title_line}\n"
         "    else\n"
         f'        error "No Photos item found with filename: {safe_name}"\n'
         "    end if\n"
@@ -55,8 +67,13 @@ def _build_applescript(file_name: str, tags: list[str], summary: str | None) -> 
     return script
 
 
-def write_to_photos(file_path: str, tags: list[str], summary: str | None) -> str | None:
-    """Set keywords and description on a photo in Apple Photos via AppleScript.
+def write_to_photos(
+    file_path: str,
+    tags: list[str],
+    summary: str | None,
+    title: str | None = None,
+) -> str | None:
+    """Set keywords, description, and title on a photo in Apple Photos via AppleScript.
 
     Uses the bare filename extracted from ``file_path`` to locate the photo in
     Photos. This is a best-effort match: if multiple library items share the
@@ -67,6 +84,7 @@ def write_to_photos(file_path: str, tags: list[str], summary: str | None) -> str
         file_path: Full path to the image (only the basename is used for lookup).
         tags: List of keyword strings to assign to the photo.
         summary: Optional description/caption text. Skipped when ``None``.
+        title: Optional title text. Skipped when ``None``.
 
     Returns:
         ``None`` on success, or an error message string on failure.
@@ -77,7 +95,7 @@ def write_to_photos(file_path: str, tags: list[str], summary: str | None) -> str
     import os
 
     file_name = os.path.basename(file_path)
-    script = _build_applescript(file_name, tags, summary)
+    script = _build_applescript(file_name, tags, summary, title=title)
 
     try:
         proc = subprocess.run(  # noqa: S603

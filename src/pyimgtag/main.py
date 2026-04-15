@@ -75,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Write tags and description back to Apple Photos (only with --photos-library)",
     )
+    run_p.add_argument(
+        "--write-exif",
+        action="store_true",
+        help="Write description and keywords to image EXIF via exiftool",
+    )
 
     # --- status subcommand ---
     status_p = subparsers.add_parser("status", help="Show progress stats from the DB")
@@ -154,6 +159,10 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
     if args.write_back and args.input_dir:
         print("Warning: --write-back has no effect with --input-dir", file=sys.stderr)
 
+    if args.write_exif and args.dry_run:
+        print("Warning: --write-exif ignored in --dry-run mode", file=sys.stderr)
+        args.write_exif = False
+
     extensions = {e.strip().lower() for e in args.extensions.split(",")}
 
     ok, msg = check_ollama(args.ollama_url)
@@ -229,12 +238,25 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
             if progress_db is not None:
                 progress_db.mark_done(file_path, result)
 
+            rich_desc = result.build_description()
+
             if args.write_back and result.source_type == "photos_library" and result.tags:
                 from pyimgtag.applescript_writer import write_to_photos
 
-                err = write_to_photos(result.file_name, result.tags, result.scene_summary)
+                err = write_to_photos(
+                    result.file_name, result.tags, rich_desc, title=result.scene_summary
+                )
                 if err:
                     print(f"  Write-back failed: {err}", file=sys.stderr)
+
+            if args.write_exif and result.tags:
+                from pyimgtag.exif_writer import write_exif_description
+
+                err = write_exif_description(
+                    result.file_path, description=rich_desc, keywords=result.tags
+                )
+                if err:
+                    print(f"  EXIF write failed: {err}", file=sys.stderr)
 
             result.phash = phash_map.get(str(file_path))
             results.append(result)

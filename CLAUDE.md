@@ -42,16 +42,20 @@ pre-commit run --all-files
 
 ```
 src/pyimgtag/
-  main.py           CLI entry point and orchestration
-  models.py         Data classes (ExifData, TagResult, GeoResult, ImageResult)
-  scanner.py        Directory and Photos library scanning
-  exif_reader.py    EXIF GPS + date (exiftool primary, Pillow fallback)
-  ollama_client.py  Ollama vision API client (1 call/image, compact prompt)
-  geocoder.py       Nominatim reverse geocoder with JSON disk cache
-  filters.py        Date range, GPS, limit filters
-  output_writer.py  JSON/CSV/JSONL output
-  cache.py          Simple JSON file cache
-tests/              Unit tests (no network, no Ollama required)
+  main.py              CLI entry point, subcommand dispatch (run/status/reprocess/preflight/cleanup)
+  models.py            Data classes (ExifData, TagResult, GeoResult, ImageResult)
+  scanner.py           Directory and Photos library scanning
+  exif_reader.py       EXIF GPS + date (exiftool primary, Pillow fallback)
+  ollama_client.py     Ollama vision API client (1 call/image, rich structured response)
+  geocoder.py          Nominatim reverse geocoder with JSON disk cache
+  filters.py           Date range, GPS, limit filters
+  output_writer.py     JSON/CSV/JSONL output
+  progress_db.py       SQLite progress DB with versioned migrations (PRAGMA user_version)
+  applescript_writer.py  Apple Photos keyword/description write-back via osascript
+  dedup.py             Perceptual hash duplicate detection
+  heic_converter.py    HEIC to JPEG conversion (macOS sips)
+  cache.py             Simple JSON file cache
+tests/                 Unit tests (no network, no Ollama required)
 ```
 
 ## Code Style
@@ -108,8 +112,9 @@ tests/              Unit tests (no network, no Ollama required)
 
 ## Important Notes
 
-- MVP is read-only — never writes metadata back to images
-- One Ollama call per image with compact JSON prompt (low token usage)
+- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag cleanup`, `pyimgtag preflight`
+- `--write-back` flag enables writing tags/description back to Apple Photos via AppleScript
+- One Ollama call per image with structured JSON prompt (rich metadata)
 - EXIF GPS is source of truth for location — model does not guess location
 - Geocoding results cached at ~/.cache/pyimgtag/ (rounded to ~1km)
 - Nominatim rate limit: max 1 request/sec
