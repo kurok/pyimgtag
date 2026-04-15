@@ -17,10 +17,6 @@ from pyimgtag.preflight import check_ollama, run_preflight
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.scanner import scan_directory, scan_photos_library
 
-# ------------------------------------------------------------------
-# CLI argument parser
-# ------------------------------------------------------------------
-
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -43,14 +39,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max image dimension sent to model (default: 1280)",
     )
     p.add_argument("--timeout", type=int, default=120, help="Model request timeout in seconds")
-
     p.add_argument("--limit", type=int, help="Max images to process")
     p.add_argument("--date", help="Process only this date (YYYY-MM-DD)")
     p.add_argument("--date-from", help="Process images from this date (YYYY-MM-DD)")
     p.add_argument("--date-to", help="Process images up to this date (YYYY-MM-DD)")
     p.add_argument("--extensions", default="jpg,jpeg,heic,png", help="Comma-separated extensions")
     p.add_argument("--skip-no-gps", action="store_true", help="Skip images without GPS data")
-
     p.add_argument("--dry-run", action="store_true", help="Read-only mode, print results only")
     p.add_argument("--output-json", help="Write results to a JSON file")
     p.add_argument("--output-csv", help="Write results to a CSV file")
@@ -58,45 +52,40 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verbose", "-v", action="store_true", help="Verbose per-file output")
     p.add_argument("--cache-dir", help="Geocoding cache directory")
     p.add_argument(
+        "--dedup", action="store_true", help="Detect and skip duplicate images via phash"
+    )
+    p.add_argument(
+        "--dedup-threshold", type=int, default=5, help="Hamming distance threshold (default: 5)"
+    )
+    p.add_argument(
         "--db", help="Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
     )
     p.add_argument(
         "--no-cache", action="store_true", help="Skip progress database, reprocess all images"
     )
     p.add_argument(
-        "--preflight",
-        action="store_true",
-        help="Run preflight checks for prerequisites and exit",
+        "--preflight", action="store_true", help="Run preflight checks for prerequisites and exit"
     )
 
     return p
-
-
-# ------------------------------------------------------------------
-# main entry point
-# ------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # --- preflight ---
     if args.preflight:
         return _handle_preflight(args)
 
-    # Require a source when not running preflight
     if not args.input_dir and not args.photos_library:
         parser.error("one of the arguments --input-dir --photos-library is required")
 
     extensions = {e.strip().lower() for e in args.extensions.split(",")}
 
-    # Quick Ollama connectivity warning before processing
     ok, msg = check_ollama(args.ollama_url)
     if not ok:
         print(f"Warning: {msg}", file=sys.stderr)
 
-    # --- scan ---
     try:
         if args.input_dir:
             source_type = "directory"
@@ -112,7 +101,31 @@ def main(argv: list[str] | None = None) -> int:
         print("No image files found.", file=sys.stderr)
         return 0
 
-    # --- init services ---
+    # --- dedup ---
+    phash_map: dict[str, str] = {}
+    skipped_dedup: set[str] = set()
+    if args.dedup:
+        from pyimgtag.dedup import compute_phash, find_duplicate_groups
+
+        print("Computing perceptual hashes...", file=sys.stderr)
+        records: list[tuple[str, str]] = []
+        for f in files:
+            h = compute_phash(f)
+            if h is not None:
+                records.append((str(f), h))
+                phash_map[str(f)] = h
+        groups = find_duplicate_groups(records, threshold=args.dedup_threshold)
+        dup_count = 0
+        for group in groups:
+            for path in sorted(group)[1:]:
+                skipped_dedup.add(path)
+                dup_count += 1
+        print(
+            f"Found {len(groups)} duplicate groups ({dup_count} images skipped, "
+            f"keeping 1 per group)",
+            file=sys.stderr,
+        )
+
     ollama = OllamaClient(
         model=args.model, base_url=args.ollama_url, max_dim=args.max_dim, timeout=args.timeout
     )
@@ -124,11 +137,14 @@ def main(argv: list[str] | None = None) -> int:
     results: list[ImageResult] = []
     stats = _new_stats(len(files))
 
-    # --- process ---
     try:
         for file_path in files:
             if args.limit and stats["processed"] >= args.limit:
                 break
+
+            if str(file_path) in skipped_dedup:
+                stats["skipped_dedup"] += 1
+                continue
 
             result = _process_one(
                 file_path, source_type, args, ollama, geocoder, stats, progress_db
@@ -139,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             if progress_db is not None:
                 progress_db.mark_done(file_path, result)
 
+            result.phash = phash_map.get(str(file_path))
             results.append(result)
             stats["processed"] += 1
 
@@ -157,7 +174,6 @@ def main(argv: list[str] | None = None) -> int:
         if progress_db is not None:
             progress_db.close()
 
-    # --- output files ---
     if args.output_json:
         write_json(results, args.output_json)
         print(f"Wrote {len(results)} results to {args.output_json}", file=sys.stderr)
@@ -165,14 +181,8 @@ def main(argv: list[str] | None = None) -> int:
         write_csv(results, args.output_csv)
         print(f"Wrote {len(results)} results to {args.output_csv}", file=sys.stderr)
 
-    # --- summary ---
     _print_summary(stats)
     return 0
-
-
-# ------------------------------------------------------------------
-# preflight handler
-# ------------------------------------------------------------------
 
 
 def _handle_preflight(args: argparse.Namespace) -> int:
@@ -199,11 +209,6 @@ def _handle_preflight(args: argparse.Namespace) -> int:
     return 0 if all_passed else 1
 
 
-# ------------------------------------------------------------------
-# per-file processing
-# ------------------------------------------------------------------
-
-
 def _process_one(
     file_path: Path,
     source_type: str,
@@ -214,7 +219,6 @@ def _process_one(
     progress_db: ProgressDB | None = None,
 ) -> ImageResult | None:
     """Process one image.  Returns ``None`` when filtered out."""
-    # local availability
     try:
         if not file_path.exists() or file_path.stat().st_size == 0:
             stats["skipped_no_local"] += 1
@@ -223,7 +227,6 @@ def _process_one(
         stats["skipped_no_local"] += 1
         return None
 
-    # skip already-processed
     if progress_db is not None and progress_db.is_processed(file_path):
         stats["skipped_cached"] += 1
         return None
@@ -232,7 +235,6 @@ def _process_one(
         file_path=str(file_path), file_name=file_path.name, source_type=source_type
     )
 
-    # EXIF
     try:
         exif = read_exif(file_path)
     except Exception:
@@ -241,17 +243,14 @@ def _process_one(
     result.gps_lat = exif.gps_lat
     result.gps_lon = exif.gps_lon
 
-    # date filter
     if not passes_date_filter(exif, file_path, args.date, args.date_from, args.date_to):
         stats["skipped_date"] += 1
         return None
 
-    # GPS filter
     if args.skip_no_gps and not exif.has_gps:
         stats["skipped_no_gps"] += 1
         return None
 
-    # --- tag with model ---
     tag_result = ollama.tag_image(str(file_path))
     if tag_result.error:
         result.processing_status = "error"
@@ -261,7 +260,6 @@ def _process_one(
         result.tags = tag_result.tags
         result.scene_summary = tag_result.summary
 
-    # --- reverse geocode ---
     if exif.has_gps:
         geo = geocoder.resolve(exif.gps_lat, exif.gps_lon)
         if geo.error:
@@ -275,11 +273,6 @@ def _process_one(
     return result
 
 
-# ------------------------------------------------------------------
-# output helpers
-# ------------------------------------------------------------------
-
-
 def _new_stats(scanned: int) -> dict:
     return {
         "scanned": scanned,
@@ -288,6 +281,7 @@ def _new_stats(scanned: int) -> dict:
         "skipped_no_gps": 0,
         "skipped_no_local": 0,
         "skipped_cached": 0,
+        "skipped_dedup": 0,
         "model_failures": 0,
         "geocode_failures": 0,
     }
@@ -345,6 +339,7 @@ def _print_summary(stats: dict) -> None:
     print(f"  Skipped (no GPS): {stats['skipped_no_gps']}", file=sys.stderr)
     print(f"  Skipped (no file):{stats['skipped_no_local']}", file=sys.stderr)
     print(f"  Skipped (cached): {stats['skipped_cached']}", file=sys.stderr)
+    print(f"  Skipped (dedup):  {stats['skipped_dedup']}", file=sys.stderr)
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
     print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
 

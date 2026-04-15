@@ -1,6 +1,6 @@
 ## Summary
 
-<!-- Brief description of the changes -->
+<!-- Brief description of what this PR does and why -->
 
 ## Changes
 
@@ -8,15 +8,20 @@
 
 ## Related Issues
 
-<!-- Link to relevant issues: closes #123 -->
+<!-- Link to relevant issues: Closes #123, Fixes #456 -->
 
 ## Testing
 
-- [ ] Tests pass locally
+- [ ] All existing tests pass (`pytest`)
 - [ ] New tests added for new functionality
+- [ ] Tested manually (describe what you tested)
 
 ## Checklist
 
-- [ ] Code follows project style (ruff format + ruff check)
-- [ ] No unnecessary files included
-- [ ] Documentation updated if needed
+- [ ] Commit message follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, etc.)
+- [ ] Code formatted and linted (`ruff format` + `ruff check`)
+- [ ] Type checking passes (`mypy`)
+- [ ] Pre-commit hooks pass (`pre-commit run --all-files`)
+- [ ] No unnecessary files or debug code included
+- [ ] Documentation updated if needed (README, docstrings)
+- [ ] No secrets, credentials, or personal paths in code
