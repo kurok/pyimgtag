@@ -20,12 +20,12 @@ class TestBuildParser:
     def test_default_model(self):
         parser = build_parser()
         args = parser.parse_args(["tag"])
-        assert args.model == "gemma3:4b"
+        assert args.model == "gemma4:e4b"
 
     def test_custom_model(self):
         parser = build_parser()
-        args = parser.parse_args(["--model", "gemma3:12b", "tag"])
-        assert args.model == "gemma3:12b"
+        args = parser.parse_args(["--model", "gemma4:e12b", "tag"])
+        assert args.model == "gemma4:e12b"
 
     def test_dry_run_flag(self):
         parser = build_parser()

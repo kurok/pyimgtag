@@ -18,8 +18,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model",
-        default="gemma3:4b",
-        help="Ollama model to use for image tagging (default: gemma3:4b)",
+        default="gemma4:e4b",
+        help="Ollama model to use for image tagging (default: gemma4:e4b)",
     )
     parser.add_argument(
         "--library",

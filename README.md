@@ -13,7 +13,7 @@ pyimgtag uses a locally-running Gemma model (via [Ollama](https://ollama.ai)) to
 **Key features:**
 
 - Runs entirely on-device — no cloud, no data leaves your Mac
-- Uses Gemma 3 vision model via Ollama for image understanding
+- Uses Gemma 4 vision model via Ollama for image understanding
 - Reads directly from the macOS Photos library
 - Stores tags in a local SQLite database for fast search
 - Batch processing with configurable concurrency
@@ -23,7 +23,7 @@ pyimgtag uses a locally-running Gemma model (via [Ollama](https://ollama.ai)) to
 - macOS (Photos library access)
 - Python 3.11+
 - [Ollama](https://ollama.ai) installed and running
-- Gemma 3 model pulled: `ollama pull gemma3:4b`
+- Gemma 4 model pulled: `ollama pull gemma4:e4b`
 
 ## Quick Start
 
@@ -32,7 +32,7 @@ pyimgtag uses a locally-running Gemma model (via [Ollama](https://ollama.ai)) to
 pip install pyimgtag
 
 # Pull the model
-ollama pull gemma3:4b
+ollama pull gemma4:e4b
 
 # Tag untagged photos
 pyimgtag tag
@@ -72,7 +72,7 @@ pyimgtag tag
 pyimgtag --dry-run tag
 
 # Use a larger model for better accuracy
-pyimgtag --model gemma3:12b tag
+pyimgtag --model gemma4:e12b tag
 
 # Process in larger batches
 pyimgtag --batch-size 50 tag
