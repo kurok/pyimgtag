@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from pyimgtag.preflight import check_ollama, run_preflight
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.scanner import scan_directory, scan_photos_library
 
+_DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -26,45 +29,90 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
-    src = p.add_mutually_exclusive_group(required=False)
+    subparsers = p.add_subparsers(dest="subcommand")
+
+    # --- run subcommand ---
+    run_p = subparsers.add_parser("run", help="Tag images (default workhorse)")
+    src = run_p.add_mutually_exclusive_group(required=False)
     src.add_argument("--input-dir", help="Path to an exported image folder")
     src.add_argument("--photos-library", help="Path to an Apple Photos library package")
 
-    p.add_argument("--model", default="gemma4:e4b", help="Ollama model (default: gemma4:e4b)")
-    p.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama base URL")
-    p.add_argument(
+    run_p.add_argument("--model", default="gemma4:e4b", help="Ollama model (default: gemma4:e4b)")
+    run_p.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama base URL")
+    run_p.add_argument(
         "--max-dim",
         type=int,
         default=1280,
         help="Max image dimension sent to model (default: 1280)",
     )
-    p.add_argument("--timeout", type=int, default=120, help="Model request timeout in seconds")
-    p.add_argument("--limit", type=int, help="Max images to process")
-    p.add_argument("--date", help="Process only this date (YYYY-MM-DD)")
-    p.add_argument("--date-from", help="Process images from this date (YYYY-MM-DD)")
-    p.add_argument("--date-to", help="Process images up to this date (YYYY-MM-DD)")
-    p.add_argument("--extensions", default="jpg,jpeg,heic,png", help="Comma-separated extensions")
-    p.add_argument("--skip-no-gps", action="store_true", help="Skip images without GPS data")
-    p.add_argument("--dry-run", action="store_true", help="Read-only mode, print results only")
-    p.add_argument("--output-json", help="Write results to a JSON file")
-    p.add_argument("--output-csv", help="Write results to a CSV file")
-    p.add_argument("--jsonl-stdout", action="store_true", help="JSONL output to stdout")
-    p.add_argument("--verbose", "-v", action="store_true", help="Verbose per-file output")
-    p.add_argument("--cache-dir", help="Geocoding cache directory")
-    p.add_argument(
+    run_p.add_argument("--timeout", type=int, default=120, help="Model request timeout in seconds")
+    run_p.add_argument("--limit", type=int, help="Max images to process")
+    run_p.add_argument("--date", help="Process only this date (YYYY-MM-DD)")
+    run_p.add_argument("--date-from", help="Process images from this date (YYYY-MM-DD)")
+    run_p.add_argument("--date-to", help="Process images up to this date (YYYY-MM-DD)")
+    run_p.add_argument(
+        "--extensions", default="jpg,jpeg,heic,png", help="Comma-separated extensions"
+    )
+    run_p.add_argument("--skip-no-gps", action="store_true", help="Skip images without GPS data")
+    run_p.add_argument("--dry-run", action="store_true", help="Read-only mode, print results only")
+    run_p.add_argument("--output-json", help="Write results to a JSON file")
+    run_p.add_argument("--output-csv", help="Write results to a CSV file")
+    run_p.add_argument("--jsonl-stdout", action="store_true", help="JSONL output to stdout")
+    run_p.add_argument("--verbose", "-v", action="store_true", help="Verbose per-file output")
+    run_p.add_argument("--cache-dir", help="Geocoding cache directory")
+    run_p.add_argument(
         "--dedup", action="store_true", help="Detect and skip duplicate images via phash"
     )
-    p.add_argument(
+    run_p.add_argument(
         "--dedup-threshold", type=int, default=5, help="Hamming distance threshold (default: 5)"
     )
-    p.add_argument(
-        "--db", help="Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
-    )
-    p.add_argument(
+    run_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    run_p.add_argument(
         "--no-cache", action="store_true", help="Skip progress database, reprocess all images"
     )
-    p.add_argument(
-        "--preflight", action="store_true", help="Run preflight checks for prerequisites and exit"
+    run_p.add_argument(
+        "--write-back",
+        action="store_true",
+        help="Write tags and description back to Apple Photos (only with --photos-library)",
+    )
+
+    # --- status subcommand ---
+    status_p = subparsers.add_parser("status", help="Show progress stats from the DB")
+    status_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+
+    # --- reprocess subcommand ---
+    reprocess_p = subparsers.add_parser(
+        "reprocess", help="Reset DB entries so photos get re-tagged"
+    )
+    reprocess_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    reprocess_p.add_argument(
+        "--status",
+        help="Only reset entries with this status (e.g. 'error'). Omit to reset everything.",
+    )
+
+    # --- preflight subcommand ---
+    preflight_p = subparsers.add_parser(
+        "preflight", help="Run preflight checks for prerequisites and exit"
+    )
+    preflight_p.add_argument(
+        "--ollama-url", default="http://localhost:11434", help="Ollama base URL"
+    )
+    preflight_p.add_argument(
+        "--model", default="gemma4:e4b", help="Ollama model (default: gemma4:e4b)"
+    )
+    src_pre = preflight_p.add_mutually_exclusive_group(required=False)
+    src_pre.add_argument("--input-dir", help="Path to an exported image folder")
+    src_pre.add_argument("--photos-library", help="Path to an Apple Photos library package")
+
+    # --- cleanup subcommand ---
+    cleanup_p = subparsers.add_parser(
+        "cleanup", help="List photos flagged for cleanup (delete/review) and exit"
+    )
+    cleanup_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    cleanup_p.add_argument(
+        "--include-review",
+        action="store_true",
+        help="Also show photos flagged as 'review' (default: delete only)",
     )
 
     return p
@@ -74,11 +122,37 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.preflight:
+    if args.subcommand is None:
+        parser.print_help()
+        return 1
+
+    if args.subcommand == "run":
+        return _handle_run(args, parser)
+
+    if args.subcommand == "status":
+        return _handle_status(args)
+
+    if args.subcommand == "reprocess":
+        return _handle_reprocess(args)
+
+    if args.subcommand == "preflight":
         return _handle_preflight(args)
 
+    if args.subcommand == "cleanup":
+        return _handle_cleanup(args)
+
+    # Should never reach here
+    parser.print_help()
+    return 1
+
+
+def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Execute the run subcommand (image tagging)."""
     if not args.input_dir and not args.photos_library:
         parser.error("one of the arguments --input-dir --photos-library is required")
+
+    if args.write_back and args.input_dir:
+        print("Warning: --write-back has no effect with --input-dir", file=sys.stderr)
 
     extensions = {e.strip().lower() for e in args.extensions.split(",")}
 
@@ -155,6 +229,13 @@ def main(argv: list[str] | None = None) -> int:
             if progress_db is not None:
                 progress_db.mark_done(file_path, result)
 
+            if args.write_back and result.source_type == "photos_library" and result.tags:
+                from pyimgtag.applescript_writer import write_to_photos
+
+                err = write_to_photos(result.file_name, result.tags, result.scene_summary)
+                if err:
+                    print(f"  Write-back failed: {err}", file=sys.stderr)
+
             result.phash = phash_map.get(str(file_path))
             results.append(result)
             stats["processed"] += 1
@@ -185,6 +266,42 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _handle_status(args: argparse.Namespace) -> int:
+    """Show progress stats from the DB."""
+    db = ProgressDB(db_path=args.db)
+    try:
+        stats = db.get_stats()
+    finally:
+        db.close()
+
+    total = stats["total"]
+    ok = stats["ok"]
+    error = stats["error"]
+    pending = total - ok - error
+
+    pct = f"{ok * 100 // total}%" if total > 0 else "0%"
+    print(f"Progress: {ok} / {total} ({pct})")
+    print(f"  ok:      {ok}")
+    print(f"  error:   {error}")
+    print(f"  pending: {pending}")
+    return 0
+
+
+def _handle_reprocess(args: argparse.Namespace) -> int:
+    """Reset DB entries so photos get re-tagged."""
+    db = ProgressDB(db_path=args.db)
+    try:
+        if args.status:
+            count = db.reset_by_status(args.status)
+        else:
+            count = db.reset_all()
+    finally:
+        db.close()
+
+    print(f"Reset {count} entries for reprocessing.")
+    return 0
+
+
 def _handle_preflight(args: argparse.Namespace) -> int:
     """Run preflight checks, print results, and return exit code."""
     source_path: str | None = None
@@ -207,6 +324,36 @@ def _handle_preflight(args: argparse.Namespace) -> int:
             all_passed = False
 
     return 0 if all_passed else 1
+
+
+def _handle_cleanup(args: argparse.Namespace) -> int:
+    """List photos flagged for cleanup and exit."""
+    db = ProgressDB(db_path=args.db)
+    try:
+        candidates = db.get_cleanup_candidates(include_review=args.include_review)
+    finally:
+        db.close()
+
+    if not candidates:
+        print("No cleanup candidates found.")
+        return 0
+
+    label = "delete + review" if args.include_review else "delete"
+    print(f"Cleanup candidates ({label}): {len(candidates)}")
+    print()
+    for item in candidates:
+        tags = ", ".join(json.loads(item["tags"])) if item.get("tags") else "(none)"
+        loc = item.get("nearest_city") or ""
+        if item.get("nearest_country") and loc:
+            loc = f"{loc}, {item['nearest_country']}"
+        parts = [f"[{item['cleanup_class']}]", item["file_path"]]
+        if loc:
+            parts.append(f"| {loc}")
+        if item.get("image_date"):
+            parts.append(f"| {item['image_date'][:10]}")
+        parts.append(f"| tags: {tags}")
+        print("  " + "  ".join(parts))
+    return 0
 
 
 def _process_one(
@@ -287,6 +434,13 @@ def _process_one(
     else:
         result.tags = tag_result.tags
         result.scene_summary = tag_result.summary
+        result.scene_category = tag_result.scene_category
+        result.emotional_tone = tag_result.emotional_tone
+        result.cleanup_class = tag_result.cleanup_class
+        result.has_text = tag_result.has_text
+        result.text_summary = tag_result.text_summary
+        result.event_hint = tag_result.event_hint
+        result.significance = tag_result.significance
 
     return result
 
@@ -328,6 +482,20 @@ def _print_verbose(result: ImageResult, idx: int, total: int) -> None:
     print(f"  Tags:     {tags}")
     if result.scene_summary:
         print(f"  Summary:  {result.scene_summary}")
+    if result.scene_category:
+        print(f"  Scene:    {result.scene_category}")
+    if result.emotional_tone:
+        print(f"  Tone:     {result.emotional_tone}")
+    if result.cleanup_class:
+        print(f"  Cleanup:  {result.cleanup_class}")
+    if result.has_text:
+        print("  Has text: yes")
+        if result.text_summary:
+            print(f"  Text:     {result.text_summary}")
+    if result.event_hint:
+        print(f"  Event:    {result.event_hint}")
+    if result.significance:
+        print(f"  Signif.:  {result.significance}")
     if result.gps_lat is not None:
         print(f"  GPS:      {result.gps_lat}, {result.gps_lon}")
     else:
