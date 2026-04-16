@@ -172,6 +172,42 @@ class TestBuildParser:
         args = build_parser().parse_args(["preflight", "--model", "llava:latest"])
         assert args.model == "llava:latest"
 
+    def test_run_sidecar_only_flag(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--sidecar-only"])
+        assert args.sidecar_only is True
+
+    def test_run_sidecar_only_default_false(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
+        assert args.sidecar_only is False
+
+    def test_run_metadata_format_default(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
+        assert args.metadata_format == "auto"
+
+    def test_run_metadata_format_xmp(self):
+        args = build_parser().parse_args(
+            ["run", "--input-dir", "/tmp", "--metadata-format", "xmp"]
+        )
+        assert args.metadata_format == "xmp"
+
+    def test_run_metadata_format_iptc(self):
+        args = build_parser().parse_args(
+            ["run", "--input-dir", "/tmp", "--metadata-format", "iptc"]
+        )
+        assert args.metadata_format == "iptc"
+
+    def test_run_metadata_format_exif(self):
+        args = build_parser().parse_args(
+            ["run", "--input-dir", "/tmp", "--metadata-format", "exif"]
+        )
+        assert args.metadata_format == "exif"
+
+    def test_run_metadata_format_invalid_rejected(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(
+                ["run", "--input-dir", "/tmp", "--metadata-format", "badvalue"]
+            )
+
 
 class TestMainNoSource:
     def test_missing_dir_returns_error(self):

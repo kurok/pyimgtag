@@ -82,6 +82,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write description and keywords to image EXIF via exiftool",
     )
     run_p.add_argument(
+        "--sidecar-only",
+        action="store_true",
+        help="Write metadata to an XMP sidecar (.xmp) instead of modifying the original file",
+    )
+    run_p.add_argument(
+        "--metadata-format",
+        choices=["auto", "xmp", "iptc", "exif"],
+        default="auto",
+        help="Metadata fields to write when using --write-exif (default: auto writes all fields)",
+    )
+    run_p.add_argument(
         "--no-recursive",
         action="store_true",
         help="Only scan the top-level directory (do not descend into subdirectories)",
@@ -176,9 +187,12 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
             file=sys.stderr,
         )
 
-    if args.write_exif and args.dry_run:
-        print("Warning: --write-exif ignored in --dry-run mode", file=sys.stderr)
-        args.write_exif = False
+    if (args.write_exif or args.sidecar_only) and args.dry_run:
+        print(
+            "Info: --write-exif/--sidecar-only disabled in --dry-run mode"
+            " (use --verbose to preview proposed metadata)",
+            file=sys.stderr,
+        )
 
     extensions = {e.strip().lower() for e in args.extensions.split(",")}
 
@@ -269,14 +283,16 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
                 if err:
                     print(f"  Write-back failed: {err}", file=sys.stderr)
 
-            if args.write_exif and result.tags:
-                from pyimgtag.exif_writer import write_exif_description
-
-                err = write_exif_description(
-                    result.file_path, description=rich_desc, keywords=result.tags
-                )
-                if err:
-                    print(f"  EXIF write failed: {err}", file=sys.stderr)
+            if (args.write_exif or args.sidecar_only) and result.tags:
+                if args.dry_run:
+                    if args.verbose:
+                        target = "sidecar" if args.sidecar_only else "file"
+                        print(f"  [dry-run] Would write to {target}:")
+                        if rich_desc:
+                            print(f"    description: {rich_desc[:80]}")
+                        print(f"    keywords: {', '.join(result.tags)}")
+                else:
+                    _write_metadata(result, rich_desc, args)
 
             result.phash = phash_map.get(str(file_path))
             results.append(result)
@@ -485,6 +501,46 @@ def _process_one(
         result.significance = tag_result.significance
 
     return result
+
+
+def _write_metadata(
+    result: ImageResult,
+    rich_desc: str | None,
+    args: argparse.Namespace,
+) -> None:
+    """Write metadata for one image: sidecar-only, direct, or auto-fallback."""
+    from pyimgtag.exif_writer import (
+        SUPPORTED_DIRECT_WRITE_EXTENSIONS,
+        write_exif_description,
+        write_xmp_sidecar,
+    )
+
+    if args.sidecar_only:
+        err = write_xmp_sidecar(result.file_path, description=rich_desc, keywords=result.tags)
+        if err:
+            print(f"  Sidecar write failed: {err}", file=sys.stderr)
+        return
+
+    # Direct write with auto-fallback for unsupported extensions
+    ext = Path(result.file_path).suffix.lower()
+    if ext not in SUPPORTED_DIRECT_WRITE_EXTENSIONS:
+        print(
+            f"  [{ext}] not supported for direct write; falling back to XMP sidecar",
+            file=sys.stderr,
+        )
+        err = write_xmp_sidecar(result.file_path, description=rich_desc, keywords=result.tags)
+        if err:
+            print(f"  Sidecar write failed: {err}", file=sys.stderr)
+        return
+
+    err = write_exif_description(
+        result.file_path,
+        description=rich_desc,
+        keywords=result.tags,
+        fmt=args.metadata_format,
+    )
+    if err:
+        print(f"  EXIF write failed: {err}", file=sys.stderr)
 
 
 def _new_stats(scanned: int) -> dict:
