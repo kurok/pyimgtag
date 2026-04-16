@@ -17,6 +17,12 @@ from PIL import Image
 
 from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic, sips_available
 from pyimgtag.models import TagResult, normalize_tags
+from pyimgtag.raw_converter import (
+    convert_raw_with_rawpy,
+    extract_raw_thumbnail,
+    is_raw,
+    rawpy_available,
+)
 
 try:
     import pillow_heif
@@ -173,6 +179,16 @@ class OllamaClient:
 
         if is_heic(file_path) and sips_available():
             temp_jpeg_path = convert_heic_to_jpeg(file_path)
+            temp_jpeg = str(temp_jpeg_path)
+            open_path = temp_jpeg
+        elif is_raw(file_path):
+            try:
+                temp_jpeg_path = extract_raw_thumbnail(file_path)
+            except RuntimeError:
+                if rawpy_available():
+                    temp_jpeg_path = convert_raw_with_rawpy(file_path)
+                else:
+                    raise
             temp_jpeg = str(temp_jpeg_path)
             open_path = temp_jpeg
 

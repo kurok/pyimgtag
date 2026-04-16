@@ -7,6 +7,7 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 from pyimgtag.exif_writer import (
+    RAW_SIDECAR_ONLY_EXTENSIONS,
     SUPPORTED_DIRECT_WRITE_EXTENSIONS,
     diff_metadata,
     is_exiftool_available,
@@ -454,6 +455,31 @@ class TestDiffMetadata:
             result = diff_metadata(str(src), description="test")
         assert len(result) == 1
         assert "unavailable" in result[0]
+
+
+class TestExtensionConstants:
+    def test_raw_sidecar_only_extensions_is_frozen(self):
+        assert isinstance(RAW_SIDECAR_ONLY_EXTENSIONS, frozenset)
+
+    def test_cr2_is_sidecar_only(self):
+        assert ".cr2" in RAW_SIDECAR_ONLY_EXTENSIONS
+
+    def test_nef_is_sidecar_only(self):
+        assert ".nef" in RAW_SIDECAR_ONLY_EXTENSIONS
+
+    def test_arw_is_sidecar_only(self):
+        assert ".arw" in RAW_SIDECAR_ONLY_EXTENSIONS
+
+    def test_dng_is_not_sidecar_only(self):
+        # DNG supports direct in-file EXIF write via exiftool
+        assert ".dng" not in RAW_SIDECAR_ONLY_EXTENSIONS
+
+    def test_dng_supports_direct_write(self):
+        assert ".dng" in SUPPORTED_DIRECT_WRITE_EXTENSIONS
+
+    def test_no_overlap_between_sidecar_only_and_direct_write(self):
+        overlap = RAW_SIDECAR_ONLY_EXTENSIONS & SUPPORTED_DIRECT_WRITE_EXTENSIONS
+        assert overlap == frozenset(), f"Unexpected overlap: {overlap}"
 
 
 class TestSupportedExtensions:
