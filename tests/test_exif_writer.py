@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from unittest.mock import MagicMock, patch
 
-from pyimgtag.exif_writer import is_exiftool_available, write_exif_description
+from pyimgtag.exif_writer import (
+    SUPPORTED_DIRECT_WRITE_EXTENSIONS,
+    diff_metadata,
+    is_exiftool_available,
+    read_existing_metadata,
+    write_exif_description,
+    write_xmp_sidecar,
+)
 
 
 def _make_completed_process(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
@@ -203,3 +211,256 @@ class TestWriteExifDescription:
                 write_exif_description("/path/photo.jpg", description="A sunset photo")
                 cmd = mock_run.call_args_list[1][0][0]
                 assert "-UserComment=A sunset photo" in cmd
+
+
+class TestWriteExifDescriptionFormats:
+    """Tests for the fmt and merge parameters."""
+
+    def _patch_run(self, *side_effects):
+        return patch(
+            "pyimgtag.exif_writer.subprocess.run",
+            side_effect=list(side_effects),
+        )
+
+    def _date_read_result(self):
+        return _make_completed_process(0, stdout=json.dumps([{}]))
+
+    def test_fmt_xmp_writes_only_xmp_description(self):
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(self._date_read_result(), _make_completed_process(0)) as mock_run:
+                write_exif_description("/p/photo.jpg", description="desc", fmt="xmp")
+                cmd = mock_run.call_args_list[1][0][0]
+                assert "-XMP:Description=desc" in cmd
+                assert "-ImageDescription=desc" not in cmd
+                assert "-IPTC:Caption-Abstract=desc" not in cmd
+
+    def test_fmt_iptc_writes_only_iptc_description(self):
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(self._date_read_result(), _make_completed_process(0)) as mock_run:
+                write_exif_description("/p/photo.jpg", description="desc", fmt="iptc")
+                cmd = mock_run.call_args_list[1][0][0]
+                assert "-IPTC:Caption-Abstract=desc" in cmd
+                assert "-ImageDescription=desc" not in cmd
+                assert "-XMP:Description=desc" not in cmd
+
+    def test_fmt_exif_writes_only_exif_fields(self):
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(self._date_read_result(), _make_completed_process(0)) as mock_run:
+                write_exif_description(
+                    "/p/photo.jpg", description="desc", keywords=["kw"], fmt="exif"
+                )
+                cmd = mock_run.call_args_list[1][0][0]
+                assert "-ImageDescription=desc" in cmd
+                assert "-UserComment=desc" in cmd
+                assert "-XPKeywords=kw" in cmd
+                assert "-XMP:Description=desc" not in cmd
+                assert "-IPTC:Keywords=kw" not in cmd
+
+    def test_merge_skips_keyword_clear(self):
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(self._date_read_result(), _make_completed_process(0)) as mock_run:
+                write_exif_description("/p/photo.jpg", keywords=["kw"], merge=True)
+                cmd = mock_run.call_args_list[1][0][0]
+                assert "-IPTC:Keywords=kw" in cmd
+                assert "-IPTC:Keywords=" not in cmd
+                assert "-XMP:Subject=" not in cmd
+                assert "-XPKeywords=" not in cmd
+
+    def test_no_merge_clears_keywords(self):
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(self._date_read_result(), _make_completed_process(0)) as mock_run:
+                write_exif_description("/p/photo.jpg", keywords=["kw"], merge=False)
+                cmd = mock_run.call_args_list[1][0][0]
+                assert "-IPTC:Keywords=" in cmd  # clear step present
+
+
+class TestWriteXmpSidecar:
+    def _patch_run(self, *side_effects):
+        return patch(
+            "pyimgtag.exif_writer.subprocess.run",
+            side_effect=list(side_effects),
+        )
+
+    def test_nothing_to_write_returns_none(self):
+        result = write_xmp_sidecar("/path/photo.jpg")
+        assert result is None
+
+    def test_exiftool_not_available(self):
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=False):
+            result = write_xmp_sidecar("/path/photo.jpg", description="test")
+            assert result is not None
+            assert "exiftool" in result.lower()
+
+    def test_creates_new_sidecar_from_source(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        # sidecar does not exist yet → expect -o sidecar source args
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(_make_completed_process(0)) as mock_run:
+                result = write_xmp_sidecar(str(src), description="desc", keywords=["k1"])
+                assert result is None
+                cmd = mock_run.call_args_list[0][0][0]
+                assert "-XMP:Description=desc" in cmd
+                assert "-XMP:Subject=k1" in cmd
+                # Should use -o output source pattern (not -overwrite_original)
+                assert "-o" in cmd
+                assert "-overwrite_original" not in cmd
+
+    def test_updates_existing_sidecar(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        sidecar = tmp_path / "photo.xmp"
+        sidecar.touch()
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(_make_completed_process(0)) as mock_run:
+                result = write_xmp_sidecar(str(src), description="desc")
+                assert result is None
+                cmd = mock_run.call_args_list[0][0][0]
+                assert "-overwrite_original" in cmd
+                assert str(sidecar) in cmd
+                assert str(src) not in cmd  # source not passed when updating sidecar
+
+    def test_success_returns_none(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(_make_completed_process(0)):
+                result = write_xmp_sidecar(str(src), description="desc")
+                assert result is None
+
+    def test_nonzero_exit_returns_error(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(_make_completed_process(1, stderr="bad")):
+                result = write_xmp_sidecar(str(src), description="desc")
+                assert result is not None
+                assert "bad" in result
+
+    def test_timeout_returns_error(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(subprocess.TimeoutExpired(cmd="exiftool", timeout=30)):
+                result = write_xmp_sidecar(str(src), description="desc")
+                assert result is not None
+                assert "timed out" in result.lower()
+
+    def test_clears_subject_before_setting(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(_make_completed_process(0)) as mock_run:
+                write_xmp_sidecar(str(src), keywords=["kw"])
+                cmd = mock_run.call_args_list[0][0][0]
+                clear_idx = cmd.index("-XMP:Subject=")
+                set_idx = cmd.index("-XMP:Subject=kw")
+                assert clear_idx < set_idx
+
+
+class TestReadExistingMetadata:
+    def _patch_run(self, stdout="", returncode=0):
+        mock = _make_completed_process(returncode, stdout=stdout)
+        return patch("pyimgtag.exif_writer.subprocess.run", return_value=mock)
+
+    def test_returns_description_and_keywords(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        payload = json.dumps([{"Description": "A sunset", "Keywords": ["beach", "sun"]}])
+        with self._patch_run(payload):
+            result = read_existing_metadata(str(src))
+        assert result["description"] == "A sunset"
+        assert result["keywords"] == ["beach", "sun"]
+
+    def test_single_keyword_as_string(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        payload = json.dumps([{"Keywords": "solo"}])
+        with self._patch_run(payload):
+            result = read_existing_metadata(str(src))
+        assert result["keywords"] == ["solo"]
+
+    def test_empty_response_returns_defaults(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with self._patch_run("[]"):
+            result = read_existing_metadata(str(src))
+        assert result["description"] is None
+        assert result["keywords"] == []
+
+    def test_nonzero_exit_returns_defaults(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with self._patch_run("", returncode=1):
+            result = read_existing_metadata(str(src))
+        assert result["description"] is None
+        assert result["keywords"] == []
+
+    def test_prefers_sidecar_when_present(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        sidecar = tmp_path / "photo.xmp"
+        sidecar.touch()
+        mock = _make_completed_process(0, stdout="[]")
+        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock) as mock_run:
+            read_existing_metadata(str(src))
+            cmd = mock_run.call_args_list[0][0][0]
+            assert str(sidecar) in cmd
+            assert str(src) not in cmd
+
+
+class TestDiffMetadata:
+    def test_no_changes_returns_empty(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        existing = {"description": "A sunset", "keywords": ["beach"]}
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with patch("pyimgtag.exif_writer.read_existing_metadata", return_value=existing):
+                result = diff_metadata(str(src), description="A sunset", keywords=["beach"])
+        assert result == []
+
+    def test_description_change_detected(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        existing = {"description": "Old desc", "keywords": []}
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with patch("pyimgtag.exif_writer.read_existing_metadata", return_value=existing):
+                result = diff_metadata(str(src), description="New desc")
+        assert any("description" in line for line in result)
+        assert any("New desc" in line for line in result)
+
+    def test_keyword_add_detected(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        existing = {"description": None, "keywords": []}
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with patch("pyimgtag.exif_writer.read_existing_metadata", return_value=existing):
+                result = diff_metadata(str(src), keywords=["beach", "sunset"])
+        assert any("add" in line for line in result)
+
+    def test_keyword_remove_detected(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        existing = {"description": None, "keywords": ["old_tag"]}
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with patch("pyimgtag.exif_writer.read_existing_metadata", return_value=existing):
+                result = diff_metadata(str(src), keywords=["new_tag"])
+        assert any("remove" in line for line in result)
+
+    def test_exiftool_unavailable(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=False):
+            result = diff_metadata(str(src), description="test")
+        assert len(result) == 1
+        assert "unavailable" in result[0]
+
+
+class TestSupportedExtensions:
+    def test_common_types_supported(self):
+        for ext in (".jpg", ".jpeg", ".heic", ".png", ".tiff", ".tif", ".dng"):
+            assert ext in SUPPORTED_DIRECT_WRITE_EXTENSIONS
+
+    def test_raw_types_not_in_supported(self):
+        for ext in (".cr2", ".nef", ".raf", ".arw"):
+            assert ext not in SUPPORTED_DIRECT_WRITE_EXTENSIONS
