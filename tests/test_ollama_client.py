@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
+
 from pyimgtag.ollama_client import (
     _RESPONSE_SCHEMA,
     _build_prompt_with_context,
@@ -167,3 +171,74 @@ class TestResponseSchema:
         assert set(props["cleanup_class"]["enum"]) == _CLEANUP_CLASS_ALLOWED
         assert set(props["event_hint"]["enum"]) == _EVENT_HINT_ALLOWED
         assert set(props["significance"]["enum"]) == _SIGNIFICANCE_ALLOWED
+
+
+class TestPrepareImageRaw:
+    """Tests for RAW file handling in OllamaClient._prepare_image."""
+
+    def _make_client(self):
+        from pyimgtag.ollama_client import OllamaClient
+
+        return OllamaClient(base_url="http://localhost:11434", model="test")
+
+    def _jpeg_bytes(self) -> bytes:
+        import io as _io
+
+        from PIL import Image as _Image
+
+        buf = _io.BytesIO()
+        img = _Image.new("RGB", (10, 10), color=(128, 64, 32))
+        img.save(buf, format="JPEG")
+        return buf.getvalue()
+
+    def test_raw_file_uses_extract_thumbnail(self, tmp_path):
+        jpeg_path = tmp_path / "IMG_001_thumb.jpg"
+        jpeg_path.write_bytes(self._jpeg_bytes())
+        client = self._make_client()
+        with patch("pyimgtag.ollama_client.is_raw", return_value=True):
+            with patch(
+                "pyimgtag.ollama_client.extract_raw_thumbnail", return_value=jpeg_path
+            ) as mock_extract:
+                with patch("pyimgtag.ollama_client.is_heic", return_value=False):
+                    client._prepare_image(str(tmp_path / "IMG_001.cr2"))
+        mock_extract.assert_called_once()
+
+    def test_raw_falls_back_to_rawpy_when_exiftool_fails(self, tmp_path):
+        jpeg_path = tmp_path / "IMG_001_raw.jpg"
+        jpeg_path.write_bytes(self._jpeg_bytes())
+        client = self._make_client()
+        with patch("pyimgtag.ollama_client.is_raw", return_value=True):
+            with patch(
+                "pyimgtag.ollama_client.extract_raw_thumbnail",
+                side_effect=RuntimeError("no embedded JPEG"),
+            ):
+                with patch("pyimgtag.ollama_client.rawpy_available", return_value=True):
+                    with patch(
+                        "pyimgtag.ollama_client.convert_raw_with_rawpy",
+                        return_value=jpeg_path,
+                    ) as mock_rawpy:
+                        with patch("pyimgtag.ollama_client.is_heic", return_value=False):
+                            client._prepare_image(str(tmp_path / "IMG_001.cr2"))
+        mock_rawpy.assert_called_once()
+
+    def test_raw_raises_when_both_backends_fail(self, tmp_path):
+        fake_cr2 = tmp_path / "IMG_001.cr2"
+        fake_cr2.write_bytes(b"\x00" * 100)
+        client = self._make_client()
+        with patch("pyimgtag.ollama_client.is_raw", return_value=True):
+            with patch(
+                "pyimgtag.ollama_client.extract_raw_thumbnail",
+                side_effect=RuntimeError("no embedded JPEG"),
+            ):
+                with patch("pyimgtag.ollama_client.rawpy_available", return_value=False):
+                    with patch("pyimgtag.ollama_client.is_heic", return_value=False):
+                        with pytest.raises(RuntimeError, match="no embedded JPEG"):
+                            client._prepare_image(str(fake_cr2))
+
+    def test_non_raw_file_skips_raw_path(self, tmp_path):
+        jpeg = tmp_path / "photo.jpg"
+        jpeg.write_bytes(self._jpeg_bytes())
+        client = self._make_client()
+        with patch("pyimgtag.ollama_client.extract_raw_thumbnail") as mock_extract:
+            client._prepare_image(str(jpeg))
+        mock_extract.assert_not_called()
