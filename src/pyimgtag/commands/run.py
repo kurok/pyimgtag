@@ -298,7 +298,7 @@ def _write_metadata(
         print(f"  EXIF write failed: {err}", file=sys.stderr)
 
 
-def _new_stats(scanned: int) -> dict:
+def _new_stats(scanned: int) -> dict[str, int]:
     return {
         "scanned": scanned,
         "processed": 0,
