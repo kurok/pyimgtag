@@ -19,18 +19,14 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         python-version: "3.12"
-    - name: Create virtual environment
-      run: |
-        uv venv
-        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
     - name: Install dependencies
       run: uv pip install -e ".[dev,lint]"
     - name: Check formatting with ruff
-      run: ruff format --check .
+      run: uv run ruff format --check .
     - name: Lint with ruff
-      run: ruff check .
+      run: uv run ruff check .
     - name: Run mypy
-      run: python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+      run: uv run python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
 
   # -------------------------------------------------------------------
   # Pre-commit hooks
@@ -42,14 +38,10 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         python-version: "3.12"
-    - name: Create virtual environment
-      run: |
-        uv venv
-        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
     - name: Install pre-commit
       run: uv pip install pre-commit
     - name: Run pre-commit on all files
-      run: pre-commit run --all-files
+      run: uv run pre-commit run --all-files
 
   # -------------------------------------------------------------------
   # Unit tests + Coverage (multi-version, multi-OS matrix)
@@ -70,15 +62,11 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         python-version: ${{ matrix.python-version }}
-    - name: Create virtual environment
-      run: |
-        uv venv
-        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
     - name: Install dependencies
       run: uv pip install -e ".[dev,lint]"
     - name: Run tests
       run: |
-        pytest \
+        uv run pytest \
           ${{ (matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12') && '--cov' || '--no-cov' }} \
           --junitxml=junit.xml -o junit_family=legacy
     - name: Upload coverage reports to Codecov
@@ -103,16 +91,12 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         python-version: "3.12"
-    - name: Create virtual environment
-      run: |
-        uv venv
-        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
     - name: Install dependencies
       run: uv pip install -e ".[security]"
     - name: Run bandit (security linter)
-      run: python -m bandit -r src/pyimgtag/ -c pyproject.toml
+      run: uv run python -m bandit -r src/pyimgtag/ -c pyproject.toml
     - name: Run pip-audit (dependency vulnerabilities)
-      run: python -m pip_audit
+      run: uv run python -m pip_audit
 
   # -------------------------------------------------------------------
   # Docker image smoke test
