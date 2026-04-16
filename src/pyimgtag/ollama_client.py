@@ -7,6 +7,7 @@ usage.  Images are resized and JPEG-compressed before encoding.
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import json
 import os
@@ -24,12 +25,10 @@ from pyimgtag.raw_converter import (
     rawpy_available,
 )
 
-try:
+with contextlib.suppress(ImportError):
     import pillow_heif
 
     pillow_heif.register_heif_opener()
-except ImportError:
-    pass
 
 _MODEL_TEMPERATURE: float = 0.3
 _MODEL_MAX_TOKENS: int = 512
@@ -212,13 +211,11 @@ class OllamaClient:
                 return base64.b64encode(buf.getvalue()).decode("ascii")
         finally:
             if temp_jpeg is not None:
-                try:
+                with contextlib.suppress(OSError):
                     os.unlink(temp_jpeg)
                     temp_dir = os.path.dirname(temp_jpeg)
                     if temp_dir and not os.listdir(temp_dir):
                         os.rmdir(temp_dir)
-                except OSError:
-                    pass
 
     def close(self) -> None:
         self._session.close()

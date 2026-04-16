@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from pathlib import PurePosixPath
 
 try:
     import photoscript
@@ -174,13 +175,12 @@ def write_to_photos(
     Returns:
         ``None`` on success, or an error message string on failure.
     """
-    import os
 
     # AppleScript write-back is only available on macOS
     if not _IS_MACOS:
         return "Apple Photos write-back is only available on macOS"
 
-    file_name = os.path.basename(file_path)
+    file_name = PurePosixPath(file_path).name
 
     if _HAS_PHOTOSCRIPT:
         return _write_via_photoscript(file_name, tags, summary, title=title)

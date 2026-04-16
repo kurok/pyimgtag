@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -121,13 +122,11 @@ class ImageResult:
             parts.append(", ".join(loc_parts) + ".")
 
         if self.image_date:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 from datetime import datetime
 
                 dt = datetime.strptime(self.image_date[:10], "%Y-%m-%d")
                 parts.append(dt.strftime("%B %Y") + ".")
-            except (ValueError, TypeError):
-                pass
 
         return " ".join(parts)
 

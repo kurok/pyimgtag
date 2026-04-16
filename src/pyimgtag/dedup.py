@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections import deque
 from pathlib import Path
 
 import imagehash
 from PIL import Image
 
-try:
+with contextlib.suppress(ImportError):
     import pillow_heif
 
     pillow_heif.register_heif_opener()
-except ImportError:
-    pass
 
 
 def compute_phash(image_path: str | Path) -> str | None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from pyimgtag.main import build_parser, main
@@ -87,11 +89,9 @@ class TestBuildParser:
         from contextlib import redirect_stdout
 
         buf = io.StringIO()
-        try:
+        with contextlib.suppress(SystemExit):
             with redirect_stdout(buf):
                 build_parser().parse_args(["run", "--help"])
-        except SystemExit:
-            pass
         assert "cr2" in buf.getvalue().lower()
 
     def test_run_dedup_flag(self):

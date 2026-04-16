@@ -11,6 +11,7 @@ Responds to POST /api/chat with canned TagResult JSON.
 
 from __future__ import annotations
 
+import contextlib
 import http.server
 import json
 import sys
@@ -88,19 +89,18 @@ _RESPONSES: list[dict[str, Any]] = [
     },
 ]
 
-_counter = 0
+_counter: list[int] = [0]
 _lock = threading.Lock()
 
 
 class MockOllamaHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
-        global _counter
         length = int(self.headers.get("Content-Length", 0))
         self.rfile.read(length)
 
         with _lock:
-            resp = _RESPONSES[_counter % len(_RESPONSES)]
-            _counter += 1
+            resp = _RESPONSES[_counter[0] % len(_RESPONSES)]
+            _counter[0] += 1
 
         body = json.dumps({"message": {"content": json.dumps(resp)}}).encode()
         self.send_response(200)
@@ -116,7 +116,5 @@ class MockOllamaHandler(http.server.BaseHTTPRequestHandler):
 if __name__ == "__main__":
     server = http.server.HTTPServer(("127.0.0.1", PORT), MockOllamaHandler)
     print(f"mock-ollama listening on http://127.0.0.1:{PORT}", flush=True)
-    try:
+    with contextlib.suppress(KeyboardInterrupt):
         server.serve_forever()
-    except KeyboardInterrupt:
-        pass
