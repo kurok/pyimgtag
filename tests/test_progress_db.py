@@ -217,7 +217,7 @@ class TestSchemaVersioning:
         """A brand-new database must be fully migrated to the latest version."""
         db = ProgressDB(db_path=tmp_path / "v3.db")
         try:
-            assert self._user_version(db._conn) == 3
+            assert self._user_version(db._conn) == 4
         finally:
             db.close()
 
@@ -277,7 +277,7 @@ class TestSchemaVersioning:
 
         db = ProgressDB(db_path=db_path)
         try:
-            assert self._user_version(db._conn) == 3
+            assert self._user_version(db._conn) == 4
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db._conn))
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
@@ -305,14 +305,14 @@ class TestSchemaVersioning:
 
         db = ProgressDB(db_path=db_path)
         try:
-            assert self._user_version(db._conn) == 3
+            assert self._user_version(db._conn) == 4
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
         finally:
             db.close()
 
     def test_user_version_is_set_correctly_after_migration(self, tmp_path):
-        """PRAGMA user_version must equal 3 after migration from version 1."""
+        """PRAGMA user_version must equal 4 after migration from version 1."""
         db_path = tmp_path / "check_version.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute(
@@ -338,7 +338,7 @@ class TestSchemaVersioning:
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute("PRAGMA user_version").fetchone()[0] == 3
+            assert raw.execute("PRAGMA user_version").fetchone()[0] == 4
         finally:
             raw.close()
 
@@ -350,7 +350,7 @@ class TestSchemaVersioning:
 
         db2 = ProgressDB(db_path=db_path)
         try:
-            assert self._user_version(db2._conn) == 3
+            assert self._user_version(db2._conn) == 4
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db2._conn))
             assert self._table_exists(db2._conn, "faces")
             assert self._table_exists(db2._conn, "persons")
@@ -786,5 +786,448 @@ class TestFaceDB:
             db.insert_face("/img/a.jpg", FaceDetection(), embedding=original)
             results = db.get_all_embeddings()
             np.testing.assert_array_equal(results[0][1], original)
+        finally:
+            db.close()
+
+
+def _make_image(tmp_path, name: str):
+    img = tmp_path / name
+    img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
+    return img
+
+
+class TestMigrationV4:
+    def test_fresh_db_is_at_version_4(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
+            assert ver == 4
+        finally:
+            db.close()
+
+    def test_fresh_db_has_location_columns(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            cols = {
+                row[1] for row in db._conn.execute("PRAGMA table_info(processed_images)").fetchall()
+            }
+            assert "nearest_city" in cols
+            assert "nearest_region" in cols
+            assert "nearest_country" in cols
+        finally:
+            db.close()
+
+    def test_mark_done_stores_location(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        img = _make_image(tmp_path, "photo.jpg")
+        try:
+            result = ImageResult(
+                file_path=str(img),
+                file_name="photo.jpg",
+                tags=["nature"],
+                nearest_city="Lviv",
+                nearest_region="Lviv Oblast",
+                nearest_country="Ukraine",
+            )
+            db.mark_done(img, result)
+            row = db._conn.execute(
+                "SELECT nearest_city, nearest_region, nearest_country "
+                "FROM processed_images WHERE file_path = ?",
+                (str(img),),
+            ).fetchone()
+            assert row[0] == "Lviv"
+            assert row[1] == "Lviv Oblast"
+            assert row[2] == "Ukraine"
+        finally:
+            db.close()
+
+    def test_v3_db_migrates_to_v4(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        # Build a v3 database manually
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """CREATE TABLE processed_images (
+                file_path TEXT PRIMARY KEY, file_size INTEGER, file_mtime REAL,
+                tags TEXT, scene_summary TEXT, processed_at TEXT, status TEXT,
+                error_message TEXT, scene_category TEXT, emotional_tone TEXT,
+                cleanup_class TEXT, has_text INTEGER DEFAULT 0, text_summary TEXT,
+                event_hint TEXT, significance TEXT
+            )"""
+        )
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+        conn.close()
+
+        db = ProgressDB(db_path=db_path)
+        try:
+            ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
+            assert ver == 4
+            cols = {
+                row[1] for row in db._conn.execute("PRAGMA table_info(processed_images)").fetchall()
+            }
+            assert "nearest_city" in cols
+        finally:
+            db.close()
+
+
+class TestQueryImages:
+    def _populate(self, db: ProgressDB, tmp_path) -> None:
+        images = [
+            ("a.jpg", ["cat", "indoor"], "tabby on couch", None, False, "home", "UA"),
+            ("b.jpg", ["cat", "outdoor"], "cat in garden", "review", False, "Kyiv", "UA"),
+            ("c.jpg", ["dog", "outdoor"], "labrador running", "delete", False, "Berlin", "DE"),
+            ("d.jpg", ["cat", "sign"], "street sign with text", None, True, "Paris", "FR"),
+        ]
+        for name, tags, summary, cleanup, has_text, city, country in images:
+            img = _make_image(tmp_path, name)
+            result = ImageResult(
+                file_path=str(img),
+                file_name=name,
+                tags=tags,
+                scene_summary=summary,
+                cleanup_class=cleanup,
+                has_text=has_text,
+                nearest_city=city,
+                nearest_country=country,
+            )
+            db.mark_done(img, result)
+
+    def test_query_no_filters_returns_all(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images()
+            assert len(rows) == 4
+        finally:
+            db.close()
+
+    def test_query_by_tag_exact(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(tag="cat")
+            assert len(rows) == 3
+            for r in rows:
+                assert "cat" in r["tags_list"]
+        finally:
+            db.close()
+
+    def test_query_by_tag_substring(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(tag="sig")  # matches "sign" only
+            assert len(rows) == 1
+            assert "sign" in rows[0]["tags_list"]
+        finally:
+            db.close()
+
+    def test_query_has_text_true(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(has_text=True)
+            assert len(rows) == 1
+            assert rows[0]["file_name"] == "d.jpg"
+        finally:
+            db.close()
+
+    def test_query_has_text_false(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(has_text=False)
+            assert len(rows) == 3
+        finally:
+            db.close()
+
+    def test_query_by_cleanup_class(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(cleanup_class="delete")
+            assert len(rows) == 1
+            assert rows[0]["cleanup_class"] == "delete"
+        finally:
+            db.close()
+
+    def test_query_by_city(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(city="kyiv")
+            assert len(rows) == 1
+            assert rows[0]["nearest_city"] == "Kyiv"
+        finally:
+            db.close()
+
+    def test_query_by_country(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(country="UA")
+            assert len(rows) == 2
+        finally:
+            db.close()
+
+    def test_query_combined_filters(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(tag="cat", country="UA")
+            assert len(rows) == 2
+        finally:
+            db.close()
+
+    def test_query_limit(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(limit=2)
+            assert len(rows) == 2
+        finally:
+            db.close()
+
+    def test_query_returns_location_fields(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(city="Paris")
+            assert len(rows) == 1
+            assert rows[0]["nearest_city"] == "Paris"
+            assert rows[0]["nearest_country"] == "FR"
+        finally:
+            db.close()
+
+    def test_query_no_match_returns_empty(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.query_images(tag="unicorn")
+            assert rows == []
+        finally:
+            db.close()
+
+
+class TestTagCounts:
+    def _populate(self, db: ProgressDB, tmp_path) -> None:
+        data = [
+            ("a.jpg", ["cat", "indoor"]),
+            ("b.jpg", ["cat", "outdoor"]),
+            ("c.jpg", ["dog", "outdoor"]),
+        ]
+        for name, tags in data:
+            img = _make_image(tmp_path, name)
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=name, tags=tags))
+
+    def test_get_tag_counts_returns_all_tags(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            counts = dict(db.get_tag_counts())
+            assert counts["cat"] == 2
+            assert counts["outdoor"] == 2
+            assert counts["dog"] == 1
+            assert counts["indoor"] == 1
+        finally:
+            db.close()
+
+    def test_get_tag_counts_sorted_by_count_desc(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            counts = db.get_tag_counts()
+            values = [c for _, c in counts]
+            assert values == sorted(values, reverse=True)
+        finally:
+            db.close()
+
+    def test_get_tag_counts_empty_db(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            assert db.get_tag_counts() == []
+        finally:
+            db.close()
+
+
+class TestRenameTag:
+    def _populate(self, db: ProgressDB, tmp_path) -> None:
+        data = [
+            ("a.jpg", ["cat", "indoor"]),
+            ("b.jpg", ["cat", "outdoor"]),
+            ("c.jpg", ["dog", "outdoor"]),
+        ]
+        for name, tags in data:
+            img = _make_image(tmp_path, name)
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=name, tags=tags))
+
+    def test_rename_updates_matching_images(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.rename_tag("cat", "feline")
+            assert count == 2
+            rows = db.query_images(tag="feline")
+            assert len(rows) == 2
+        finally:
+            db.close()
+
+    def test_rename_removes_old_tag(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            db.rename_tag("cat", "feline")
+            rows = db.query_images(tag="cat")
+            assert rows == []
+        finally:
+            db.close()
+
+    def test_rename_skips_unrelated_images(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.rename_tag("cat", "feline")
+            # dog image is unaffected
+            rows = db.query_images(tag="dog")
+            assert len(rows) == 1
+            assert count == 2
+        finally:
+            db.close()
+
+    def test_rename_case_insensitive(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.rename_tag("CAT", "feline")
+            assert count == 2
+        finally:
+            db.close()
+
+    def test_rename_deduplicates_when_new_tag_already_present(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        img = _make_image(tmp_path, "x.jpg")
+        try:
+            db.mark_done(
+                img, ImageResult(file_path=str(img), file_name="x.jpg", tags=["cat", "feline"])
+            )
+            db.rename_tag("cat", "feline")
+            rows = db.query_images(tag="feline")
+            assert len(rows[0]["tags_list"]) == 1
+        finally:
+            db.close()
+
+    def test_rename_returns_zero_when_tag_not_found(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.rename_tag("unicorn", "rainbow")
+            assert count == 0
+        finally:
+            db.close()
+
+
+class TestDeleteTag:
+    def _populate(self, db: ProgressDB, tmp_path) -> None:
+        data = [
+            ("a.jpg", ["cat", "indoor"]),
+            ("b.jpg", ["cat", "outdoor"]),
+            ("c.jpg", ["dog", "outdoor"]),
+        ]
+        for name, tags in data:
+            img = _make_image(tmp_path, name)
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=name, tags=tags))
+
+    def test_delete_removes_tag_from_matching_images(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.delete_tag("cat")
+            assert count == 2
+            rows = db.query_images(tag="cat")
+            assert rows == []
+        finally:
+            db.close()
+
+    def test_delete_leaves_other_tags_intact(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            db.delete_tag("cat")
+            rows = db.query_images(tag="indoor")
+            assert len(rows) == 1
+        finally:
+            db.close()
+
+    def test_delete_case_insensitive(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.delete_tag("CAT")
+            assert count == 2
+        finally:
+            db.close()
+
+    def test_delete_returns_zero_when_not_found(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.delete_tag("unicorn")
+            assert count == 0
+        finally:
+            db.close()
+
+
+class TestMergeTags:
+    def _populate(self, db: ProgressDB, tmp_path) -> None:
+        data = [
+            ("a.jpg", ["cat", "indoor"]),
+            ("b.jpg", ["cat", "outdoor"]),
+            ("c.jpg", ["dog", "outdoor"]),
+        ]
+        for name, tags in data:
+            img = _make_image(tmp_path, name)
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=name, tags=tags))
+
+    def test_merge_adds_target_and_removes_source(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.merge_tags("cat", "feline")
+            assert count == 2
+            assert db.query_images(tag="cat") == []
+            assert len(db.query_images(tag="feline")) == 2
+        finally:
+            db.close()
+
+    def test_merge_does_not_duplicate_target(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        img = _make_image(tmp_path, "x.jpg")
+        try:
+            db.mark_done(
+                img, ImageResult(file_path=str(img), file_name="x.jpg", tags=["cat", "feline"])
+            )
+            db.merge_tags("cat", "feline")
+            rows = db.query_images(tag="feline")
+            assert len(rows[0]["tags_list"]) == 1
+        finally:
+            db.close()
+
+    def test_merge_leaves_unrelated_images_unchanged(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            db.merge_tags("cat", "feline")
+            rows = db.query_images(tag="dog")
+            assert len(rows) == 1
+            assert "feline" not in rows[0]["tags_list"]
+        finally:
+            db.close()
+
+    def test_merge_returns_zero_when_source_not_found(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            count = db.merge_tags("unicorn", "animal")
+            assert count == 0
         finally:
             db.close()

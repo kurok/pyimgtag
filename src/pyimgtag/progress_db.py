@@ -53,6 +53,9 @@ class ProgressDB:
         ),
         (3, "CREATE INDEX IF NOT EXISTS idx_faces_image ON faces(image_path)"),
         (3, "CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id)"),
+        (4, "ALTER TABLE processed_images ADD COLUMN nearest_city TEXT"),
+        (4, "ALTER TABLE processed_images ADD COLUMN nearest_region TEXT"),
+        (4, "ALTER TABLE processed_images ADD COLUMN nearest_country TEXT"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -136,8 +139,9 @@ class ProgressDB:
                 (file_path, file_size, file_mtime, tags, scene_summary,
                  processed_at, status, error_message,
                  scene_category, emotional_tone, cleanup_class, has_text,
-                 text_summary, event_hint, significance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 text_summary, event_hint, significance,
+                 nearest_city, nearest_region, nearest_country)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(file_path),
@@ -155,6 +159,9 @@ class ProgressDB:
                 result.text_summary,
                 result.event_hint,
                 result.significance,
+                result.nearest_city,
+                result.nearest_region,
+                result.nearest_country,
             ),
         )
         self._conn.commit()
@@ -187,6 +194,229 @@ class ProgressDB:
         self._conn.execute("DELETE FROM processed_images WHERE status = ?", (status,))
         self._conn.commit()
         return count
+
+    def query_images(
+        self,
+        tag: str | None = None,
+        has_text: bool | None = None,
+        cleanup_class: str | None = None,
+        scene_category: str | None = None,
+        city: str | None = None,
+        country: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """Query images with advanced filters.
+
+        Args:
+            tag: Case-insensitive substring match against any tag value.
+            has_text: True = only images with text; False = only without; None = any.
+            cleanup_class: Exact match against cleanup_class ('delete', 'review', etc.).
+            scene_category: Exact match against scene_category.
+            city: Case-insensitive substring match against nearest_city.
+            country: Case-insensitive substring match against nearest_country.
+            status: Exact match against status ('ok', 'error').
+            limit: Max rows to return. None = no limit.
+
+        Returns:
+            List of image metadata dicts.
+        """
+        conditions: list[str] = []
+        params: list[object] = []
+
+        if tag is not None:
+            conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(tags) WHERE LOWER(value) LIKE LOWER(?))"
+            )
+            params.append(f"%{tag}%")
+        if has_text is True:
+            conditions.append("has_text = 1")
+        elif has_text is False:
+            conditions.append("(has_text = 0 OR has_text IS NULL)")
+        if cleanup_class is not None:
+            conditions.append("cleanup_class = ?")
+            params.append(cleanup_class)
+        if scene_category is not None:
+            conditions.append("scene_category = ?")
+            params.append(scene_category)
+        if city is not None:
+            conditions.append("LOWER(nearest_city) LIKE LOWER(?)")
+            params.append(f"%{city}%")
+        if country is not None:
+            conditions.append("LOWER(nearest_country) LIKE LOWER(?)")
+            params.append(f"%{country}%")
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
+        query = (  # nosec B608
+            "SELECT file_path, tags, scene_summary, processed_at, status, "
+            "cleanup_class, scene_category, emotional_tone, event_hint, significance, "
+            "nearest_city, nearest_region, nearest_country "
+            "FROM processed_images "
+            + where  # nosec B608
+            + " ORDER BY file_path "
+            + limit_clause
+        )
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._query_row_to_dict(r) for r in rows]
+
+    @staticmethod
+    def _query_row_to_dict(row: tuple) -> dict:
+        """Convert a query_images SELECT row (13 cols) to a metadata dict."""
+        file_path: str = row[0]
+        tags_raw: str | None = row[1]
+        try:
+            tags_list: list[str] = json.loads(tags_raw) if tags_raw else []
+        except (json.JSONDecodeError, TypeError):
+            tags_list = []
+        return {
+            "file_path": file_path,
+            "file_name": Path(file_path).name,
+            "tags_list": tags_list,
+            "scene_summary": row[2],
+            "processed_at": row[3],
+            "status": row[4],
+            "cleanup_class": row[5],
+            "scene_category": row[6],
+            "emotional_tone": row[7],
+            "event_hint": row[8],
+            "significance": row[9],
+            "nearest_city": row[10],
+            "nearest_region": row[11],
+            "nearest_country": row[12],
+        }
+
+    def get_tag_counts(self) -> list[tuple[str, int]]:
+        """Return (tag, count) pairs sorted by count descending.
+
+        Counts how many images have each distinct tag.
+
+        Returns:
+            List of (tag_name, image_count) tuples.
+        """
+        rows = self._conn.execute(
+            "SELECT LOWER(value), COUNT(*) AS cnt "
+            "FROM processed_images, json_each(tags) "
+            "WHERE tags IS NOT NULL "
+            "GROUP BY LOWER(value) "
+            "ORDER BY cnt DESC, LOWER(value)"
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def rename_tag(self, old_tag: str, new_tag: str) -> int:
+        """Rename a tag across all images.
+
+        Replaces every occurrence of *old_tag* (case-insensitive) with *new_tag*
+        (lowercased). Images that already contain *new_tag* are de-duplicated so
+        the tag only appears once.
+
+        Args:
+            old_tag: The tag to rename.
+            new_tag: The replacement tag (will be lowercased).
+
+        Returns:
+            Number of images updated.
+        """
+        old_lower = old_tag.lower()
+        new_lower = new_tag.lower()
+        rows = self._conn.execute(
+            "SELECT file_path, tags FROM processed_images WHERE tags IS NOT NULL"
+        ).fetchall()
+        updated = 0
+        with self._conn:
+            for file_path, tags_raw in rows:
+                try:
+                    tags: list[str] = json.loads(tags_raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                tags_lower = [t.lower() for t in tags]
+                if old_lower not in tags_lower:
+                    continue
+                new_tags: list[str] = []
+                seen: set[str] = set()
+                for t in tags:
+                    val = t.lower()
+                    replacement = new_lower if val == old_lower else val
+                    if replacement not in seen:
+                        seen.add(replacement)
+                        new_tags.append(replacement)
+                self._conn.execute(
+                    "UPDATE processed_images SET tags = ? WHERE file_path = ?",
+                    (json.dumps(new_tags), file_path),
+                )
+                updated += 1
+        return updated
+
+    def delete_tag(self, tag: str) -> int:
+        """Remove a tag from all images that have it.
+
+        Args:
+            tag: The tag to delete (case-insensitive match).
+
+        Returns:
+            Number of images updated.
+        """
+        tag_lower = tag.lower()
+        rows = self._conn.execute(
+            "SELECT file_path, tags FROM processed_images WHERE tags IS NOT NULL"
+        ).fetchall()
+        updated = 0
+        with self._conn:
+            for file_path, tags_raw in rows:
+                try:
+                    tags: list[str] = json.loads(tags_raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                new_tags = [t for t in tags if t.lower() != tag_lower]
+                if len(new_tags) == len(tags):
+                    continue
+                self._conn.execute(
+                    "UPDATE processed_images SET tags = ? WHERE file_path = ?",
+                    (json.dumps(new_tags), file_path),
+                )
+                updated += 1
+        return updated
+
+    def merge_tags(self, source_tag: str, target_tag: str) -> int:
+        """Merge *source_tag* into *target_tag*.
+
+        For every image that has *source_tag*, removes it and adds *target_tag*
+        (if not already present). The *target_tag* is lowercased.
+
+        Args:
+            source_tag: The tag to replace (case-insensitive match).
+            target_tag: The tag to add (will be lowercased).
+
+        Returns:
+            Number of images updated.
+        """
+        src_lower = source_tag.lower()
+        tgt_lower = target_tag.lower()
+        rows = self._conn.execute(
+            "SELECT file_path, tags FROM processed_images WHERE tags IS NOT NULL"
+        ).fetchall()
+        updated = 0
+        with self._conn:
+            for file_path, tags_raw in rows:
+                try:
+                    tags: list[str] = json.loads(tags_raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                tags_lower = [t.lower() for t in tags]
+                if src_lower not in tags_lower:
+                    continue
+                new_tags = [t for t in tags if t.lower() != src_lower]
+                if tgt_lower not in [t.lower() for t in new_tags]:
+                    new_tags.append(tgt_lower)
+                self._conn.execute(
+                    "UPDATE processed_images SET tags = ? WHERE file_path = ?",
+                    (json.dumps(new_tags), file_path),
+                )
+                updated += 1
+        return updated
 
     def get_cleanup_candidates(self, include_review: bool = False) -> list[dict]:
         """Return photos flagged for cleanup.
