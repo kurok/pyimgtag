@@ -34,7 +34,7 @@ def _handle_tags_list(args: argparse.Namespace) -> int:
         db.close()
 
     if not counts:
-        print("No tags found.")
+        print("No tags found.", file=sys.stderr)
         return 0
 
     col_tag = max(len(t) for t, _ in counts)

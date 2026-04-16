@@ -282,8 +282,7 @@ class TestReprocessSubcommand:
         db_path = str(tmp_path / "test.db")
         result = main(["reprocess", "--db", db_path])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "Reset 0 entries" in out
+        assert "Reset 0 entries" in capsys.readouterr().err
 
     def test_reprocess_all(self, tmp_path, capsys):
         from pyimgtag.models import ImageResult
@@ -300,8 +299,7 @@ class TestReprocessSubcommand:
 
         result = main(["reprocess", "--db", str(db_path)])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "Reset 1 entries" in out
+        assert "Reset 1 entries" in capsys.readouterr().err
 
     def test_reprocess_by_status(self, tmp_path, capsys):
         from pyimgtag.models import ImageResult
@@ -327,8 +325,7 @@ class TestReprocessSubcommand:
 
         result = main(["reprocess", "--db", str(db_path), "--status", "error"])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "Reset 1 entries" in out
+        assert "Reset 1 entries" in capsys.readouterr().err
 
         # ok entry should still be in DB
         db2 = ProgressDB(db_path=db_path)
@@ -343,8 +340,7 @@ class TestCleanupSubcommand:
         db_path = str(tmp_path / "test.db")
         result = main(["cleanup", "--db", db_path])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "No cleanup candidates found." in out
+        assert "No cleanup candidates found." in capsys.readouterr().err
 
     def test_cleanup_subcommand_parses(self):
         args = build_parser().parse_args(["cleanup"])
@@ -547,8 +543,7 @@ class TestFacesReviewSubcommand:
         db_path = str(tmp_path / "test.db")
         result = main(["faces", "review", "--db", db_path])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "No faces detected yet" in out
+        assert "No faces detected yet" in capsys.readouterr().err
 
     def test_review_with_persons(self, tmp_path, capsys):
         from pyimgtag.models import FaceDetection
@@ -567,12 +562,12 @@ class TestFacesReviewSubcommand:
 
         result = main(["faces", "review", "--db", str(tmp_path / "test.db")])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "3 total" in out
-        assert "2 assigned" in out
-        assert "1 unassigned" in out
-        assert "Alice" in out
-        assert "[confirmed]" in out
+        err = capsys.readouterr().err
+        assert "3 total" in err
+        assert "2 assigned" in err
+        assert "1 unassigned" in err
+        assert "Alice" in err
+        assert "[confirmed]" in err
 
 
 class TestFacesClusterSubcommand:
@@ -581,8 +576,7 @@ class TestFacesClusterSubcommand:
         db_path = str(tmp_path / "test.db")
         result = main(["faces", "cluster", "--db", db_path])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "No clusters formed" in out
+        assert "No clusters formed" in capsys.readouterr().err
 
 
 class TestFacesApplySubcommand:
@@ -590,8 +584,7 @@ class TestFacesApplySubcommand:
         db_path = str(tmp_path / "test.db")
         result = main(["faces", "apply", "--db", db_path])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "No persons found" in out
+        assert "No persons found" in capsys.readouterr().err
 
     def test_apply_dry_run_shows_keywords(self, tmp_path, capsys):
         import numpy as np
@@ -608,9 +601,9 @@ class TestFacesApplySubcommand:
 
         result = main(["faces", "apply", "--db", str(tmp_path / "test.db"), "--dry-run"])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "[dry-run]" in out
-        assert "person:Bob" in out
+        err = capsys.readouterr().err
+        assert "[dry-run]" in err
+        assert "person:Bob" in err
 
     def test_apply_without_write_flag_lists_only(self, tmp_path, capsys):
         import numpy as np
@@ -627,9 +620,9 @@ class TestFacesApplySubcommand:
 
         result = main(["faces", "apply", "--db", str(tmp_path / "test.db")])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "person:Charlie" in out
-        assert "Use --write-exif or --sidecar-only" in out
+        err = capsys.readouterr().err
+        assert "person:Charlie" in err
+        assert "Use --write-exif or --sidecar-only" in err
 
 
 class TestQueryParserArgs:
@@ -765,9 +758,9 @@ class TestQuerySubcommand:
         db_path = self._make_db(tmp_path)
         result = main(["query", "--db", db_path])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "PATH" in out
-        assert "2 image(s) found" in out
+        captured = capsys.readouterr()
+        assert "PATH" in captured.out
+        assert "2 image(s) found" in captured.err
 
     def test_query_paths_format(self, tmp_path, capsys):
         db_path = self._make_db(tmp_path)
@@ -790,15 +783,13 @@ class TestQuerySubcommand:
         db_path = self._make_db(tmp_path)
         result = main(["query", "--db", db_path, "--tag", "cat"])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "1 image(s) found" in out
+        assert "1 image(s) found" in capsys.readouterr().err
 
     def test_query_filter_by_cleanup(self, tmp_path, capsys):
         db_path = self._make_db(tmp_path)
         result = main(["query", "--db", db_path, "--cleanup", "delete"])
         assert result == 0
-        out = capsys.readouterr().out
-        assert "1 image(s) found" in out
+        assert "1 image(s) found" in capsys.readouterr().err
 
 
 class TestTagsSubcommand:
@@ -826,21 +817,20 @@ class TestTagsSubcommand:
         db_path = str(tmp_path / "empty.db")
         result = main(["tags", "list", "--db", db_path])
         assert result == 0
-        assert "No tags" in capsys.readouterr().out
+        assert "No tags" in capsys.readouterr().err
 
     def test_tags_rename_updates_db(self, tmp_path, capsys):
         db_path = self._make_db(tmp_path)
         result = main(["tags", "rename", "cat", "feline", "--db", db_path])
         assert result == 0
-        assert "2 image(s)" in capsys.readouterr().out
+        assert "2 image(s)" in capsys.readouterr().err
 
     def test_tags_rename_dry_run_does_not_modify(self, tmp_path, capsys):
         from pyimgtag.progress_db import ProgressDB
 
         db_path = self._make_db(tmp_path)
         main(["tags", "rename", "cat", "feline", "--dry-run", "--db", db_path])
-        out = capsys.readouterr().out
-        assert "[dry-run]" in out
+        assert "[dry-run]" in capsys.readouterr().err
         # DB should be unchanged
         db = ProgressDB(db_path=db_path)
         counts = dict(db.get_tag_counts())
@@ -863,8 +853,7 @@ class TestTagsSubcommand:
 
         db_path = self._make_db(tmp_path)
         main(["tags", "delete", "cat", "--dry-run", "--db", db_path])
-        out = capsys.readouterr().out
-        assert "[dry-run]" in out
+        assert "[dry-run]" in capsys.readouterr().err
         db = ProgressDB(db_path=db_path)
         counts = dict(db.get_tag_counts())
         db.close()
@@ -891,8 +880,7 @@ class TestTagsSubcommand:
 
         db_path = self._make_db(tmp_path)
         main(["tags", "merge", "cat", "animal", "--dry-run", "--db", db_path])
-        out = capsys.readouterr().out
-        assert "[dry-run]" in out
+        assert "[dry-run]" in capsys.readouterr().err
         db = ProgressDB(db_path=db_path)
         counts = dict(db.get_tag_counts())
         db.close()
