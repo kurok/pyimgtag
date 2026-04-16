@@ -1,6 +1,6 @@
 $ pyimgtag query --cleanup delete --format table
-PATH                                                TAGS                                      CATEGORY         CLEANUP 
+PATH                                                TAGS                                      CATEGORY         CLEANUP
 -----------------------------------------------------------------------------------------------------------------------
-ocs-wiki-guide/examples/fixtures/mountain_hike.jpg  screenshot, text, blurry                  other            delete  
+ocs-wiki-guide/examples/fixtures/mountain_hike.jpg  screenshot, text, blurry                  other            delete
 
 1 image(s) found.
