@@ -440,3 +440,173 @@ class TestCleanupSubcommand:
         assert "[delete]" in out
         assert "[review]" in out
         assert "delete + review" in out
+
+
+class TestFacesBuildParser:
+    def test_faces_subcommand_parses(self):
+        args = build_parser().parse_args(["faces", "scan", "--input-dir", "/tmp/photos"])
+        assert args.subcommand == "faces"
+        assert args.faces_action == "scan"
+        assert args.input_dir == "/tmp/photos"
+
+    def test_faces_scan_defaults(self):
+        args = build_parser().parse_args(["faces", "scan", "--input-dir", "/tmp"])
+        assert args.max_dim == 1280
+        assert args.detection_model == "hog"
+        assert args.extensions == "jpg,jpeg,heic,png"
+        assert args.limit is None
+        assert args.db is None
+
+    def test_faces_scan_custom_model(self):
+        args = build_parser().parse_args(
+            ["faces", "scan", "--input-dir", "/tmp", "--detection-model", "cnn"]
+        )
+        assert args.detection_model == "cnn"
+
+    def test_faces_scan_photos_library(self):
+        args = build_parser().parse_args(
+            ["faces", "scan", "--photos-library", "/tmp/lib.photoslibrary"]
+        )
+        assert args.photos_library == "/tmp/lib.photoslibrary"
+
+    def test_faces_scan_mutual_exclusion(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(
+                ["faces", "scan", "--input-dir", "/a", "--photos-library", "/b"]
+            )
+
+    def test_faces_scan_requires_source(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["faces", "scan"])
+
+    def test_faces_scan_limit(self):
+        args = build_parser().parse_args(["faces", "scan", "--input-dir", "/tmp", "--limit", "10"])
+        assert args.limit == 10
+
+    def test_faces_cluster_defaults(self):
+        args = build_parser().parse_args(["faces", "cluster"])
+        assert args.faces_action == "cluster"
+        assert args.eps == 0.5
+        assert args.min_samples == 2
+
+    def test_faces_cluster_custom_params(self):
+        args = build_parser().parse_args(["faces", "cluster", "--eps", "0.3", "--min-samples", "5"])
+        assert args.eps == 0.3
+        assert args.min_samples == 5
+
+    def test_faces_review_parses(self):
+        args = build_parser().parse_args(["faces", "review"])
+        assert args.faces_action == "review"
+
+    def test_faces_apply_defaults(self):
+        args = build_parser().parse_args(["faces", "apply"])
+        assert args.faces_action == "apply"
+        assert args.write_exif is False
+        assert args.sidecar_only is False
+        assert args.dry_run is False
+
+    def test_faces_apply_write_exif(self):
+        args = build_parser().parse_args(["faces", "apply", "--write-exif"])
+        assert args.write_exif is True
+
+    def test_faces_apply_sidecar_only(self):
+        args = build_parser().parse_args(["faces", "apply", "--sidecar-only"])
+        assert args.sidecar_only is True
+
+    def test_faces_apply_dry_run(self):
+        args = build_parser().parse_args(["faces", "apply", "--dry-run"])
+        assert args.dry_run is True
+
+    def test_faces_no_action_returns_1(self):
+        result = main(["faces"])
+        assert result == 1
+
+
+class TestFacesReviewSubcommand:
+    def test_review_empty_db(self, tmp_path, capsys):
+        db_path = str(tmp_path / "test.db")
+        result = main(["faces", "review", "--db", db_path])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "No faces detected yet" in out
+
+    def test_review_with_persons(self, tmp_path, capsys):
+        from pyimgtag.models import FaceDetection
+        from pyimgtag.progress_db import ProgressDB
+
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        det = FaceDetection(image_path="/img/a.jpg")
+        f1 = db.insert_face("/img/a.jpg", det)
+        f2 = db.insert_face("/img/b.jpg", det)
+        pid = db.create_person(label="Alice", confirmed=True)
+        db.set_person_id(f1, pid)
+        db.set_person_id(f2, pid)
+        # One unassigned face
+        db.insert_face("/img/c.jpg", det)
+        db.close()
+
+        result = main(["faces", "review", "--db", str(tmp_path / "test.db")])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "3 total" in out
+        assert "2 assigned" in out
+        assert "1 unassigned" in out
+        assert "Alice" in out
+        assert "[confirmed]" in out
+
+
+class TestFacesClusterSubcommand:
+    def test_cluster_empty_db(self, tmp_path, capsys):
+        pytest.importorskip("sklearn", reason="scikit-learn not installed")
+        db_path = str(tmp_path / "test.db")
+        result = main(["faces", "cluster", "--db", db_path])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "No clusters formed" in out
+
+
+class TestFacesApplySubcommand:
+    def test_apply_no_persons(self, tmp_path, capsys):
+        db_path = str(tmp_path / "test.db")
+        result = main(["faces", "apply", "--db", db_path])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "No persons found" in out
+
+    def test_apply_dry_run_shows_keywords(self, tmp_path, capsys):
+        import numpy as np
+
+        from pyimgtag.models import FaceDetection
+        from pyimgtag.progress_db import ProgressDB
+
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        det = FaceDetection(image_path="/img/a.jpg")
+        f1 = db.insert_face("/img/a.jpg", det, embedding=np.ones(128))
+        pid = db.create_person(label="Bob")
+        db.set_person_id(f1, pid)
+        db.close()
+
+        result = main(["faces", "apply", "--db", str(tmp_path / "test.db"), "--dry-run"])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "[dry-run]" in out
+        assert "person:Bob" in out
+
+    def test_apply_without_write_flag_lists_only(self, tmp_path, capsys):
+        import numpy as np
+
+        from pyimgtag.models import FaceDetection
+        from pyimgtag.progress_db import ProgressDB
+
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        det = FaceDetection(image_path="/img/a.jpg")
+        f1 = db.insert_face("/img/a.jpg", det, embedding=np.ones(128))
+        pid = db.create_person(label="Charlie")
+        db.set_person_id(f1, pid)
+        db.close()
+
+        result = main(["faces", "apply", "--db", str(tmp_path / "test.db")])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "person:Charlie" in out
+        assert "Use --write-exif or --sidecar-only" in out

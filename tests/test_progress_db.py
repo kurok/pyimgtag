@@ -5,7 +5,9 @@ from __future__ import annotations
 import sqlite3
 import time
 
-from pyimgtag.models import ImageResult
+import numpy as np
+
+from pyimgtag.models import FaceDetection, ImageResult
 from pyimgtag.progress_db import ProgressDB
 
 
@@ -199,33 +201,61 @@ _NEW_COLUMN_NAMES = {
 class TestSchemaVersioning:
     """Tests for PRAGMA user_version tracking and incremental migrations."""
 
-    def _column_names(self, conn: sqlite3.Connection) -> set[str]:
-        return {row[1] for row in conn.execute("PRAGMA table_info(processed_images)").fetchall()}
+    def _column_names(self, conn: sqlite3.Connection, table: str = "processed_images") -> set[str]:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+    def _table_exists(self, conn: sqlite3.Connection, table: str) -> bool:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        return row is not None
 
     def _user_version(self, conn: sqlite3.Connection) -> int:
         return conn.execute("PRAGMA user_version").fetchone()[0]
 
-    def test_fresh_db_is_at_version_2(self, tmp_path):
+    def test_fresh_db_is_at_version_3(self, tmp_path):
         """A brand-new database must be fully migrated to the latest version."""
-        db = ProgressDB(db_path=tmp_path / "v2.db")
+        db = ProgressDB(db_path=tmp_path / "v3.db")
         try:
-            assert self._user_version(db._conn) == 2
+            assert self._user_version(db._conn) == 3
         finally:
             db.close()
 
     def test_fresh_db_has_all_new_columns(self, tmp_path):
         """All version-2 columns must be present in a fresh database."""
-        db = ProgressDB(db_path=tmp_path / "v2.db")
+        db = ProgressDB(db_path=tmp_path / "v3.db")
         try:
             cols = self._column_names(db._conn)
             assert _NEW_COLUMN_NAMES.issubset(cols)
         finally:
             db.close()
 
-    def test_v1_db_migrates_to_v2_on_open(self, tmp_path):
-        """A database stuck at version 1 (missing new columns) must be upgraded on open."""
+    def test_fresh_db_has_face_tables(self, tmp_path):
+        """A fresh database must have faces and persons tables."""
+        db = ProgressDB(db_path=tmp_path / "v3.db")
+        try:
+            assert self._table_exists(db._conn, "faces")
+            assert self._table_exists(db._conn, "persons")
+            face_cols = self._column_names(db._conn, "faces")
+            assert {
+                "id",
+                "image_path",
+                "bbox_x",
+                "bbox_y",
+                "bbox_w",
+                "bbox_h",
+                "confidence",
+                "embedding",
+                "person_id",
+            }.issubset(face_cols)
+            person_cols = self._column_names(db._conn, "persons")
+            assert {"id", "label", "confirmed"}.issubset(person_cols)
+        finally:
+            db.close()
+
+    def test_v1_db_migrates_to_v3_on_open(self, tmp_path):
+        """A database stuck at version 1 must be upgraded through v2 and v3."""
         db_path = tmp_path / "old.db"
-        # Build a minimal version-1 schema without the new columns.
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             """
@@ -247,13 +277,42 @@ class TestSchemaVersioning:
 
         db = ProgressDB(db_path=db_path)
         try:
-            assert self._user_version(db._conn) == 2
+            assert self._user_version(db._conn) == 3
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db._conn))
+            assert self._table_exists(db._conn, "faces")
+            assert self._table_exists(db._conn, "persons")
+        finally:
+            db.close()
+
+    def test_v2_db_migrates_to_v3_on_open(self, tmp_path):
+        """A database at version 2 must gain face tables on open."""
+        db_path = tmp_path / "v2.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE processed_images (
+                file_path TEXT PRIMARY KEY, file_size INTEGER, file_mtime REAL,
+                tags TEXT, scene_summary TEXT, processed_at TEXT, status TEXT,
+                error_message TEXT, scene_category TEXT, emotional_tone TEXT,
+                cleanup_class TEXT, has_text INTEGER DEFAULT 0, text_summary TEXT,
+                event_hint TEXT, significance TEXT
+            )
+            """
+        )
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+        conn.close()
+
+        db = ProgressDB(db_path=db_path)
+        try:
+            assert self._user_version(db._conn) == 3
+            assert self._table_exists(db._conn, "faces")
+            assert self._table_exists(db._conn, "persons")
         finally:
             db.close()
 
     def test_user_version_is_set_correctly_after_migration(self, tmp_path):
-        """PRAGMA user_version must equal 2 after migration from version 1."""
+        """PRAGMA user_version must equal 3 after migration from version 1."""
         db_path = tmp_path / "check_version.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute(
@@ -277,10 +336,9 @@ class TestSchemaVersioning:
         db = ProgressDB(db_path=db_path)
         db.close()
 
-        # Verify version directly via a raw connection — no ProgressDB involved.
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute("PRAGMA user_version").fetchone()[0] == 2
+            assert raw.execute("PRAGMA user_version").fetchone()[0] == 3
         finally:
             raw.close()
 
@@ -290,11 +348,12 @@ class TestSchemaVersioning:
         db = ProgressDB(db_path=db_path)
         db.close()
 
-        # Second open — all migrations are already applied.
         db2 = ProgressDB(db_path=db_path)
         try:
-            assert self._user_version(db2._conn) == 2
+            assert self._user_version(db2._conn) == 3
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db2._conn))
+            assert self._table_exists(db2._conn, "faces")
+            assert self._table_exists(db2._conn, "persons")
         finally:
             db2.close()
 
@@ -449,5 +508,145 @@ class TestGetCleanupCandidates:
             assert "image_date" in item
             assert "nearest_city" in item
             assert "nearest_country" in item
+        finally:
+            db.close()
+
+
+class TestFaceDB:
+    """Tests for face pipeline database methods."""
+
+    def test_insert_face_returns_id(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            det = FaceDetection(
+                image_path="/img/a.jpg",
+                bbox_x=10,
+                bbox_y=20,
+                bbox_w=50,
+                bbox_h=60,
+                confidence=0.95,
+            )
+            face_id = db.insert_face("/img/a.jpg", det)
+            assert isinstance(face_id, int)
+            assert face_id >= 1
+        finally:
+            db.close()
+
+    def test_insert_face_with_embedding(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            det = FaceDetection(image_path="/img/a.jpg", bbox_x=0, bbox_y=0, bbox_w=64, bbox_h=64)
+            emb = np.random.rand(128).astype(np.float64)
+            face_id = db.insert_face("/img/a.jpg", det, embedding=emb)
+            results = db.get_all_embeddings()
+            assert len(results) == 1
+            assert results[0][0] == face_id
+            np.testing.assert_array_almost_equal(results[0][1], emb)
+        finally:
+            db.close()
+
+    def test_get_faces_for_image(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            det1 = FaceDetection(
+                image_path="/img/a.jpg", bbox_x=10, bbox_y=20, bbox_w=50, bbox_h=60
+            )
+            det2 = FaceDetection(
+                image_path="/img/a.jpg", bbox_x=100, bbox_y=200, bbox_w=50, bbox_h=60
+            )
+            det3 = FaceDetection(image_path="/img/b.jpg", bbox_x=5, bbox_y=5, bbox_w=30, bbox_h=30)
+            db.insert_face("/img/a.jpg", det1)
+            db.insert_face("/img/a.jpg", det2)
+            db.insert_face("/img/b.jpg", det3)
+
+            faces_a = db.get_faces_for_image("/img/a.jpg")
+            assert len(faces_a) == 2
+            assert faces_a[0]["bbox_x"] == 10
+            assert faces_a[1]["bbox_x"] == 100
+
+            faces_b = db.get_faces_for_image("/img/b.jpg")
+            assert len(faces_b) == 1
+        finally:
+            db.close()
+
+    def test_get_faces_for_image_empty(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            assert db.get_faces_for_image("/nonexistent.jpg") == []
+        finally:
+            db.close()
+
+    def test_get_all_embeddings_skips_null(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            det1 = FaceDetection(image_path="/img/a.jpg")
+            det2 = FaceDetection(image_path="/img/b.jpg")
+            db.insert_face("/img/a.jpg", det1, embedding=np.ones(128))
+            db.insert_face("/img/b.jpg", det2)  # no embedding
+            results = db.get_all_embeddings()
+            assert len(results) == 1
+        finally:
+            db.close()
+
+    def test_create_person_and_assign(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            det = FaceDetection(image_path="/img/a.jpg")
+            face_id = db.insert_face("/img/a.jpg", det)
+            person_id = db.create_person(label="Alice")
+            db.set_person_id(face_id, person_id)
+
+            faces = db.get_faces_for_image("/img/a.jpg")
+            assert faces[0]["person_id"] == person_id
+        finally:
+            db.close()
+
+    def test_get_persons(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            det1 = FaceDetection(image_path="/img/a.jpg")
+            det2 = FaceDetection(image_path="/img/b.jpg")
+            f1 = db.insert_face("/img/a.jpg", det1)
+            f2 = db.insert_face("/img/b.jpg", det2)
+            pid = db.create_person(label="Bob", confirmed=True)
+            db.set_person_id(f1, pid)
+            db.set_person_id(f2, pid)
+
+            persons = db.get_persons()
+            assert len(persons) == 1
+            assert persons[0].label == "Bob"
+            assert persons[0].confirmed is True
+            assert set(persons[0].face_ids) == {f1, f2}
+        finally:
+            db.close()
+
+    def test_update_person_label(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            pid = db.create_person(label="Unknown_1")
+            db.update_person_label(pid, "Charlie")
+            persons = db.get_persons()
+            assert persons[0].label == "Charlie"
+        finally:
+            db.close()
+
+    def test_get_face_count(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            assert db.get_face_count() == 0
+            db.insert_face("/a.jpg", FaceDetection())
+            db.insert_face("/b.jpg", FaceDetection())
+            assert db.get_face_count() == 2
+        finally:
+            db.close()
+
+    def test_embedding_roundtrip_precision(self, tmp_path):
+        """Embedding blob serialization must preserve float64 precision."""
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            original = np.array([1.0 / 3.0, np.pi, -0.0, 1e-300, 1e300] + [0.0] * 123)
+            db.insert_face("/img/a.jpg", FaceDetection(), embedding=original)
+            results = db.get_all_embeddings()
+            np.testing.assert_array_equal(results[0][1], original)
         finally:
             db.close()

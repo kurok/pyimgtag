@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import numpy as np
 
 DEFAULT_MAX_TAGS = 5
 
@@ -126,3 +130,34 @@ class ImageResult:
                 pass
 
         return " ".join(parts)
+
+
+@dataclass
+class FaceDetection:
+    """A single face detected in an image."""
+
+    image_path: str = ""
+    bbox_x: int = 0
+    bbox_y: int = 0
+    bbox_w: int = 0
+    bbox_h: int = 0
+    confidence: float = 0.0
+
+
+@dataclass
+class FaceEmbedding:
+    """128-d face encoding associated with a detected face."""
+
+    face_id: int = 0
+    image_path: str = ""
+    embedding: np.ndarray | None = None
+
+
+@dataclass
+class PersonCluster:
+    """A cluster of faces representing one person."""
+
+    person_id: int = 0
+    label: str = ""
+    confirmed: bool = False
+    face_ids: list[int] = field(default_factory=list)

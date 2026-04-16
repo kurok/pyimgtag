@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import struct
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from pyimgtag.models import ImageResult
+from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 class ProgressDB:
@@ -24,6 +29,30 @@ class ProgressDB:
         (2, "ALTER TABLE processed_images ADD COLUMN text_summary TEXT"),
         (2, "ALTER TABLE processed_images ADD COLUMN event_hint TEXT"),
         (2, "ALTER TABLE processed_images ADD COLUMN significance TEXT"),
+        (
+            3,
+            """CREATE TABLE IF NOT EXISTS persons (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                label     TEXT NOT NULL DEFAULT '',
+                confirmed INTEGER NOT NULL DEFAULT 0
+            )""",
+        ),
+        (
+            3,
+            """CREATE TABLE IF NOT EXISTS faces (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                image_path TEXT NOT NULL,
+                bbox_x     INTEGER NOT NULL DEFAULT 0,
+                bbox_y     INTEGER NOT NULL DEFAULT 0,
+                bbox_w     INTEGER NOT NULL DEFAULT 0,
+                bbox_h     INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                embedding  BLOB,
+                person_id  INTEGER REFERENCES persons(id)
+            )""",
+        ),
+        (3, "CREATE INDEX IF NOT EXISTS idx_faces_image ON faces(image_path)"),
+        (3, "CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id)"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -203,6 +232,116 @@ class ProgressDB:
                 }
             )
         return result
+
+    # --- face pipeline methods ---
+
+    @staticmethod
+    def _embedding_to_blob(embedding: np.ndarray) -> bytes:
+        """Pack a 128-d float64 numpy array into a compact bytes blob."""
+        return struct.pack(f"{len(embedding)}d", *embedding.tolist())
+
+    @staticmethod
+    def _blob_to_embedding(blob: bytes) -> np.ndarray:
+        """Unpack a blob back into a numpy float64 array."""
+        import numpy as np
+
+        count = len(blob) // struct.calcsize("d")
+        return np.array(struct.unpack(f"{count}d", blob), dtype=np.float64)
+
+    def insert_face(
+        self,
+        image_path: str,
+        detection: FaceDetection,
+        embedding: np.ndarray | None = None,
+    ) -> int:
+        """Insert a detected face. Returns the new face row id."""
+        blob = self._embedding_to_blob(embedding) if embedding is not None else None
+        cur = self._conn.execute(
+            """INSERT INTO faces (image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence, embedding)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                image_path,
+                detection.bbox_x,
+                detection.bbox_y,
+                detection.bbox_w,
+                detection.bbox_h,
+                detection.confidence,
+                blob,
+            ),
+        )
+        self._conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    def get_faces_for_image(self, image_path: str) -> list[dict]:
+        """Return all face rows for an image path."""
+        rows = self._conn.execute(
+            "SELECT id, bbox_x, bbox_y, bbox_w, bbox_h, confidence, person_id "
+            "FROM faces WHERE image_path = ?",
+            (image_path,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "bbox_x": r[1],
+                "bbox_y": r[2],
+                "bbox_w": r[3],
+                "bbox_h": r[4],
+                "confidence": r[5],
+                "person_id": r[6],
+            }
+            for r in rows
+        ]
+
+    def get_all_embeddings(self) -> list[tuple[int, np.ndarray]]:
+        """Return (face_id, embedding) for all faces that have embeddings."""
+        rows = self._conn.execute(
+            "SELECT id, embedding FROM faces WHERE embedding IS NOT NULL"
+        ).fetchall()
+        return [(r[0], self._blob_to_embedding(r[1])) for r in rows]
+
+    def set_person_id(self, face_id: int, person_id: int) -> None:
+        """Assign a face to a person cluster."""
+        self._conn.execute("UPDATE faces SET person_id = ? WHERE id = ?", (person_id, face_id))
+        self._conn.commit()
+
+    def create_person(self, label: str = "", confirmed: bool = False) -> int:
+        """Create a new person entry. Returns the person id."""
+        cur = self._conn.execute(
+            "INSERT INTO persons (label, confirmed) VALUES (?, ?)",
+            (label, 1 if confirmed else 0),
+        )
+        self._conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    def get_persons(self) -> list[PersonCluster]:
+        """Return all persons with their assigned face ids."""
+        persons = self._conn.execute("SELECT id, label, confirmed FROM persons").fetchall()
+        result = []
+        for pid, label, confirmed in persons:
+            face_ids = [
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT id FROM faces WHERE person_id = ?", (pid,)
+                ).fetchall()
+            ]
+            result.append(
+                PersonCluster(
+                    person_id=pid,
+                    label=label,
+                    confirmed=bool(confirmed),
+                    face_ids=face_ids,
+                )
+            )
+        return result
+
+    def update_person_label(self, person_id: int, label: str) -> None:
+        """Update the display label for a person."""
+        self._conn.execute("UPDATE persons SET label = ? WHERE id = ?", (label, person_id))
+        self._conn.commit()
+
+    def get_face_count(self) -> int:
+        """Return total number of detected faces."""
+        return self._conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0]
 
     def close(self) -> None:
         self._conn.close()
