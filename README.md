@@ -1,8 +1,11 @@
 # pyimgtag
 
 [![CI](https://github.com/kurok/pyimgtag/actions/workflows/python-package.yml/badge.svg)](https://github.com/kurok/pyimgtag/actions/workflows/python-package.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![CodeQL](https://github.com/kurok/pyimgtag/actions/workflows/codeql.yml/badge.svg)](https://github.com/kurok/pyimgtag/actions/workflows/codeql.yml)
+[![PyPI version](https://img.shields.io/pypi/v/pyimgtag)](https://pypi.org/project/pyimgtag/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pyimgtag)](https://pypi.org/project/pyimgtag/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/kurok/pyimgtag/graph/badge.svg)](https://codecov.io/gh/kurok/pyimgtag)
 
 Tag images using a local Gemma model for searchable tags, with optional Apple Photos integration on macOS.
 
