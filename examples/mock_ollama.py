@@ -8,6 +8,7 @@ Usage:
 
 Responds to POST /api/chat with canned TagResult JSON.
 """
+
 from __future__ import annotations
 
 import http.server
