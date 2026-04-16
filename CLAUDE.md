@@ -156,11 +156,11 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 
 ## CI Pipeline (5 Jobs)
 
-1. lint — ruff format check + lint
+1. quality — ruff format check + lint + mypy (combined, uv install)
 2. pre-commit — hooks
-3. test — matrix (ubuntu + macos) x (py3.11, 3.12, 3.13) with coverage (85% threshold)
-4. typecheck — mypy
-5. security — bandit + pip-audit
+3. test — matrix (ubuntu + macos) x (py3.11, 3.12, 3.13); coverage only on ubuntu/3.12
+4. security — bandit + pip-audit
+5. docker — build + smoke tests
 
 ## Workflow: Creating a Clean PR
 
