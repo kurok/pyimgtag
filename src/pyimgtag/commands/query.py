@@ -12,8 +12,7 @@ def cmd_query(args: argparse.Namespace) -> int:
     """Execute the query subcommand."""
     import json as _json
 
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         has_text: bool | None = None
         if args.has_text:
             has_text = True
@@ -30,8 +29,6 @@ def cmd_query(args: argparse.Namespace) -> int:
             status=args.status,
             limit=args.limit,
         )
-    finally:
-        db.close()
 
     if not results:
         print("No images matched the given filters.", file=sys.stderr)

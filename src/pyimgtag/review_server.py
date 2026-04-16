@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import io
 from pathlib import Path
@@ -308,12 +309,10 @@ def _make_thumbnail(image_path: str, size: int) -> bytes | None:
     except ImportError:
         return None
 
-    try:
+    with contextlib.suppress(ImportError):
         from pillow_heif import register_heif_opener  # type: ignore[import-untyped]
 
         register_heif_opener()
-    except ImportError:
-        pass
 
     cache_key = hashlib.sha256(f"{image_path}:{size}".encode()).hexdigest()
     cache_path = _THUMB_DIR / f"{cache_key}.jpg"

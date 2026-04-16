@@ -11,11 +11,8 @@ from pyimgtag.progress_db import ProgressDB
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Show progress stats from the DB."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         stats = db.get_stats()
-    finally:
-        db.close()
 
     total = stats["total"]
     ok = stats["ok"]
@@ -32,14 +29,11 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_reprocess(args: argparse.Namespace) -> int:
     """Reset DB entries so photos get re-tagged."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         if args.status:
             count = db.reset_by_status(args.status)
         else:
             count = db.reset_all()
-    finally:
-        db.close()
 
     print(f"Reset {count} entries for reprocessing.", file=sys.stderr)
     return 0
@@ -47,11 +41,8 @@ def cmd_reprocess(args: argparse.Namespace) -> int:
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
     """List photos flagged for cleanup and exit."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         candidates = db.get_cleanup_candidates(include_review=args.include_review)
-    finally:
-        db.close()
 
     if not candidates:
         print("No cleanup candidates found.", file=sys.stderr)

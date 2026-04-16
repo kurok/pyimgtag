@@ -51,22 +51,22 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         print("No image files found.", file=sys.stderr)
         return 0
 
-    db = ProgressDB(db_path=args.db)
     total_faces = 0
     scanned = 0
-    try:
-        for i, file_path in enumerate(files):
-            if args.limit and i >= args.limit:
-                break
-            count = scan_and_store(file_path, db, max_dim=args.max_dim, model=args.detection_model)
-            scanned += 1
-            if count > 0:
-                total_faces += count
-                print(f"  {file_path.name}: {count} face(s)", file=sys.stderr)
-    except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
-    finally:
-        db.close()
+    with ProgressDB(db_path=args.db) as db:
+        try:
+            for i, file_path in enumerate(files):
+                if args.limit and i >= args.limit:
+                    break
+                count = scan_and_store(
+                    file_path, db, max_dim=args.max_dim, model=args.detection_model
+                )
+                scanned += 1
+                if count > 0:
+                    total_faces += count
+                    print(f"  {file_path.name}: {count} face(s)", file=sys.stderr)
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
 
     print(f"\nScanned {scanned} images, detected {total_faces} faces.", file=sys.stderr)
     return 0
@@ -80,11 +80,8 @@ def _handle_faces_cluster(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         result = cluster_faces(db, eps=args.eps, min_samples=args.min_samples)
-    finally:
-        db.close()
 
     if not result:
         print(
@@ -101,12 +98,9 @@ def _handle_faces_cluster(args: argparse.Namespace) -> int:
 
 def _handle_faces_review(args: argparse.Namespace) -> int:
     """List detected persons and face counts."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         persons = db.get_persons()
         total_faces = db.get_face_count()
-    finally:
-        db.close()
 
     if not persons and total_faces == 0:
         print("No faces detected yet. Run 'pyimgtag faces scan' first.", file=sys.stderr)
@@ -132,8 +126,7 @@ def _handle_faces_review(args: argparse.Namespace) -> int:
 
 def _handle_faces_apply(args: argparse.Namespace) -> int:
     """Write person keywords to image metadata."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         persons = db.get_persons()
         if not persons:
             print(
@@ -161,8 +154,6 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
                 image_keywords.setdefault(image_path, [])
                 if keyword not in image_keywords[image_path]:
                     image_keywords[image_path].append(keyword)
-    finally:
-        db.close()
 
     if not image_keywords:
         print("No face-to-person assignments to write.", file=sys.stderr)

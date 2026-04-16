@@ -7,6 +7,7 @@ system deps), and falls back to Pillow when neither is available.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 from datetime import datetime
@@ -21,12 +22,10 @@ try:
 except ImportError:
     exifread = None  # type: ignore[assignment]
 
-try:
+with contextlib.suppress(ImportError):
     import pillow_heif
 
     pillow_heif.register_heif_opener()
-except ImportError:
-    pass
 
 
 def read_exif(file_path: str | Path) -> ExifData:

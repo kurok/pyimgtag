@@ -27,11 +27,8 @@ def cmd_tags(args: argparse.Namespace) -> int:
 
 def _handle_tags_list(args: argparse.Namespace) -> int:
     """List all tags with image counts."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         counts = db.get_tag_counts()
-    finally:
-        db.close()
 
     if not counts:
         print("No tags found.", file=sys.stderr)
@@ -49,8 +46,7 @@ def _handle_tags_list(args: argparse.Namespace) -> int:
 
 def _handle_tags_rename(args: argparse.Namespace) -> int:
     """Rename a tag across all images."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         if args.dry_run:
             tag_counts = db.get_tag_counts()
             count = next((c for t, c in tag_counts if t == args.old_tag.lower()), 0)
@@ -64,15 +60,12 @@ def _handle_tags_rename(args: argparse.Namespace) -> int:
                 f"Renamed '{args.old_tag}' → '{args.new_tag}' in {count} image(s).",
                 file=sys.stderr,
             )
-    finally:
-        db.close()
     return 0
 
 
 def _handle_tags_delete(args: argparse.Namespace) -> int:
     """Delete a tag from all images."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         if args.dry_run:
             tag_counts = db.get_tag_counts()
             count = next((c for t, c in tag_counts if t == args.tag.lower()), 0)
@@ -80,15 +73,12 @@ def _handle_tags_delete(args: argparse.Namespace) -> int:
         else:
             count = db.delete_tag(args.tag)
             print(f"Deleted '{args.tag}' from {count} image(s).", file=sys.stderr)
-    finally:
-        db.close()
     return 0
 
 
 def _handle_tags_merge(args: argparse.Namespace) -> int:
     """Merge source tag into target tag across all images."""
-    db = ProgressDB(db_path=args.db)
-    try:
+    with ProgressDB(db_path=args.db) as db:
         if args.dry_run:
             tag_counts = db.get_tag_counts()
             count = next((c for t, c in tag_counts if t == args.source_tag.lower()), 0)
@@ -103,6 +93,4 @@ def _handle_tags_merge(args: argparse.Namespace) -> int:
                 f"Merged '{args.source_tag}' → '{args.target_tag}' in {count} image(s).",
                 file=sys.stderr,
             )
-    finally:
-        db.close()
     return 0

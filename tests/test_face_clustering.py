@@ -25,34 +25,25 @@ def _seed_faces(db: ProgressDB, embeddings: list[np.ndarray], prefix: str = "/im
 
 class TestClusterFaces:
     def test_empty_db_returns_empty(self, tmp_path):
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             result = cluster_faces(db)
             assert result == {}
-        finally:
-            db.close()
 
     def test_single_face_no_cluster(self, tmp_path):
         """One face cannot form a cluster with min_samples=2."""
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             _seed_faces(db, [np.zeros(128)])
             result = cluster_faces(db)
             assert result == {}
-        finally:
-            db.close()
 
     def test_two_identical_embeddings_form_cluster(self, tmp_path):
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             emb = np.ones(128) * 0.5
             face_ids = _seed_faces(db, [emb, emb])
             result = cluster_faces(db)
             assert len(result) == 1
             person_id = next(iter(result))
             assert set(result[person_id]) == set(face_ids)
-        finally:
-            db.close()
 
     def test_two_distinct_groups(self, tmp_path):
         db = ProgressDB(db_path=tmp_path / "test.db")

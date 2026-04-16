@@ -45,8 +45,6 @@ class TestWriteExifDescription:
 
     def _date_read_result(self, dates=None):
         """Return a CompletedProcess for the date-reading exiftool call."""
-        import json
-
         info = dates or {}
         return _make_completed_process(0, stdout=json.dumps([info]))
 
