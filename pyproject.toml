@@ -46,7 +46,14 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-n auto"
+addopts = "-n auto --dist=worksteal"
+
+[tool.coverage.run]
+branch = false
+source = ["src/pyimgtag"]
+
+[tool.coverage.report]
+fail_under = 85
 
 [tool.mypy]
 python_version = "3.11"
