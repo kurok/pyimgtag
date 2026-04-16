@@ -1,4 +1,5 @@
 """RAW image thumbnail extraction using exiftool."""
+
 from __future__ import annotations
 
 import shutil
@@ -59,9 +60,9 @@ def extract_raw_thumbnail(
         Path to the extracted JPEG thumbnail.
 
     Raises:
-        RuntimeError: If exiftool is not available on PATH.
+        RuntimeError: If exiftool is not available on PATH, or if no embedded
+            JPEG could be extracted after trying all tags.
         FileNotFoundError: If the input file does not exist.
-        RuntimeError: If no embedded JPEG could be extracted.
     """
     if shutil.which("exiftool") is None:
         raise RuntimeError("exiftool is not available — install it and add it to PATH")
@@ -79,13 +80,23 @@ def extract_raw_thumbnail(
     output_path = output_dir / f"{input_path.stem}_thumb.jpg"
 
     for tag in _THUMBNAIL_TAGS:
-        proc = subprocess.run(
-            ["exiftool", "-b", f"-{tag}", str(input_path)],
-            capture_output=True,
-            timeout=30,
-        )
-        if proc.returncode == 0 and proc.stdout:
+        try:
+            proc = subprocess.run(
+                ["exiftool", "-b", f"-{tag}", str(input_path)],
+                capture_output=True,
+                timeout=30,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            continue
+
+        if proc.returncode != 0:
+            # Non-zero may mean the tag doesn't exist (rc=1) or a real error (rc=2+).
+            # Either way, try the next tag — if all fail the final raise gives context.
+            continue
+
+        if proc.stdout:
             output_path.write_bytes(proc.stdout)
             return output_path
+        # Empty stdout = tag absent, try next
 
     raise RuntimeError(f"No embedded JPEG found in {input_path}")
