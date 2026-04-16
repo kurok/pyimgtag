@@ -1,0 +1,3 @@
+# pyimgtag Wiki
+
+Initializing...
