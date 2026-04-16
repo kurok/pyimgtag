@@ -87,12 +87,15 @@ def _handle_faces_cluster(args: argparse.Namespace) -> int:
         db.close()
 
     if not result:
-        print("No clusters formed. Need more faces or adjust --eps/--min-samples.")
+        print(
+            "No clusters formed. Need more faces or adjust --eps/--min-samples.",
+            file=sys.stderr,
+        )
         return 0
 
-    print(f"Created {len(result)} person cluster(s):")
+    print(f"Created {len(result)} person cluster(s):", file=sys.stderr)
     for person_id, face_ids in result.items():
-        print(f"  Person {person_id}: {len(face_ids)} face(s)")
+        print(f"  Person {person_id}: {len(face_ids)} face(s)", file=sys.stderr)
     return 0
 
 
@@ -106,22 +109,24 @@ def _handle_faces_review(args: argparse.Namespace) -> int:
         db.close()
 
     if not persons and total_faces == 0:
-        print("No faces detected yet. Run 'pyimgtag faces scan' first.")
+        print("No faces detected yet. Run 'pyimgtag faces scan' first.", file=sys.stderr)
         return 0
 
     assigned = sum(len(p.face_ids) for p in persons)
     unassigned = total_faces - assigned
 
-    print(f"Faces: {total_faces} total, {assigned} assigned, {unassigned} unassigned")
+    print(
+        f"Faces: {total_faces} total, {assigned} assigned, {unassigned} unassigned", file=sys.stderr
+    )
     if persons:
-        print(f"\nPersons ({len(persons)}):")
+        print(f"\nPersons ({len(persons)}):", file=sys.stderr)
         for p in persons:
             status = "confirmed" if p.confirmed else "auto"
             label = p.label or f"(unlabelled #{p.person_id})"
-            print(f"  [{status}] {label}: {len(p.face_ids)} face(s)")
+            print(f"  [{status}] {label}: {len(p.face_ids)} face(s)", file=sys.stderr)
     if unassigned > 0:
-        print(f"\n{unassigned} face(s) not assigned to any person.")
-        print("Run 'pyimgtag faces cluster' to group them.")
+        print(f"\n{unassigned} face(s) not assigned to any person.", file=sys.stderr)
+        print("Run 'pyimgtag faces cluster' to group them.", file=sys.stderr)
     return 0
 
 
@@ -131,7 +136,10 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
     try:
         persons = db.get_persons()
         if not persons:
-            print("No persons found. Run 'pyimgtag faces scan' and 'faces cluster' first.")
+            print(
+                "No persons found. Run 'pyimgtag faces scan' and 'faces cluster' first.",
+                file=sys.stderr,
+            )
             return 0
 
         # Build face_id -> person label mapping
@@ -157,17 +165,17 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
         db.close()
 
     if not image_keywords:
-        print("No face-to-person assignments to write.")
+        print("No face-to-person assignments to write.", file=sys.stderr)
         return 0
 
     written = 0
     for image_path, keywords in sorted(image_keywords.items()):
         if args.dry_run:
-            print(f"  [dry-run] {Path(image_path).name}: {', '.join(keywords)}")
+            print(f"  [dry-run] {Path(image_path).name}: {', '.join(keywords)}", file=sys.stderr)
             continue
 
         if not (args.write_exif or args.sidecar_only):
-            print(f"  {Path(image_path).name}: {', '.join(keywords)}")
+            print(f"  {Path(image_path).name}: {', '.join(keywords)}", file=sys.stderr)
             continue
 
         err = _write_person_keywords(image_path, keywords, args)
@@ -175,15 +183,18 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
             print(f"  {Path(image_path).name}: FAILED - {err}", file=sys.stderr)
         else:
             written += 1
-            print(f"  {Path(image_path).name}: {', '.join(keywords)}")
+            print(f"  {Path(image_path).name}: {', '.join(keywords)}", file=sys.stderr)
 
     if args.dry_run:
-        print(f"\n[dry-run] Would write to {len(image_keywords)} image(s).")
+        print(f"\n[dry-run] Would write to {len(image_keywords)} image(s).", file=sys.stderr)
     elif args.write_exif or args.sidecar_only:
-        print(f"\nWrote person keywords to {written}/{len(image_keywords)} image(s).")
+        print(
+            f"\nWrote person keywords to {written}/{len(image_keywords)} image(s).",
+            file=sys.stderr,
+        )
     else:
-        print(f"\n{len(image_keywords)} image(s) have person keywords.")
-        print("Use --write-exif or --sidecar-only to write them to files.")
+        print(f"\n{len(image_keywords)} image(s) have person keywords.", file=sys.stderr)
+        print("Use --write-exif or --sidecar-only to write them to files.", file=sys.stderr)
     return 0
 
 

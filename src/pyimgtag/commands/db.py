@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 from pyimgtag.progress_db import ProgressDB
 
@@ -40,7 +41,7 @@ def cmd_reprocess(args: argparse.Namespace) -> int:
     finally:
         db.close()
 
-    print(f"Reset {count} entries for reprocessing.")
+    print(f"Reset {count} entries for reprocessing.", file=sys.stderr)
     return 0
 
 
@@ -53,7 +54,7 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
         db.close()
 
     if not candidates:
-        print("No cleanup candidates found.")
+        print("No cleanup candidates found.", file=sys.stderr)
         return 0
 
     label = "delete + review" if args.include_review else "delete"
