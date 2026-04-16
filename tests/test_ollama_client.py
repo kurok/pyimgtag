@@ -200,7 +200,8 @@ class TestPrepareImageRaw:
                 "pyimgtag.ollama_client.extract_raw_thumbnail", return_value=jpeg_path
             ) as mock_extract:
                 with patch("pyimgtag.ollama_client.is_heic", return_value=False):
-                    client._prepare_image(str(tmp_path / "IMG_001.cr2"))
+                    result = client._prepare_image(str(tmp_path / "IMG_001.cr2"))
+        assert isinstance(result, str) and len(result) > 0
         mock_extract.assert_called_once()
 
     def test_raw_falls_back_to_rawpy_when_exiftool_fails(self, tmp_path):
@@ -218,7 +219,8 @@ class TestPrepareImageRaw:
                         return_value=jpeg_path,
                     ) as mock_rawpy:
                         with patch("pyimgtag.ollama_client.is_heic", return_value=False):
-                            client._prepare_image(str(tmp_path / "IMG_001.cr2"))
+                            result = client._prepare_image(str(tmp_path / "IMG_001.cr2"))
+        assert isinstance(result, str) and len(result) > 0
         mock_rawpy.assert_called_once()
 
     def test_raw_raises_when_both_backends_fail(self, tmp_path):
