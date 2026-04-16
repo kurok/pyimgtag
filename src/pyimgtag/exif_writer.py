@@ -36,6 +36,29 @@ SUPPORTED_DIRECT_WRITE_EXTENSIONS: frozenset[str] = frozenset(
     }
 )
 
+# RAW formats that must always use an XMP sidecar — never in-file writes.
+# These formats have proprietary binary structures; exiftool can read them
+# but writing metadata directly risks corruption.  DNG is excluded because
+# it is a standardised, exiftool-safe format (it's in SUPPORTED_DIRECT_WRITE_EXTENSIONS).
+RAW_SIDECAR_ONLY_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".cr2",
+        ".cr3",
+        ".nef",
+        ".nrw",
+        ".arw",
+        ".sr2",
+        ".srf",
+        ".raf",
+        ".orf",
+        ".rw2",
+        ".pef",
+        ".3fr",
+        ".fff",
+        ".rwl",
+    }
+)
+
 
 def _read_date_fields(file_path: str) -> dict[str, str] | None:
     """Read existing date fields from the image so we can restore them after writing."""
