@@ -92,7 +92,7 @@ class TestBuildParser:
                 build_parser().parse_args(["run", "--help"])
         except SystemExit:
             pass
-        assert "cr2" in buf.getvalue().lower() or "raw" in buf.getvalue().lower()
+        assert "cr2" in buf.getvalue().lower()
 
     def test_run_dedup_flag(self):
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--dedup"])
