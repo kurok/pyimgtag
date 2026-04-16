@@ -11,10 +11,10 @@ import subprocess
 
 try:
     import photoscript
-
-    _HAS_PHOTOSCRIPT = True
 except ImportError:
-    _HAS_PHOTOSCRIPT = False
+    photoscript = None  # type: ignore[assignment]
+
+_HAS_PHOTOSCRIPT = photoscript is not None
 
 
 def _escape_applescript_string(value: str) -> str:
