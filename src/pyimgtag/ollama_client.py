@@ -160,7 +160,10 @@ class OllamaClient:
                     "format": _RESPONSE_SCHEMA,
                     "stream": False,
                     "think": False,
-                    "options": {"temperature": _MODEL_TEMPERATURE, "num_predict": _MODEL_MAX_TOKENS},
+                    "options": {
+                        "temperature": _MODEL_TEMPERATURE,
+                        "num_predict": _MODEL_MAX_TOKENS,
+                    },
                 },
                 timeout=self.timeout,
             )
