@@ -17,11 +17,13 @@ services:
       # Persist geocoder cache and progress DB across runs
       - pyimgtag-cache:/root/.cache/pyimgtag
     environment:
-      # Ollama URL — defaults to host machine via host-gateway
-      OLLAMA_URL: ${OLLAMA_URL:-http://host-gateway:11434}
+      # Ollama URL — defaults to host machine via host.docker.internal
+      # Works on Docker Desktop (Mac/Windows) and Linux Docker Engine 20.10+
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
     extra_hosts:
-      # Resolve host-gateway to the Docker host IP (Docker Engine 20.10+)
-      - host-gateway:host-gateway
+      # Resolve host.docker.internal to the Docker host IP (Docker Engine 20.10+)
+      # Docker Desktop on Mac/Windows already provides this alias automatically
+      - host.docker.internal:host-gateway
     # Default command: tag all images in /images
     # Override at runtime: docker compose run --rm pyimgtag status
     command: ["run", "--input-dir", "/images"]
