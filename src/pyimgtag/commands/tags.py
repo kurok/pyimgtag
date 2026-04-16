@@ -55,11 +55,15 @@ def _handle_tags_rename(args: argparse.Namespace) -> int:
             tag_counts = db.get_tag_counts()
             count = next((c for t, c in tag_counts if t == args.old_tag.lower()), 0)
             print(
-                f"[dry-run] Would rename '{args.old_tag}' → '{args.new_tag}' in {count} image(s)."
+                f"[dry-run] Would rename '{args.old_tag}' → '{args.new_tag}' in {count} image(s).",
+                file=sys.stderr,
             )
         else:
             count = db.rename_tag(args.old_tag, args.new_tag)
-            print(f"Renamed '{args.old_tag}' → '{args.new_tag}' in {count} image(s).")
+            print(
+                f"Renamed '{args.old_tag}' → '{args.new_tag}' in {count} image(s).",
+                file=sys.stderr,
+            )
     finally:
         db.close()
     return 0
@@ -72,10 +76,10 @@ def _handle_tags_delete(args: argparse.Namespace) -> int:
         if args.dry_run:
             tag_counts = db.get_tag_counts()
             count = next((c for t, c in tag_counts if t == args.tag.lower()), 0)
-            print(f"[dry-run] Would delete '{args.tag}' from {count} image(s).")
+            print(f"[dry-run] Would delete '{args.tag}' from {count} image(s).", file=sys.stderr)
         else:
             count = db.delete_tag(args.tag)
-            print(f"Deleted '{args.tag}' from {count} image(s).")
+            print(f"Deleted '{args.tag}' from {count} image(s).", file=sys.stderr)
     finally:
         db.close()
     return 0
@@ -90,11 +94,15 @@ def _handle_tags_merge(args: argparse.Namespace) -> int:
             count = next((c for t, c in tag_counts if t == args.source_tag.lower()), 0)
             print(
                 f"[dry-run] Would merge '{args.source_tag}' → '{args.target_tag}' "
-                f"in {count} image(s)."
+                f"in {count} image(s).",
+                file=sys.stderr,
             )
         else:
             count = db.merge_tags(args.source_tag, args.target_tag)
-            print(f"Merged '{args.source_tag}' → '{args.target_tag}' in {count} image(s).")
+            print(
+                f"Merged '{args.source_tag}' → '{args.target_tag}' in {count} image(s).",
+                file=sys.stderr,
+            )
     finally:
         db.close()
     return 0

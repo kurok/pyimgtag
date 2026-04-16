@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 from pyimgtag.progress_db import ProgressDB
 
@@ -33,7 +34,7 @@ def cmd_query(args: argparse.Namespace) -> int:
         db.close()
 
     if not results:
-        print("No images matched the given filters.")
+        print("No images matched the given filters.", file=sys.stderr)
         return 0
 
     fmt = args.format
@@ -66,5 +67,5 @@ def cmd_query(args: argparse.Namespace) -> int:
                 f"{path_str:<{col_path}}  {tags_str:<{col_tags}}  "
                 f"{cat_str:<{col_cat}}  {clean_str:<{col_clean}}"
             )
-        print(f"\n{len(results)} image(s) found.")
+        print(f"\n{len(results)} image(s) found.", file=sys.stderr)
     return 0

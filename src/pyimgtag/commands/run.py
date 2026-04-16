@@ -132,10 +132,10 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                 if args.dry_run:
                     if args.verbose:
                         target = "sidecar" if args.sidecar_only else "file"
-                        print(f"  [dry-run] Would write to {target}:")
+                        print(f"  [dry-run] Would write to {target}:", file=sys.stderr)
                         if rich_desc:
-                            print(f"    description: {rich_desc[:80]}")
-                        print(f"    keywords: {', '.join(result.tags)}")
+                            print(f"    description: {rich_desc[:80]}", file=sys.stderr)
+                        print(f"    keywords: {', '.join(result.tags)}", file=sys.stderr)
                 else:
                     _write_metadata(result, rich_desc, args)
 
@@ -324,35 +324,35 @@ def _print_brief(result: ImageResult, idx: int, total: int) -> None:
     if loc:
         parts.append(f"| {loc}")
     parts.append(f"| {status}")
-    print(" ".join(parts))
+    print(" ".join(parts), file=sys.stderr)
 
 
 def _print_verbose(result: ImageResult, idx: int, total: int) -> None:
-    print(f"[{idx}/{total}] {result.file_name}")
-    print(f"  Path:     {result.file_path}")
-    print(f"  Date:     {result.image_date or '(unknown)'}")
+    print(f"[{idx}/{total}] {result.file_name}", file=sys.stderr)
+    print(f"  Path:     {result.file_path}", file=sys.stderr)
+    print(f"  Date:     {result.image_date or '(unknown)'}", file=sys.stderr)
     tags = ", ".join(result.tags) if result.tags else "(none)"
-    print(f"  Tags:     {tags}")
+    print(f"  Tags:     {tags}", file=sys.stderr)
     if result.scene_summary:
-        print(f"  Summary:  {result.scene_summary}")
+        print(f"  Summary:  {result.scene_summary}", file=sys.stderr)
     if result.scene_category:
-        print(f"  Scene:    {result.scene_category}")
+        print(f"  Scene:    {result.scene_category}", file=sys.stderr)
     if result.emotional_tone:
-        print(f"  Tone:     {result.emotional_tone}")
+        print(f"  Tone:     {result.emotional_tone}", file=sys.stderr)
     if result.cleanup_class:
-        print(f"  Cleanup:  {result.cleanup_class}")
+        print(f"  Cleanup:  {result.cleanup_class}", file=sys.stderr)
     if result.has_text:
-        print("  Has text: yes")
+        print("  Has text: yes", file=sys.stderr)
         if result.text_summary:
-            print(f"  Text:     {result.text_summary}")
+            print(f"  Text:     {result.text_summary}", file=sys.stderr)
     if result.event_hint:
-        print(f"  Event:    {result.event_hint}")
+        print(f"  Event:    {result.event_hint}", file=sys.stderr)
     if result.significance:
-        print(f"  Signif.:  {result.significance}")
+        print(f"  Signif.:  {result.significance}", file=sys.stderr)
     if result.gps_lat is not None:
-        print(f"  GPS:      {result.gps_lat}, {result.gps_lon}")
+        print(f"  GPS:      {result.gps_lat}, {result.gps_lon}", file=sys.stderr)
     else:
-        print("  GPS:      (none)")
+        print("  GPS:      (none)", file=sys.stderr)
     loc_parts = [
         p
         for p in [
@@ -363,11 +363,11 @@ def _print_verbose(result: ImageResult, idx: int, total: int) -> None:
         ]
         if p
     ]
-    print(f"  Location: {', '.join(loc_parts) if loc_parts else '(none)'}")
-    print(f"  Status:   {result.processing_status}")
+    print(f"  Location: {', '.join(loc_parts) if loc_parts else '(none)'}", file=sys.stderr)
+    print(f"  Status:   {result.processing_status}", file=sys.stderr)
     if result.error_message:
-        print(f"  Error:    {result.error_message}")
-    print()
+        print(f"  Error:    {result.error_message}", file=sys.stderr)
+    print(file=sys.stderr)
 
 
 def _print_summary(stats: dict) -> None:
