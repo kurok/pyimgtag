@@ -121,3 +121,21 @@ jobs:
       run: python -m bandit -r src/pyimgtag/ -c pyproject.toml
     - name: Run pip-audit (dependency vulnerabilities)
       run: python -m pip_audit
+
+  # -------------------------------------------------------------------
+  # Docker image smoke test
+  # -------------------------------------------------------------------
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - name: Build Docker image
+      run: docker build -t pyimgtag:ci .
+    - name: Smoke test --help
+      run: docker run --rm pyimgtag:ci --help
+    - name: Smoke test --version
+      run: docker run --rm pyimgtag:ci --version
+    - name: Smoke test status subcommand
+      run: docker run --rm pyimgtag:ci status
+    - name: Verify exiftool is on PATH inside image
+      run: docker run --rm --entrypoint exiftool pyimgtag:ci -ver
