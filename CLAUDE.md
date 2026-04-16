@@ -62,10 +62,12 @@ tests/                 Unit tests (no network, no Ollama required)
 
 - ruff for linting & formatting (line length: 100, target py311)
 - Type hints on all public functions/methods
-- Google-style docstrings
+- Google-style docstrings on public API; not required on private helpers where the name is self-explanatory
 - Import sorting via ruff (isort rules)
+- `from __future__ import annotations` for modern type syntax
+- Use `X | None` instead of `Optional[X]`
 
-## Branch Naming (Enforced)
+## Branch Naming (Enforced by GitHub Ruleset)
 
 - `feature/` — new features (**NOT** `feat/`)
 - `fix/` — bug fixes
@@ -77,12 +79,80 @@ tests/                 Unit tests (no network, no Ollama required)
 - `release/` — release prep
 - `hotfix/` — urgent production fixes
 
+## Commit Messages (Conventional Commits)
+
+Format: `type(optional-scope): description`
+
+| Type | Semver | Use for |
+|---|---|---|
+| `feat:` | MINOR | New feature |
+| `fix:` | PATCH | Bug fix |
+| `perf:` | PATCH | Performance improvement |
+| `refactor:` | PATCH | Code change, no new feature/fix |
+| `docs:` | — | Documentation only |
+| `test:` | — | Tests only |
+| `chore:` | — | Maintenance, tooling |
+| `ci:` | — | CI/CD changes |
+| `style:` | — | Formatting, whitespace |
+
+Rules:
+- First line under **72 characters**
+- Imperative mood: "add", not "added" or "adds"
+- Start description with **lowercase**
+- **No period** at end of first line
+- Breaking changes: append `!` after type (`feat!:`) or add `BREAKING CHANGE:` footer
+
 ## Pull Request Requirements
 
+Enforced by GitHub ruleset:
 - 1 approving review required
-- All review threads resolved
-- Required linear history (squash/rebase merges only)
+- Code owner review required for `src/pyimgtag/` and `.github/` (`@kurok`)
+- Stale reviews dismissed on new push — re-approval needed
+- All review threads resolved before merge
+- Required linear history — squash or rebase only, no merge commits
 - Status check: `test (ubuntu-latest, 3.12)` must pass
+- CodeQL analysis must pass
+
+PR description must use the repo template (`.github/pull_request_template.md`):
+
+```markdown
+## Summary
+<!-- what and why -->
+
+## Changes
+- bullet list of changes
+
+## Related Issues
+<!-- Closes #123 -->
+
+## Testing
+- [ ] All existing tests pass (`pytest`)
+- [ ] New tests added for new functionality
+- [ ] Tested manually (describe what you tested)
+
+## Checklist
+- [ ] Commit message follows Conventional Commits
+- [ ] Code formatted and linted (`ruff format` + `ruff check`)
+- [ ] Type checking passes (`mypy`)
+- [ ] Pre-commit hooks pass (`pre-commit run --all-files`)
+- [ ] No unnecessary files or debug code included
+- [ ] Documentation updated if needed
+- [ ] No secrets, credentials, or personal paths in code
+```
+
+## Testing Rules
+
+- Tests must not require network access, Ollama, or external services
+- Tests run in parallel (`pytest-xdist`) — no shared state between tests
+- Use `tmp_path` fixture for all filesystem operations
+- 85% coverage threshold enforced in CI
+
+## Dependencies
+
+- Keep runtime dependencies minimal (currently: `requests`, `Pillow`, `imagehash`)
+- Optional features go in `[project.optional-dependencies]` in `pyproject.toml`
+- Guard optional imports with `try/except ImportError`
+- New dependencies require justification in the PR description
 
 ## CI Pipeline (5 Jobs)
 
@@ -102,17 +172,18 @@ tests/                 Unit tests (no network, no Ollama required)
    ruff format src/ tests/
    ruff check src/ tests/ --fix
    python -m pytest tests/ -v
-   python -m mypy src/pyimgtag/ --ignore-missing-imports
+   python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+   python -m bandit -r src/pyimgtag/ -c pyproject.toml
    pre-commit run --all-files
    ```
-5. Commit with Conventional Commits: `feat: add X`, `fix: resolve Y`
+5. Commit with Conventional Commits: `feat: add x`, `fix: resolve y`
 6. Push: `git push -u origin feature/descriptive-name`
-7. Create PR: `gh pr create --title "type: description"`
-8. Monitor: `gh run list --branch feature/descriptive-name`
+7. Create PR using the repo template: `gh pr create --title "type: description"`
+8. Monitor CI: `gh run list --branch feature/descriptive-name`
 
 ## Important Notes
 
-- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag cleanup`, `pyimgtag preflight`
+- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag cleanup`, `pyimgtag preflight`, `pyimgtag query`, `pyimgtag tags`
 - `--write-back` flag enables writing tags/description back to Apple Photos via AppleScript
 - One Ollama call per image with structured JSON prompt (rich metadata)
 - EXIF GPS is source of truth for location — model does not guess location
@@ -122,5 +193,4 @@ tests/                 Unit tests (no network, no Ollama required)
 - Never commit `.env` or secrets
 - Release: update version in `pyproject.toml` AND `src/pyimgtag/__init__.py`
 - Release automation triggers on `v*` tags
-- Tests run parallel — no shared state dependencies
 - Bandit skips: B404/B603/B607 (exiftool subprocess with fixed args)
