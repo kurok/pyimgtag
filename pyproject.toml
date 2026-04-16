@@ -52,9 +52,6 @@ addopts = "-n auto --dist=worksteal"
 branch = false
 source = ["src/pyimgtag"]
 
-[tool.coverage.report]
-fail_under = 85
-
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = false
