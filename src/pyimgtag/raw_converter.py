@@ -109,12 +109,7 @@ def extract_raw_thumbnail(
 
 def rawpy_available() -> bool:
     """Return True if rawpy is installed (install with: pip install pyimgtag[raw])."""
-    try:
-        import rawpy  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+    return rawpy is not None
 
 
 def convert_raw_with_rawpy(

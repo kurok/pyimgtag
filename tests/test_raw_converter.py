@@ -218,21 +218,8 @@ class TestRawpyAvailable:
         assert isinstance(result, bool)
 
     def test_returns_false_when_rawpy_not_importable(self):
-        original = sys.modules.get("rawpy", "ABSENT")
-        sys.modules["rawpy"] = None  # type: ignore[assignment]
-        try:
-            import importlib
-
-            import pyimgtag.raw_converter as rc
-
-            importlib.reload(rc)
-            assert rc.rawpy_available() is False
-        finally:
-            if original == "ABSENT":
-                del sys.modules["rawpy"]
-            else:
-                sys.modules["rawpy"] = original
-            importlib.reload(rc)
+        with patch.dict(sys.modules, {"rawpy": None}):
+            assert rawpy_available() is False
 
 
 class TestConvertRawWithRawpy:
