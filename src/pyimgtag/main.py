@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from platform import system as get_platform_name
@@ -39,7 +40,11 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--photos-library", help="Path to an Apple Photos library package")
 
     run_p.add_argument("--model", default="gemma4:e4b", help="Ollama model (default: gemma4:e4b)")
-    run_p.add_argument("--ollama-url", default="http://localhost:11434", help="Ollama base URL")
+    run_p.add_argument(
+        "--ollama-url",
+        default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+        help="Ollama base URL",
+    )
     run_p.add_argument(
         "--max-dim",
         type=int,
@@ -122,7 +127,9 @@ def build_parser() -> argparse.ArgumentParser:
         "preflight", help="Run preflight checks for prerequisites and exit"
     )
     preflight_p.add_argument(
-        "--ollama-url", default="http://localhost:11434", help="Ollama base URL"
+        "--ollama-url",
+        default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+        help="Ollama base URL",
     )
     preflight_p.add_argument(
         "--model", default="gemma4:e4b", help="Ollama model (default: gemma4:e4b)"

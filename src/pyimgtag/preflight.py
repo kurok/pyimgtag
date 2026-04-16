@@ -65,7 +65,10 @@ def check_exiftool() -> tuple[bool, str]:
         version = result.stdout.strip()
         return (True, f"exiftool {version} is installed")
     except FileNotFoundError:
-        return (False, "exiftool is not installed. Install: brew install exiftool")
+        return (
+            False,
+            "exiftool is not installed. See https://exiftool.org for install instructions.",
+        )
     except Exception as e:
         return (False, f"exiftool check failed: {e}")
 

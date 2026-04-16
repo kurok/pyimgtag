@@ -1,0 +1,32 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Dev environment
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Test outputs
+.coverage
+junit.xml
+htmlcov/
+
+# Docs / plans
+docs/
+
+# CI / IDE
+.github/
+.claude/
+.idea/
+.vscode/
+
+# Runtime cache (mount as volume instead)
+.cache/

@@ -1,0 +1,34 @@
+# pyimgtag docker-compose
+#
+# Usage:
+#   IMAGES_DIR=/path/to/photos docker compose run --rm pyimgtag run --input-dir /images
+#
+# Optional overrides:
+#   OLLAMA_URL=http://192.168.1.10:11434   # if Ollama is on another machine
+#   CACHE_DIR=/custom/cache/path           # override default named volume
+
+services:
+  pyimgtag:
+    build: .
+    image: pyimgtag:latest
+    volumes:
+      # Mount your image directory read-only at /images
+      - ${IMAGES_DIR:?Set IMAGES_DIR to your photos path}:/images:ro
+      # Persist geocoder cache and progress DB across runs
+      - pyimgtag-cache:/root/.cache/pyimgtag
+    environment:
+      # Ollama URL — defaults to host machine via host.docker.internal
+      # Works on Docker Desktop (Mac/Windows) and Linux Docker Engine 20.10+
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      # Resolve host.docker.internal to the Docker host IP (Docker Engine 20.10+)
+      # Docker Desktop on Mac/Windows already provides this alias automatically
+      - host.docker.internal:host-gateway
+    # Default command: tag all images in /images
+    # Override at runtime: docker compose run --rm pyimgtag status
+    command: ["run", "--input-dir", "/images"]
+
+volumes:
+  pyimgtag-cache:
+    # Override with: CACHE_DIR=/host/path docker compose ...
+    # and mount manually if you prefer a bind mount over a named volume
