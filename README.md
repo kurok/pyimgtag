@@ -104,6 +104,31 @@ brew install exiftool
 
 **Note:** Most features work cross-platform. Apple Photos integration is macOS-only since it requires macOS-specific AppleScript functionality.
 
+### Cross-Platform Examples
+
+**Linux/Windows (export folders only):**
+```bash
+# Tag exported images with EXIF writing
+pyimgtag run --input-dir /mnt/photos \
+  --output-json results.json \
+  --write-exif  # If exiftool is installed
+
+# Tags and descriptions stored in results.json and EXIF
+```
+
+**macOS (both export folders and Photos library):**
+```bash
+# Tag Photos library with direct write-back to Photos app
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+  --write-back  # Push tags/descriptions to Apple Photos
+
+# Or export folder with both EXIF and JSON output
+pyimgtag run --input-dir ~/Downloads/exported \
+  --write-exif --output-json results.json
+```
+
+The tool gracefully handles missing features—if you use `--write-back` on Linux/Windows, it will warn you and proceed without it.
+
 ## Usage
 
 ### Subcommands
