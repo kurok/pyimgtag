@@ -223,6 +223,62 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preview keyword changes without writing",
     )
 
+    # --- query subcommand ---
+    query_p = subparsers.add_parser("query", help="Query images with advanced filters")
+    query_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    query_p.add_argument("--tag", help="Filter by tag (case-insensitive substring match)")
+    query_text_grp = query_p.add_mutually_exclusive_group()
+    query_text_grp.add_argument(
+        "--has-text", action="store_true", default=False, help="Only images with detected text"
+    )
+    query_text_grp.add_argument(
+        "--no-text", action="store_true", default=False, help="Only images without detected text"
+    )
+    query_p.add_argument(
+        "--cleanup", metavar="CLASS", help="Filter by cleanup_class (e.g. delete, review)"
+    )
+    query_p.add_argument("--scene-category", help="Filter by scene_category (exact match)")
+    query_p.add_argument("--city", help="Filter by nearest_city (case-insensitive substring)")
+    query_p.add_argument("--country", help="Filter by nearest_country (case-insensitive substring)")
+    query_p.add_argument("--status", choices=["ok", "error"], help="Filter by processing status")
+    query_p.add_argument(
+        "--format",
+        choices=["table", "json", "paths"],
+        default="table",
+        help="Output format (default: table)",
+    )
+    query_p.add_argument("--limit", type=int, help="Max results to return")
+
+    # --- tags subcommand group ---
+    tags_p = subparsers.add_parser("tags", help="Manage tags across the image database")
+    tags_sub = tags_p.add_subparsers(dest="tags_action")
+
+    # tags list
+    tags_list_p = tags_sub.add_parser("list", help="List all tags with image counts")
+    tags_list_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+
+    # tags rename
+    tags_rename_p = tags_sub.add_parser("rename", help="Rename a tag across all images")
+    tags_rename_p.add_argument("old_tag", help="Tag to rename")
+    tags_rename_p.add_argument("new_tag", help="Replacement tag")
+    tags_rename_p.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    tags_rename_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+
+    # tags delete
+    tags_delete_p = tags_sub.add_parser("delete", help="Delete a tag from all images")
+    tags_delete_p.add_argument("tag", help="Tag to delete")
+    tags_delete_p.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    tags_delete_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+
+    # tags merge
+    tags_merge_p = tags_sub.add_parser(
+        "merge", help="Merge source tag into target tag across all images"
+    )
+    tags_merge_p.add_argument("source_tag", help="Tag to replace")
+    tags_merge_p.add_argument("target_tag", help="Tag to add (source is removed)")
+    tags_merge_p.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    tags_merge_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+
     return p
 
 
@@ -254,6 +310,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.subcommand == "faces":
         return _handle_faces(args)
+
+    if args.subcommand == "query":
+        return _handle_query(args)
+
+    if args.subcommand == "tags":
+        return _handle_tags(args)
 
     # Should never reach here
     parser.print_help()
@@ -719,6 +781,161 @@ def _write_person_keywords(
         return write_xmp_sidecar(image_path, keywords=keywords)
 
     return write_exif_description(image_path, keywords=keywords, merge=True)
+
+
+def _handle_query(args: argparse.Namespace) -> int:
+    """Execute the query subcommand."""
+    import json as _json
+
+    db = ProgressDB(db_path=args.db)
+    try:
+        has_text: bool | None = None
+        if args.has_text:
+            has_text = True
+        elif args.no_text:
+            has_text = False
+
+        results = db.query_images(
+            tag=args.tag,
+            has_text=has_text,
+            cleanup_class=args.cleanup,
+            scene_category=args.scene_category,
+            city=args.city,
+            country=args.country,
+            status=args.status,
+            limit=args.limit,
+        )
+    finally:
+        db.close()
+
+    if not results:
+        print("No images matched the given filters.")
+        return 0
+
+    fmt = args.format
+    if fmt == "paths":
+        for r in results:
+            print(r["file_path"])
+    elif fmt == "json":
+        print(_json.dumps(results, indent=2))
+    else:
+        # table format
+        col_path = 50
+        col_tags = 40
+        col_cat = 15
+        col_clean = 8
+        header = (
+            f"{'PATH':<{col_path}}  {'TAGS':<{col_tags}}  "
+            f"{'CATEGORY':<{col_cat}}  {'CLEANUP':<{col_clean}}"
+        )
+        print(header)
+        print("-" * len(header))
+        for r in results:
+            path_str = (
+                r["file_path"][-col_path:] if len(r["file_path"]) > col_path else r["file_path"]
+            )
+            tags_str = ", ".join(r["tags_list"])
+            tags_str = tags_str[:col_tags] if len(tags_str) > col_tags else tags_str
+            cat_str = (r["scene_category"] or "")[:col_cat]
+            clean_str = (r["cleanup_class"] or "")[:col_clean]
+            print(
+                f"{path_str:<{col_path}}  {tags_str:<{col_tags}}  "
+                f"{cat_str:<{col_cat}}  {clean_str:<{col_clean}}"
+            )
+        print(f"\n{len(results)} image(s) found.")
+    return 0
+
+
+def _handle_tags(args: argparse.Namespace) -> int:
+    """Dispatch tags subcommands."""
+    if not hasattr(args, "tags_action") or args.tags_action is None:
+        print("Usage: pyimgtag tags <list|rename|delete|merge>", file=sys.stderr)
+        return 1
+    if args.tags_action == "list":
+        return _handle_tags_list(args)
+    if args.tags_action == "rename":
+        return _handle_tags_rename(args)
+    if args.tags_action == "delete":
+        return _handle_tags_delete(args)
+    if args.tags_action == "merge":
+        return _handle_tags_merge(args)
+    print(f"Unknown tags action: {args.tags_action}", file=sys.stderr)
+    return 1
+
+
+def _handle_tags_list(args: argparse.Namespace) -> int:
+    """List all tags with image counts."""
+    db = ProgressDB(db_path=args.db)
+    try:
+        counts = db.get_tag_counts()
+    finally:
+        db.close()
+
+    if not counts:
+        print("No tags found.")
+        return 0
+
+    col_tag = max(len(t) for t, _ in counts)
+    col_tag = max(col_tag, 4)
+    print(f"{'TAG':<{col_tag}}  COUNT")
+    print("-" * (col_tag + 8))
+    for tag, count in counts:
+        print(f"{tag:<{col_tag}}  {count}")
+    print(f"\n{len(counts)} unique tag(s).")
+    return 0
+
+
+def _handle_tags_rename(args: argparse.Namespace) -> int:
+    """Rename a tag across all images."""
+    db = ProgressDB(db_path=args.db)
+    try:
+        if args.dry_run:
+            tag_counts = db.get_tag_counts()
+            count = next((c for t, c in tag_counts if t == args.old_tag.lower()), 0)
+            print(
+                f"[dry-run] Would rename '{args.old_tag}' → '{args.new_tag}' in {count} image(s)."
+            )
+        else:
+            count = db.rename_tag(args.old_tag, args.new_tag)
+            print(f"Renamed '{args.old_tag}' → '{args.new_tag}' in {count} image(s).")
+    finally:
+        db.close()
+    return 0
+
+
+def _handle_tags_delete(args: argparse.Namespace) -> int:
+    """Delete a tag from all images."""
+    db = ProgressDB(db_path=args.db)
+    try:
+        if args.dry_run:
+            tag_counts = db.get_tag_counts()
+            count = next((c for t, c in tag_counts if t == args.tag.lower()), 0)
+            print(f"[dry-run] Would delete '{args.tag}' from {count} image(s).")
+        else:
+            count = db.delete_tag(args.tag)
+            print(f"Deleted '{args.tag}' from {count} image(s).")
+    finally:
+        db.close()
+    return 0
+
+
+def _handle_tags_merge(args: argparse.Namespace) -> int:
+    """Merge source tag into target tag across all images."""
+    db = ProgressDB(db_path=args.db)
+    try:
+        if args.dry_run:
+            tag_counts = db.get_tag_counts()
+            count = next((c for t, c in tag_counts if t == args.source_tag.lower()), 0)
+            print(
+                f"[dry-run] Would merge '{args.source_tag}' → '{args.target_tag}' "
+                f"in {count} image(s)."
+            )
+        else:
+            count = db.merge_tags(args.source_tag, args.target_tag)
+            print(f"Merged '{args.source_tag}' → '{args.target_tag}' in {count} image(s).")
+    finally:
+        db.close()
+    return 0
 
 
 def _process_one(

@@ -610,3 +610,270 @@ class TestFacesApplySubcommand:
         out = capsys.readouterr().out
         assert "person:Charlie" in out
         assert "Use --write-exif or --sidecar-only" in out
+
+
+class TestQueryParserArgs:
+    def test_query_parses(self):
+        args = build_parser().parse_args(["query"])
+        assert args.subcommand == "query"
+
+    def test_query_tag_flag(self):
+        args = build_parser().parse_args(["query", "--tag", "cat"])
+        assert args.tag == "cat"
+
+    def test_query_has_text_flag(self):
+        args = build_parser().parse_args(["query", "--has-text"])
+        assert args.has_text is True
+
+    def test_query_no_text_flag(self):
+        args = build_parser().parse_args(["query", "--no-text"])
+        assert args.no_text is True
+
+    def test_query_has_text_and_no_text_mutually_exclusive(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(["query", "--has-text", "--no-text"])
+
+    def test_query_cleanup_flag(self):
+        args = build_parser().parse_args(["query", "--cleanup", "delete"])
+        assert args.cleanup == "delete"
+
+    def test_query_city_flag(self):
+        args = build_parser().parse_args(["query", "--city", "Berlin"])
+        assert args.city == "Berlin"
+
+    def test_query_country_flag(self):
+        args = build_parser().parse_args(["query", "--country", "DE"])
+        assert args.country == "DE"
+
+    def test_query_format_default(self):
+        args = build_parser().parse_args(["query"])
+        assert args.format == "table"
+
+    def test_query_format_json(self):
+        args = build_parser().parse_args(["query", "--format", "json"])
+        assert args.format == "json"
+
+    def test_query_format_paths(self):
+        args = build_parser().parse_args(["query", "--format", "paths"])
+        assert args.format == "paths"
+
+    def test_query_limit_flag(self):
+        args = build_parser().parse_args(["query", "--limit", "20"])
+        assert args.limit == 20
+
+    def test_query_db_flag(self):
+        args = build_parser().parse_args(["query", "--db", "/tmp/x.db"])
+        assert args.db == "/tmp/x.db"
+
+    def test_query_status_flag(self):
+        args = build_parser().parse_args(["query", "--status", "error"])
+        assert args.status == "error"
+
+
+class TestTagsParserArgs:
+    def test_tags_list_parses(self):
+        args = build_parser().parse_args(["tags", "list"])
+        assert args.subcommand == "tags"
+        assert args.tags_action == "list"
+
+    def test_tags_rename_parses(self):
+        args = build_parser().parse_args(["tags", "rename", "cat", "feline"])
+        assert args.tags_action == "rename"
+        assert args.old_tag == "cat"
+        assert args.new_tag == "feline"
+
+    def test_tags_rename_dry_run(self):
+        args = build_parser().parse_args(["tags", "rename", "cat", "feline", "--dry-run"])
+        assert args.dry_run is True
+
+    def test_tags_delete_parses(self):
+        args = build_parser().parse_args(["tags", "delete", "cat"])
+        assert args.tags_action == "delete"
+        assert args.tag == "cat"
+
+    def test_tags_delete_dry_run(self):
+        args = build_parser().parse_args(["tags", "delete", "cat", "--dry-run"])
+        assert args.dry_run is True
+
+    def test_tags_merge_parses(self):
+        args = build_parser().parse_args(["tags", "merge", "cat", "animal"])
+        assert args.tags_action == "merge"
+        assert args.source_tag == "cat"
+        assert args.target_tag == "animal"
+
+    def test_tags_merge_dry_run(self):
+        args = build_parser().parse_args(["tags", "merge", "cat", "animal", "--dry-run"])
+        assert args.dry_run is True
+
+    def test_tags_db_flag(self):
+        args = build_parser().parse_args(["tags", "list", "--db", "/tmp/x.db"])
+        assert args.db == "/tmp/x.db"
+
+
+class TestQuerySubcommand:
+    def _make_db(self, tmp_path):
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        for name, tags, city, country, cleanup in [
+            ("a.jpg", ["cat", "indoor"], "Kyiv", "UA", None),
+            ("b.jpg", ["dog", "outdoor"], "Berlin", "DE", "delete"),
+        ]:
+            img = tmp_path / name
+            img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name=name,
+                    tags=tags,
+                    nearest_city=city,
+                    nearest_country=country,
+                    cleanup_class=cleanup,
+                ),
+            )
+        db.close()
+        return str(tmp_path / "test.db")
+
+    def test_query_empty_db_exits_zero(self, tmp_path, capsys):
+        db_path = str(tmp_path / "empty.db")
+        result = main(["query", "--db", db_path])
+        assert result == 0
+
+    def test_query_table_format(self, tmp_path, capsys):
+        db_path = self._make_db(tmp_path)
+        result = main(["query", "--db", db_path])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "PATH" in out
+        assert "2 image(s) found" in out
+
+    def test_query_paths_format(self, tmp_path, capsys):
+        db_path = self._make_db(tmp_path)
+        result = main(["query", "--db", db_path, "--format", "paths"])
+        assert result == 0
+        out = capsys.readouterr().out
+        lines = [ln for ln in out.strip().splitlines() if ln]
+        assert len(lines) == 2
+
+    def test_query_json_format(self, tmp_path, capsys):
+        import json
+
+        db_path = self._make_db(tmp_path)
+        result = main(["query", "--db", db_path, "--format", "json"])
+        assert result == 0
+        data = json.loads(capsys.readouterr().out)
+        assert len(data) == 2
+
+    def test_query_filter_by_tag(self, tmp_path, capsys):
+        db_path = self._make_db(tmp_path)
+        result = main(["query", "--db", db_path, "--tag", "cat"])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "1 image(s) found" in out
+
+    def test_query_filter_by_cleanup(self, tmp_path, capsys):
+        db_path = self._make_db(tmp_path)
+        result = main(["query", "--db", db_path, "--cleanup", "delete"])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "1 image(s) found" in out
+
+
+class TestTagsSubcommand:
+    def _make_db(self, tmp_path):
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        for name, tags in [("a.jpg", ["cat", "indoor"]), ("b.jpg", ["cat", "outdoor"])]:
+            img = tmp_path / name
+            img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=name, tags=tags))
+        db.close()
+        return str(tmp_path / "test.db")
+
+    def test_tags_list_exits_zero(self, tmp_path, capsys):
+        db_path = self._make_db(tmp_path)
+        result = main(["tags", "list", "--db", db_path])
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "cat" in out
+        assert "2" in out
+
+    def test_tags_list_empty_db(self, tmp_path, capsys):
+        db_path = str(tmp_path / "empty.db")
+        result = main(["tags", "list", "--db", db_path])
+        assert result == 0
+        assert "No tags" in capsys.readouterr().out
+
+    def test_tags_rename_updates_db(self, tmp_path, capsys):
+        db_path = self._make_db(tmp_path)
+        result = main(["tags", "rename", "cat", "feline", "--db", db_path])
+        assert result == 0
+        assert "2 image(s)" in capsys.readouterr().out
+
+    def test_tags_rename_dry_run_does_not_modify(self, tmp_path, capsys):
+        from pyimgtag.progress_db import ProgressDB
+
+        db_path = self._make_db(tmp_path)
+        main(["tags", "rename", "cat", "feline", "--dry-run", "--db", db_path])
+        out = capsys.readouterr().out
+        assert "[dry-run]" in out
+        # DB should be unchanged
+        db = ProgressDB(db_path=db_path)
+        counts = dict(db.get_tag_counts())
+        db.close()
+        assert "cat" in counts
+
+    def test_tags_delete_removes_tag(self, tmp_path, capsys):
+        from pyimgtag.progress_db import ProgressDB
+
+        db_path = self._make_db(tmp_path)
+        result = main(["tags", "delete", "cat", "--db", db_path])
+        assert result == 0
+        db = ProgressDB(db_path=db_path)
+        counts = dict(db.get_tag_counts())
+        db.close()
+        assert "cat" not in counts
+
+    def test_tags_delete_dry_run_does_not_modify(self, tmp_path, capsys):
+        from pyimgtag.progress_db import ProgressDB
+
+        db_path = self._make_db(tmp_path)
+        main(["tags", "delete", "cat", "--dry-run", "--db", db_path])
+        out = capsys.readouterr().out
+        assert "[dry-run]" in out
+        db = ProgressDB(db_path=db_path)
+        counts = dict(db.get_tag_counts())
+        db.close()
+        assert "cat" in counts
+
+    def test_tags_merge_updates_db(self, tmp_path, capsys):
+        from pyimgtag.progress_db import ProgressDB
+
+        db_path = self._make_db(tmp_path)
+        result = main(["tags", "merge", "cat", "animal", "--db", db_path])
+        assert result == 0
+        db = ProgressDB(db_path=db_path)
+        counts = dict(db.get_tag_counts())
+        db.close()
+        assert "cat" not in counts
+        assert counts.get("animal", 0) == 2
+
+    def test_tags_no_action_returns_error(self, tmp_path):
+        result = main(["tags"])
+        assert result == 1
+
+    def test_tags_merge_dry_run_does_not_modify(self, tmp_path, capsys):
+        from pyimgtag.progress_db import ProgressDB
+
+        db_path = self._make_db(tmp_path)
+        main(["tags", "merge", "cat", "animal", "--dry-run", "--db", db_path])
+        out = capsys.readouterr().out
+        assert "[dry-run]" in out
+        db = ProgressDB(db_path=db_path)
+        counts = dict(db.get_tag_counts())
+        db.close()
+        assert "cat" in counts
