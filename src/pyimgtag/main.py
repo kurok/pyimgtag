@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Only scan the top-level directory (do not descend into subdirectories)",
     )
+    run_p.add_argument(
+        "--newest-first",
+        action="store_true",
+        help="Process newest files first (by modification time)",
+    )
 
     # --- status subcommand ---
     status_p = subparsers.add_parser("status", help="Show progress stats from the DB")
@@ -188,6 +193,9 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
     if not files:
         print("No image files found.", file=sys.stderr)
         return 0
+
+    if args.newest_first:
+        files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
 
     # --- dedup ---
     phash_map: dict[str, str] = {}

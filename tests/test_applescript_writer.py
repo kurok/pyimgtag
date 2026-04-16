@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from pyimgtag.applescript_writer import (
     _build_applescript,
     _escape_applescript_string,
+    _write_via_photoscript,
     is_applescript_available,
     write_to_photos,
 )
@@ -142,7 +143,9 @@ def _make_completed_process(returncode: int = 0, stdout: str = "", stderr: str =
     return mock
 
 
+@patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False)
 class TestWriteToPhotos:
+    # Tests for the osascript fallback path (photoscript disabled).
     # Patch both is_applescript_available (True) and subprocess.run for all tests
     # that test the actual write path.
 
@@ -350,3 +353,107 @@ class TestWriteToPhotos:
 
         script = captured[0]
         assert "\\\\" in script
+
+
+# ---------------------------------------------------------------------------
+# photoscript backend
+# ---------------------------------------------------------------------------
+
+
+class TestWriteViaPhotoscript:
+    def test_success_sets_keywords_and_description(self):
+        mock_photo = MagicMock()
+        mock_photo.filename = "photo.jpg"
+        mock_lib = MagicMock()
+        mock_lib.search.return_value = [mock_photo]
+
+        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = _write_via_photoscript("photo.jpg", ["sunset", "beach"], "Nice photo")
+
+        assert result is None
+        assert mock_photo.keywords == ["sunset", "beach"]
+        assert mock_photo.description == "Nice photo"
+
+    def test_success_with_title(self):
+        mock_photo = MagicMock()
+        mock_photo.filename = "photo.jpg"
+        mock_lib = MagicMock()
+        mock_lib.search.return_value = [mock_photo]
+
+        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = _write_via_photoscript("photo.jpg", ["tag"], None, title="My Title")
+
+        assert result is None
+        assert mock_photo.title == "My Title"
+
+    def test_no_match_returns_error(self):
+        mock_lib = MagicMock()
+        mock_lib.search.return_value = []
+
+        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = _write_via_photoscript("missing.jpg", ["tag"], None)
+
+        assert result is not None
+        assert "missing.jpg" in result
+
+    def test_filters_to_exact_filename(self):
+        photo1 = MagicMock()
+        photo1.filename = "photo.jpg"
+        photo2 = MagicMock()
+        photo2.filename = "other_photo.jpg"
+        mock_lib = MagicMock()
+        mock_lib.search.return_value = [photo1, photo2]
+
+        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = _write_via_photoscript("photo.jpg", ["tag"], None)
+
+        assert result is None
+        assert photo1.keywords == ["tag"]
+
+    def test_exception_returns_error(self):
+        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.side_effect = Exception("Photos not running")
+            result = _write_via_photoscript("photo.jpg", ["tag"], None)
+
+        assert result is not None
+        assert "Photos not running" in result
+
+    def test_skips_description_when_none(self):
+        mock_photo = MagicMock()
+        mock_photo.filename = "photo.jpg"
+        # Reset the description attribute so we can check it wasn't set
+        mock_photo.description = "original"
+        mock_lib = MagicMock()
+        mock_lib.search.return_value = [mock_photo]
+
+        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            _write_via_photoscript("photo.jpg", ["tag"], None)
+
+        # description should not have been reassigned
+        assert mock_photo.description == "original"
+
+
+class TestWriteToPhotosBackendSelection:
+    def test_uses_photoscript_when_available(self):
+        with patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True):
+            with patch(
+                "pyimgtag.applescript_writer._write_via_photoscript", return_value=None
+            ) as mock_ps:
+                result = write_to_photos("/path/photo.jpg", ["tag"], "desc")
+                assert result is None
+                mock_ps.assert_called_once_with("photo.jpg", ["tag"], "desc", title=None)
+
+    def test_falls_back_to_osascript(self):
+        with patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False):
+            with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
+                with patch(
+                    "pyimgtag.applescript_writer.subprocess.run",
+                    return_value=_make_completed_process(0),
+                ):
+                    result = write_to_photos("/path/photo.jpg", ["tag"], None)
+                    assert result is None

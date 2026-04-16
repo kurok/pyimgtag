@@ -1,7 +1,8 @@
 """EXIF metadata reader with GPS and date extraction.
 
 Uses exiftool subprocess as primary backend (handles JPEG + HEIC reliably on
-macOS) and falls back to Pillow when exiftool is not installed.
+macOS), exifread as a pure-Python middle tier (good for JPEG/TIFF/PNG without
+system deps), and falls back to Pillow when neither is available.
 """
 
 from __future__ import annotations
@@ -16,6 +17,11 @@ from PIL import Image
 from pyimgtag.models import ExifData
 
 try:
+    import exifread
+except ImportError:
+    exifread = None  # type: ignore[assignment]
+
+try:
     import pillow_heif
 
     pillow_heif.register_heif_opener()
@@ -24,9 +30,15 @@ except ImportError:
 
 
 def read_exif(file_path: str | Path) -> ExifData:
-    """Read EXIF GPS and date from an image file."""
+    """Read EXIF GPS and date from an image file.
+
+    Tries backends in order: exiftool → exifread → Pillow.
+    """
     path = Path(file_path)
     result = _read_exiftool(path)
+    if result is not None:
+        return result
+    result = _read_exifread(path)
     if result is not None:
         return result
     return _read_pillow(path)
@@ -75,6 +87,63 @@ def _read_exiftool(path: Path) -> ExifData | None:
         )
     except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# exifread backend (pure Python, zero system deps)
+# ---------------------------------------------------------------------------
+
+
+def _read_exifread(path: Path) -> ExifData | None:
+    """Read EXIF via exifread.  Returns None if exifread is not installed or fails."""
+    if exifread is None:
+        return None
+    try:
+        with open(path, "rb") as f:
+            tags = exifread.process_file(f, details=False)
+        if not tags:
+            return None
+
+        lat, lon, has_gps = _exifread_gps(tags)
+
+        date_str = None
+        date_tag = tags.get("EXIF DateTimeOriginal") or tags.get("EXIF DateTimeDigitized")
+        if date_tag:
+            date_str = str(date_tag)
+        date_iso = _parse_exif_date(date_str) if date_str else None
+        if date_iso is None:
+            date_iso = _get_file_date(path)
+
+        return ExifData(gps_lat=lat, gps_lon=lon, date_original=date_iso, has_gps=has_gps)
+    except Exception:
+        return None
+
+
+def _exifread_gps(tags: dict) -> tuple[float | None, float | None, bool]:
+    """Extract GPS lat/lon from exifread tags."""
+    lat_tag = tags.get("GPS GPSLatitude")
+    lat_ref = tags.get("GPS GPSLatitudeRef")
+    lon_tag = tags.get("GPS GPSLongitude")
+    lon_ref = tags.get("GPS GPSLongitudeRef")
+    if lat_tag is None or lon_tag is None:
+        return None, None, False
+    try:
+        lat = _exifread_dms_to_decimal(lat_tag.values, str(lat_ref) if lat_ref else "N")
+        lon = _exifread_dms_to_decimal(lon_tag.values, str(lon_ref) if lon_ref else "E")
+        return lat, lon, True
+    except (TypeError, ValueError, ZeroDivisionError, IndexError, AttributeError):
+        return None, None, False
+
+
+def _exifread_dms_to_decimal(values: list, ref: str) -> float:
+    """Convert exifread DMS Ratio values to decimal degrees."""
+    d = float(values[0])
+    m = float(values[1])
+    s = float(values[2])
+    decimal = d + m / 60.0 + s / 3600.0
+    if ref.strip().upper() in ("S", "W"):
+        decimal = -decimal
+    return round(decimal, 6)
 
 
 # ---------------------------------------------------------------------------

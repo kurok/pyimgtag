@@ -105,6 +105,14 @@ class TestBuildParser:
         args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
         assert args.no_recursive is False
 
+    def test_run_newest_first_flag(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--newest-first"])
+        assert args.newest_first is True
+
+    def test_run_newest_first_default_false(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
+        assert args.newest_first is False
+
     def test_run_output_flags(self):
         args = build_parser().parse_args(
             [
