@@ -19,8 +19,12 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         python-version: "3.12"
+    - name: Create virtual environment
+      run: |
+        uv venv
+        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
     - name: Install dependencies
-      run: uv pip install --system -e ".[dev,lint]"
+      run: uv pip install -e ".[dev,lint]"
     - name: Check formatting with ruff
       run: ruff format --check .
     - name: Lint with ruff
@@ -38,8 +42,12 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         python-version: "3.12"
+    - name: Create virtual environment
+      run: |
+        uv venv
+        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
     - name: Install pre-commit
-      run: uv pip install --system pre-commit
+      run: uv pip install pre-commit
     - name: Run pre-commit on all files
       run: pre-commit run --all-files
 
@@ -62,8 +70,12 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Create virtual environment
+      run: |
+        uv venv
+        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
     - name: Install dependencies
-      run: uv pip install --system -e ".[dev,lint]"
+      run: uv pip install -e ".[dev,lint]"
     - name: Run tests
       run: |
         pytest \
@@ -91,8 +103,12 @@ jobs:
     - uses: astral-sh/setup-uv@v5
       with:
         python-version: "3.12"
+    - name: Create virtual environment
+      run: |
+        uv venv
+        echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
     - name: Install dependencies
-      run: uv pip install --system -e ".[security]"
+      run: uv pip install -e ".[security]"
     - name: Run bandit (security linter)
       run: python -m bandit -r src/pyimgtag/ -c pyproject.toml
     - name: Run pip-audit (dependency vulnerabilities)
