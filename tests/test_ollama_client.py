@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from pyimgtag.ollama_client import _build_prompt_with_context, _parse_response
+from pyimgtag.ollama_client import (
+    _RESPONSE_SCHEMA,
+    _build_prompt_with_context,
+    _parse_response,
+)
 
 
 class TestParseResponse:
@@ -123,10 +127,43 @@ class TestBuildPromptWithContext:
 
     def test_empty_dict_returns_base(self):
         prompt = _build_prompt_with_context({})
-        assert "Return compact JSON only." in prompt
+        assert "Tag this image" in prompt
         assert "Context" not in prompt
 
     def test_partial_location(self):
         prompt = _build_prompt_with_context({"city": "Tokyo"})
         assert "Location: Tokyo" in prompt
         assert "- GPS:" not in prompt
+
+
+class TestResponseSchema:
+    def test_schema_has_required_fields(self):
+        assert "tags" in _RESPONSE_SCHEMA["properties"]
+        assert "summary" in _RESPONSE_SCHEMA["properties"]
+        assert "scene_category" in _RESPONSE_SCHEMA["properties"]
+        assert "emotional_tone" in _RESPONSE_SCHEMA["properties"]
+        assert "cleanup_class" in _RESPONSE_SCHEMA["properties"]
+        assert "has_text" in _RESPONSE_SCHEMA["properties"]
+        assert "event_hint" in _RESPONSE_SCHEMA["properties"]
+        assert "significance" in _RESPONSE_SCHEMA["properties"]
+
+    def test_tags_is_array_of_strings(self):
+        tags = _RESPONSE_SCHEMA["properties"]["tags"]
+        assert tags["type"] == "array"
+        assert tags["items"]["type"] == "string"
+
+    def test_enums_match_validation(self):
+        from pyimgtag.ollama_client import (
+            _CLEANUP_CLASS_ALLOWED,
+            _EMOTIONAL_TONE_ALLOWED,
+            _EVENT_HINT_ALLOWED,
+            _SCENE_CATEGORY_ALLOWED,
+            _SIGNIFICANCE_ALLOWED,
+        )
+
+        props = _RESPONSE_SCHEMA["properties"]
+        assert set(props["scene_category"]["enum"]) == _SCENE_CATEGORY_ALLOWED
+        assert set(props["emotional_tone"]["enum"]) == _EMOTIONAL_TONE_ALLOWED
+        assert set(props["cleanup_class"]["enum"]) == _CLEANUP_CLASS_ALLOWED
+        assert set(props["event_hint"]["enum"]) == _EVENT_HINT_ALLOWED
+        assert set(props["significance"]["enum"]) == _SIGNIFICANCE_ALLOWED

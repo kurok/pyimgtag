@@ -1,8 +1,8 @@
-"""Tests for ImageResult.build_description."""
+"""Tests for ImageResult.build_description and normalize_tags."""
 
 from __future__ import annotations
 
-from pyimgtag.models import ImageResult
+from pyimgtag.models import ImageResult, normalize_tags
 
 
 class TestBuildDescription:
@@ -67,3 +67,36 @@ class TestBuildDescription:
     def test_empty_summary_returns_none(self):
         r = ImageResult(scene_summary="")
         assert r.build_description() is None
+
+
+class TestNormalizeTags:
+    def test_lowercases(self):
+        assert normalize_tags(["Sunset", "BEACH"]) == ["sunset", "beach"]
+
+    def test_strips_whitespace(self):
+        assert normalize_tags(["  sunset ", " beach"]) == ["sunset", "beach"]
+
+    def test_deduplicates(self):
+        assert normalize_tags(["sunset", "Sunset", "SUNSET"]) == ["sunset"]
+
+    def test_caps_at_max(self):
+        tags = ["a", "b", "c", "d", "e", "f", "g"]
+        assert len(normalize_tags(tags)) == 5
+
+    def test_custom_max(self):
+        tags = ["a", "b", "c", "d", "e"]
+        assert len(normalize_tags(tags, max_tags=3)) == 3
+
+    def test_skips_empty(self):
+        assert normalize_tags(["sunset", "", None, "beach"]) == ["sunset", "beach"]
+
+    def test_preserves_order(self):
+        assert normalize_tags(["zebra", "apple", "mango"]) == ["zebra", "apple", "mango"]
+
+    def test_empty_input(self):
+        assert normalize_tags([]) == []
+
+    def test_dedup_case_insensitive_keeps_first(self):
+        result = normalize_tags(["Beach", "beach", "BEACH"])
+        assert result == ["beach"]
+        assert len(result) == 1

@@ -24,11 +24,13 @@ dependencies = [
     "requests>=2.28",
     "Pillow>=10.0",
     "imagehash>=4.3.1",
+    "exifread>=3.0",
 ]
 
 [project.optional-dependencies]
 heic = ["pillow-heif>=0.10.0"]
-all = ["pillow-heif>=0.10.0"]
+photos = ["photoscript>=0.5.3"]
+all = ["pillow-heif>=0.10.0", "photoscript>=0.5.3"]
 dev = ["pytest>=9.0", "pytest-xdist>=3.0", "pytest-cov>=4.0"]
 lint = ["mypy>=1.0", "ruff>=0.1.0"]
 security = ["bandit>=1.7", "pip-audit>=2.6"]

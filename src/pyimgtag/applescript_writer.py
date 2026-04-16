@@ -1,9 +1,20 @@
-"""Write tags and description back to Apple Photos via AppleScript."""
+"""Write tags and description back to Apple Photos.
+
+Uses photoscript (Python wrapper around Photos AppleScript) when available,
+falls back to raw osascript subprocess.
+"""
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+
+try:
+    import photoscript
+except ImportError:
+    photoscript = None  # type: ignore[assignment]
+
+_HAS_PHOTOSCRIPT = photoscript is not None
 
 
 def _escape_applescript_string(value: str) -> str:
@@ -67,34 +78,41 @@ def _build_applescript(
     return script
 
 
-def write_to_photos(
-    file_path: str,
+def _write_via_photoscript(
+    file_name: str,
     tags: list[str],
     summary: str | None,
     title: str | None = None,
 ) -> str | None:
-    """Set keywords, description, and title on a photo in Apple Photos via AppleScript.
+    """Write to Photos using photoscript library."""
+    try:
+        photos_app = photoscript.PhotosLibrary()
+        results = photos_app.search(file_name)
+        # Filter to exact filename match
+        matched = [p for p in results if p.filename == file_name]
+        if not matched:
+            return f"No Photos item found with filename: {file_name}"
+        photo = matched[0]
+        photo.keywords = tags
+        if summary is not None:
+            photo.description = summary
+        if title is not None:
+            photo.title = title
+        return None
+    except Exception as exc:
+        return f"photoscript error: {exc}"
 
-    Uses the bare filename extracted from ``file_path`` to locate the photo in
-    Photos. This is a best-effort match: if multiple library items share the
-    same filename the first match is updated; if none are found an error is
-    returned.
 
-    Args:
-        file_path: Full path to the image (only the basename is used for lookup).
-        tags: List of keyword strings to assign to the photo.
-        summary: Optional description/caption text. Skipped when ``None``.
-        title: Optional title text. Skipped when ``None``.
-
-    Returns:
-        ``None`` on success, or an error message string on failure.
-    """
+def _write_via_osascript(
+    file_name: str,
+    tags: list[str],
+    summary: str | None,
+    title: str | None = None,
+) -> str | None:
+    """Write to Photos using raw osascript subprocess."""
     if not is_applescript_available():
         return "osascript is not available on this system"
 
-    import os
-
-    file_name = os.path.basename(file_path)
     script = _build_applescript(file_name, tags, summary, title=title)
 
     try:
@@ -118,6 +136,35 @@ def write_to_photos(
         )
 
     return None
+
+
+def write_to_photos(
+    file_path: str,
+    tags: list[str],
+    summary: str | None,
+    title: str | None = None,
+) -> str | None:
+    """Set keywords, description, and title on a photo in Apple Photos.
+
+    Uses photoscript when installed (cleaner API, better error handling),
+    falls back to raw AppleScript subprocess.
+
+    Args:
+        file_path: Full path to the image (only the basename is used for lookup).
+        tags: List of keyword strings to assign to the photo.
+        summary: Optional description/caption text. Skipped when ``None``.
+        title: Optional title text. Skipped when ``None``.
+
+    Returns:
+        ``None`` on success, or an error message string on failure.
+    """
+    import os
+
+    file_name = os.path.basename(file_path)
+
+    if _HAS_PHOTOSCRIPT:
+        return _write_via_photoscript(file_name, tags, summary, title=title)
+    return _write_via_osascript(file_name, tags, summary, title=title)
 
 
 def is_applescript_available() -> bool:

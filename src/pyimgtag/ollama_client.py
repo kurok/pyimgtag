@@ -16,7 +16,7 @@ import requests
 from PIL import Image
 
 from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic, sips_available
-from pyimgtag.models import TagResult
+from pyimgtag.models import TagResult, normalize_tags
 
 try:
     import pillow_heif
@@ -25,25 +25,65 @@ try:
 except ImportError:
     pass
 
+_RESPONSE_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "tags": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": 5,
+        },
+        "summary": {"type": "string"},
+        "scene_category": {
+            "type": "string",
+            "enum": [
+                "indoor_home",
+                "indoor_work",
+                "outdoor_leisure",
+                "outdoor_travel",
+                "transport",
+                "other",
+            ],
+        },
+        "emotional_tone": {
+            "type": "string",
+            "enum": ["positive", "neutral", "negative", "mixed"],
+        },
+        "cleanup_class": {
+            "type": "string",
+            "enum": ["keep", "review", "delete"],
+        },
+        "has_text": {"type": "boolean"},
+        "text_summary": {"type": "string"},
+        "event_hint": {
+            "type": "string",
+            "enum": ["outing", "gathering", "work", "travel", "daily", "other"],
+        },
+        "significance": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+        },
+    },
+    "required": [
+        "tags",
+        "summary",
+        "scene_category",
+        "emotional_tone",
+        "cleanup_class",
+        "has_text",
+        "event_hint",
+        "significance",
+    ],
+}
+
 _PROMPT_BASE = (
-    "Return compact JSON only. "
-    "Identify 1 to 5 major visible tags for this image. "
-    "Use short lowercase nouns or noun phrases. "
-    "Do not guess people names. "
-    "Do not infer exact city from image content. "
-    "Rules for extra fields:\n"
-    "- scene_category: one of indoor_home, indoor_work, outdoor_leisure, outdoor_travel, "
-    "transport, other\n"
-    "- emotional_tone: one of positive, neutral, negative, mixed\n"
-    "- cleanup_class: keep (clear value), review (uncertain), "
-    "delete (blurry/duplicate/screenshot junk)\n"
-    "- has_text: true if image contains readable text, else false\n"
-    "- text_summary: brief summary of readable text if has_text is true, else omit\n"
-    "- event_hint: one of outing, gathering, work, travel, daily, other\n"
-    "- significance: one of high, medium, low\n"
-    'Schema: {"tags":["..."], "summary":"...", "scene_category":"...", '
-    '"emotional_tone":"...", "cleanup_class":"...", "has_text":false, '
-    '"text_summary":"...", "event_hint":"...", "significance":"..."}'
+    "Tag this image for a photo gallery. "
+    "1-5 short lowercase noun phrase tags. "
+    "No people names. No city guesses from image content. "
+    "cleanup_class: keep (clear value), review (uncertain), "
+    "delete (blurry/duplicate/screenshot junk). "
+    "text_summary: only if has_text is true."
 )
 
 
@@ -63,32 +103,16 @@ def _build_prompt_with_context(context: dict) -> str:
         return _PROMPT_BASE
     ctx_block = "\n".join(ctx_lines)
     return (
-        "Return compact JSON only.\n"
         "Tag this image for a photo gallery.\n\n"
         "Context (use to improve tag relevance, not as tags themselves):\n"
         f"{ctx_block}\n\n"
-        "Rules:\n"
-        "- 1 to 5 tags maximum\n"
-        "- short lowercase noun phrases\n"
-        "- prefer broad useful tags over overly specific ones\n"
-        "- ignore small background objects\n"
-        "- no names\n"
-        "- no place guesses from image content "
-        "(location context above is from GPS metadata)\n"
-        "- no explanation\n\n"
-        "Rules for extra fields:\n"
-        "- scene_category: one of indoor_home, indoor_work, outdoor_leisure, outdoor_travel, "
-        "transport, other\n"
-        "- emotional_tone: one of positive, neutral, negative, mixed\n"
-        "- cleanup_class: keep (clear value), review (uncertain), "
-        "delete (blurry/duplicate/screenshot junk)\n"
-        "- has_text: true if image contains readable text, else false\n"
-        "- text_summary: brief summary of readable text if has_text is true, else omit\n"
-        "- event_hint: one of outing, gathering, work, travel, daily, other\n"
-        "- significance: one of high, medium, low\n\n"
-        'Schema: {"tags":["..."], "summary":"...", "scene_category":"...", '
-        '"emotional_tone":"...", "cleanup_class":"...", "has_text":false, '
-        '"text_summary":"...", "event_hint":"...", "significance":"..."}'
+        "Rules: 1-5 short lowercase noun phrase tags. "
+        "Prefer broad useful tags. Ignore small background objects. "
+        "No names. No place guesses from image content "
+        "(location context above is from GPS metadata). "
+        "cleanup_class: keep (clear value), review (uncertain), "
+        "delete (blurry/duplicate/screenshot junk). "
+        "text_summary: only if has_text is true."
     )
 
 
@@ -124,9 +148,10 @@ class OllamaClient:
                     "messages": [
                         {"role": "user", "content": prompt, "images": [img_b64]},
                     ],
+                    "format": _RESPONSE_SCHEMA,
                     "stream": False,
                     "think": False,
-                    "options": {"temperature": 0.1, "num_predict": 512},
+                    "options": {"temperature": 0.3, "num_predict": 512},
                 },
                 timeout=self.timeout,
             )
@@ -207,10 +232,10 @@ def _parse_response(text: str) -> TagResult:
     if parsed is None:
         return TagResult(raw_response=raw, error="Could not parse JSON from model response")
 
-    tags = parsed.get("tags", [])
-    if not isinstance(tags, list):
-        tags = []
-    tags = [str(t).lower().strip() for t in tags if t][:5]
+    raw_tags = parsed.get("tags", [])
+    if not isinstance(raw_tags, list):
+        raw_tags = []
+    tags = normalize_tags(raw_tags)
 
     summary = parsed.get("summary")
     if summary and not isinstance(summary, str):

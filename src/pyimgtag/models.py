@@ -4,6 +4,36 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+DEFAULT_MAX_TAGS = 5
+
+
+def normalize_tags(
+    tags: list[str],
+    max_tags: int = DEFAULT_MAX_TAGS,
+) -> list[str]:
+    """Normalize a list of tags: lowercase, strip whitespace, deduplicate, cap count.
+
+    Args:
+        tags: Raw tag strings from model output.
+        max_tags: Maximum number of tags to return.
+
+    Returns:
+        Cleaned, deduplicated, capped list preserving original order.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for t in tags:
+        if not t:
+            continue
+        cleaned = str(t).lower().strip()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        result.append(cleaned)
+        if len(result) >= max_tags:
+            break
+    return result
+
 
 @dataclass
 class ExifData:
