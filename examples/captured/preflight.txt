@@ -1,0 +1,6 @@
+$ pyimgtag preflight --input-dir examples/fixtures --ollama-url http://127.0.0.1:11435
+Preflight checks:
+  [FAIL] Ollama is not reachable at http://127.0.0.1:11435: 501 Server Error: Unsupported method ('GET') for url: http://127.0.0.1:11435/api/tags
+  [FAIL] Cannot check model: Ollama not reachable
+  [PASS] exiftool 12.62 is installed
+  [PASS] Directory accessible (7 files)

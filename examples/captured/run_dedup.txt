@@ -1,0 +1,16 @@
+$ pyimgtag run --input-dir examples/fixtures --dedup
+[1/6] blurry_screenshot.jpg -> sunset, beach, ocean, waves, golden-hour | ok
+Warning: Ollama is not reachable at http://127.0.0.1:11435: 501 Server Error: Unsupported method ('GET') for url: http://127.0.0.1:11435/api/tags
+Computing perceptual hashes...
+Found 1 duplicate groups (5 images skipped, keeping 1 per group)
+
+--- Summary ---
+  Scanned:          6
+  Processed:        1
+  Skipped (date):   0
+  Skipped (no GPS): 0
+  Skipped (no file):0
+  Skipped (cached): 0
+  Skipped (dedup):  5
+  Model failures:   0
+  Geocode failures: 0

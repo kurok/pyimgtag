@@ -1,0 +1,55 @@
+$ pyimgtag run --input-dir examples/fixtures --limit 3 --dry-run --verbose
+[1/3] blurry_screenshot.jpg
+  Path:     /Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/examples/fixtures/blurry_screenshot.jpg
+  Date:     (unknown)
+  Tags:     sunset, beach, ocean, waves, golden-hour
+  Summary:  golden hour sunset over the Pacific Ocean
+  Scene:    outdoor_leisure
+  Tone:     positive
+  Cleanup:  keep
+  Event:    outing
+  Signif.:  high
+  GPS:      (none)
+  Location: (none)
+  Status:   ok
+
+[2/3] city_walk.jpg
+  Path:     /Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/examples/fixtures/city_walk.jpg
+  Date:     (unknown)
+  Tags:     street, architecture, city, people
+  Summary:  busy Paris street with classic Haussmann buildings
+  Scene:    outdoor_travel
+  Tone:     neutral
+  Cleanup:  keep
+  Event:    travel
+  Signif.:  medium
+  GPS:      48.8566, 2.35219722222222
+  Location: Paris, Paris, Île-de-France, France
+  Status:   ok
+
+[3/3] home_dinner.jpg
+  Path:     /Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/examples/fixtures/home_dinner.jpg
+  Date:     (unknown)
+  Tags:     food, dinner, candles, family
+  Summary:  family dinner with candles on a wooden table
+  Scene:    indoor_home
+  Tone:     positive
+  Cleanup:  keep
+  Event:    gathering
+  Signif.:  high
+  GPS:      51.5073972222222, -0.1278
+  Location: City of Westminster, England, United Kingdom
+  Status:   ok
+
+Warning: Ollama is not reachable at http://127.0.0.1:11435: 501 Server Error: Unsupported method ('GET') for url: http://127.0.0.1:11435/api/tags
+
+--- Summary ---
+  Scanned:          6
+  Processed:        3
+  Skipped (date):   0
+  Skipped (no GPS): 0
+  Skipped (no file):0
+  Skipped (cached): 0
+  Skipped (dedup):  0
+  Model failures:   0
+  Geocode failures: 0

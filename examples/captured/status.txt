@@ -1,0 +1,5 @@
+$ pyimgtag status
+Progress: 6 / 6 (100%)
+  ok:      6
+  error:   0
+  pending: 0

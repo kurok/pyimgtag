@@ -1,0 +1,5 @@
+$ pyimgtag cleanup --include-review
+Cleanup candidates (delete + review): 2
+
+  [delete]  /Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/examples/fixtures/mountain_hike.jpg  | 2026-04-16  | tags: screenshot, text, blurry
+  [review]  /Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/examples/fixtures/sunset_beach.jpg  | 2026-04-16  | tags: office, meeting, laptop, whiteboard

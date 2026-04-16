@@ -1,0 +1,4 @@
+$ pyimgtag cleanup
+Cleanup candidates (delete): 1
+
+  [delete]  /Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/examples/fixtures/mountain_hike.jpg  | 2026-04-16  | tags: screenshot, text, blurry
