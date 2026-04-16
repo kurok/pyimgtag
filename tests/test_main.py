@@ -81,6 +81,19 @@ class TestBuildParser:
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--extensions", "jpg,png"])
         assert args.extensions == "jpg,png"
 
+    def test_run_extensions_raw_example_in_help(self):
+        """RAW extensions should appear somewhere reachable in the help output."""
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf):
+                build_parser().parse_args(["run", "--help"])
+        except SystemExit:
+            pass
+        assert "cr2" in buf.getvalue().lower() or "raw" in buf.getvalue().lower()
+
     def test_run_dedup_flag(self):
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--dedup"])
         assert args.dedup is True

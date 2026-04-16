@@ -57,7 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--date-from", help="Process images from this date (YYYY-MM-DD)")
     run_p.add_argument("--date-to", help="Process images up to this date (YYYY-MM-DD)")
     run_p.add_argument(
-        "--extensions", default="jpg,jpeg,heic,png", help="Comma-separated extensions"
+        "--extensions",
+        default="jpg,jpeg,heic,png",
+        help=(
+            "Comma-separated file extensions to scan (default: jpg,jpeg,heic,png). "
+            "Add RAW formats as needed, e.g. jpg,jpeg,cr2,nef,arw,dng,raf,orf,rw2"
+        ),
     )
     run_p.add_argument("--skip-no-gps", action="store_true", help="Skip images without GPS data")
     run_p.add_argument("--dry-run", action="store_true", help="Read-only mode, print results only")
