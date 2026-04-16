@@ -1,8 +1,8 @@
-"""Tests for ImageResult.build_description and normalize_tags."""
+"""Tests for ImageResult.build_description, normalize_tags, and face dataclasses."""
 
 from __future__ import annotations
 
-from pyimgtag.models import ImageResult, normalize_tags
+from pyimgtag.models import FaceDetection, ImageResult, PersonCluster, normalize_tags
 
 
 class TestBuildDescription:
@@ -100,3 +100,32 @@ class TestNormalizeTags:
         result = normalize_tags(["Beach", "beach", "BEACH"])
         assert result == ["beach"]
         assert len(result) == 1
+
+
+class TestFaceDetection:
+    def test_defaults(self):
+        d = FaceDetection()
+        assert d.image_path == ""
+        assert d.bbox_x == 0
+        assert d.confidence == 0.0
+
+    def test_custom_values(self):
+        d = FaceDetection(
+            image_path="/a.jpg", bbox_x=10, bbox_y=20, bbox_w=50, bbox_h=60, confidence=0.99
+        )
+        assert d.bbox_w == 50
+        assert d.confidence == 0.99
+
+
+class TestPersonCluster:
+    def test_defaults(self):
+        p = PersonCluster()
+        assert p.label == ""
+        assert p.confirmed is False
+        assert p.face_ids == []
+
+    def test_face_ids_not_shared(self):
+        p1 = PersonCluster()
+        p2 = PersonCluster()
+        p1.face_ids.append(1)
+        assert p2.face_ids == []
