@@ -24,9 +24,17 @@ _DATE_TAGS = [
 ]
 
 # File extensions that support direct in-file metadata writes via exiftool.
-SUPPORTED_DIRECT_WRITE_EXTENSIONS: frozenset[str] = frozenset({
-    ".jpg", ".jpeg", ".heic", ".png", ".tiff", ".tif", ".dng",
-})
+SUPPORTED_DIRECT_WRITE_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".jpg",
+        ".jpeg",
+        ".heic",
+        ".png",
+        ".tiff",
+        ".tif",
+        ".dng",
+    }
+)
 
 
 def _read_date_fields(file_path: str) -> dict[str, str] | None:
@@ -233,9 +241,12 @@ def read_existing_metadata(file_path: str) -> dict[str, object]:
     try:
         proc = subprocess.run(  # noqa: S603
             [
-                "exiftool", "-json",
-                "-Description", "-ImageDescription",
-                "-Keywords", "-Subject",
+                "exiftool",
+                "-json",
+                "-Description",
+                "-ImageDescription",
+                "-Keywords",
+                "-Subject",
                 target,
             ],
             capture_output=True,

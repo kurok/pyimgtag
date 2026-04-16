@@ -185,9 +185,7 @@ class TestBuildParser:
         assert args.metadata_format == "auto"
 
     def test_run_metadata_format_xmp(self):
-        args = build_parser().parse_args(
-            ["run", "--input-dir", "/tmp", "--metadata-format", "xmp"]
-        )
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--metadata-format", "xmp"])
         assert args.metadata_format == "xmp"
 
     def test_run_metadata_format_iptc(self):
