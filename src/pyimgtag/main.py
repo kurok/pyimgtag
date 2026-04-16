@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from platform import system as get_platform_name
 
 from pyimgtag import __version__
 from pyimgtag.exif_reader import read_exif
@@ -73,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument(
         "--write-back",
         action="store_true",
-        help="Write tags and description back to Apple Photos (only with --photos-library)",
+        help="Write tags/description back to Apple Photos (macOS + --photos-library only)",
     )
     run_p.add_argument(
         "--write-exif",
@@ -168,6 +169,12 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
 
     if args.write_back and args.input_dir:
         print("Warning: --write-back has no effect with --input-dir", file=sys.stderr)
+
+    if args.write_back and get_platform_name() != "Darwin":
+        print(
+            "Warning: --write-back requires macOS; feature is disabled on this system",
+            file=sys.stderr,
+        )
 
     if args.write_exif and args.dry_run:
         print("Warning: --write-exif ignored in --dry-run mode", file=sys.stderr)

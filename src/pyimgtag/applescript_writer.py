@@ -1,13 +1,14 @@
 """Write tags and description back to Apple Photos.
 
 Uses photoscript (Python wrapper around Photos AppleScript) when available,
-falls back to raw osascript subprocess.
+falls back to raw osascript subprocess. Only available on macOS.
 """
 
 from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 
 try:
     import photoscript
@@ -15,6 +16,19 @@ except ImportError:
     photoscript = None  # type: ignore[assignment]
 
 _HAS_PHOTOSCRIPT = photoscript is not None
+_IS_MACOS = sys.platform == "darwin"
+
+
+def is_applescript_available() -> bool:
+    """Return True if AppleScript write-back is available (macOS only).
+
+    AppleScript functionality requires:
+    1. Running on macOS
+    2. osascript being available on the system path
+    """
+    if not _IS_MACOS:
+        return False
+    return shutil.which("osascript") is not None
 
 
 def _escape_applescript_string(value: str) -> str:
@@ -146,6 +160,8 @@ def write_to_photos(
 ) -> str | None:
     """Set keywords, description, and title on a photo in Apple Photos.
 
+    **macOS only.** Returns an error on non-macOS systems.
+
     Uses photoscript when installed (cleaner API, better error handling),
     falls back to raw AppleScript subprocess.
 
@@ -160,13 +176,12 @@ def write_to_photos(
     """
     import os
 
+    # AppleScript write-back is only available on macOS
+    if not _IS_MACOS:
+        return "Apple Photos write-back is only available on macOS"
+
     file_name = os.path.basename(file_path)
 
     if _HAS_PHOTOSCRIPT:
         return _write_via_photoscript(file_name, tags, summary, title=title)
     return _write_via_osascript(file_name, tags, summary, title=title)
-
-
-def is_applescript_available() -> bool:
-    """Return True if osascript is available on this system."""
-    return shutil.which("osascript") is not None
