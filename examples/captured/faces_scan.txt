@@ -1,0 +1,24 @@
+$ pyimgtag faces scan --input-dir examples/fixtures
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/src/pyimgtag/__main__.py", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/src/pyimgtag/main.py", line 317, in main
+    return _handle_faces(args)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/src/pyimgtag/main.py", line 599, in _handle_faces
+    return _handle_faces_scan(args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/src/pyimgtag/main.py", line 640, in _handle_faces_scan
+    count = scan_and_store(file_path, db, max_dim=args.max_dim, model=args.detection_model)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/src/pyimgtag/face_embedding.py", line 90, in scan_and_store
+    faces = detect_faces(image_path, max_dim=max_dim, model=model)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/src/pyimgtag/face_detection.py", line 72, in detect_faces
+    _check_face_recognition()
+  File "/Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/src/pyimgtag/face_detection.py", line 23, in _check_face_recognition
+    raise ImportError(
+ImportError: face_recognition is not installed. Install the [face] extra: pip install pyimgtag[face]

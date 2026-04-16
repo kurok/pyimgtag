@@ -1,0 +1,2 @@
+$ pyimgtag tags rename golden-hour golden_hour
+Renamed 'golden-hour' → 'golden_hour' in 1 image(s).

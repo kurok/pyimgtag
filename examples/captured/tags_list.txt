@@ -1,0 +1,30 @@
+$ pyimgtag tags list
+TAG           COUNT
+--------------------
+alpine        1
+architecture  1
+beach         1
+blurry        1
+candles       1
+city          1
+dinner        1
+family        1
+food          1
+golden-hour   1
+hiking        1
+laptop        1
+meeting       1
+mountain      1
+ocean         1
+office        1
+people        1
+screenshot    1
+snow          1
+street        1
+sunset        1
+text          1
+trail         1
+waves         1
+whiteboard    1
+
+25 unique tag(s).

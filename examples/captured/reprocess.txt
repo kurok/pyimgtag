@@ -1,0 +1,2 @@
+$ pyimgtag reprocess --status error
+Reset 0 entries for reprocessing.

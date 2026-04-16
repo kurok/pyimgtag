@@ -1,0 +1,16 @@
+$ pyimgtag run --input-dir examples/fixtures
+[1/6] mountain_hike.jpg -> screenshot, text, blurry | Sachseln, Schweiz/Suisse/Svizzera/Svizra | ok
+[2/6] office_meeting.jpg -> mountain, hiking, snow, alpine, trail | New York, United States | ok
+[3/6] sunset_beach.jpg -> office, meeting, laptop, whiteboard | San Francisco, United States | ok
+Warning: Ollama is not reachable at http://127.0.0.1:11435: 501 Server Error: Unsupported method ('GET') for url: http://127.0.0.1:11435/api/tags
+
+--- Summary ---
+  Scanned:          6
+  Processed:        3
+  Skipped (date):   0
+  Skipped (no GPS): 0
+  Skipped (no file):0
+  Skipped (cached): 3
+  Skipped (dedup):  0
+  Model failures:   0
+  Geocode failures: 0

@@ -1,0 +1,11 @@
+$ pyimgtag query --format table
+PATH                                                TAGS                                      CATEGORY         CLEANUP
+-----------------------------------------------------------------------------------------------------------------------
+wiki-guide/examples/fixtures/blurry_screenshot.jpg  sunset, beach, ocean, waves, golden-hour  outdoor_leisure  keep
+es/docs-wiki-guide/examples/fixtures/city_walk.jpg  street, architecture, city, people        outdoor_travel   keep
+/docs-wiki-guide/examples/fixtures/home_dinner.jpg  food, dinner, candles, family             indoor_home      keep
+ocs-wiki-guide/examples/fixtures/mountain_hike.jpg  screenshot, text, blurry                  other            delete
+cs-wiki-guide/examples/fixtures/office_meeting.jpg  mountain, hiking, snow, alpine, trail     outdoor_leisure  keep
+docs-wiki-guide/examples/fixtures/sunset_beach.jpg  office, meeting, laptop, whiteboard       indoor_work      review
+
+6 image(s) found.

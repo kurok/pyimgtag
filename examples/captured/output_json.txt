@@ -1,0 +1,33 @@
+$ pyimgtag run --input-dir examples/fixtures --output-json results.json
+# results.json (first entry)
+{
+  "file_path": "/Users/yuriyr/work/pyimgtag/.worktrees/docs-wiki-guide/examples/fixtures/blurry_screenshot.jpg",
+  "file_name": "blurry_screenshot.jpg",
+  "source_type": "directory",
+  "is_local": true,
+  "image_date": null,
+  "tags": [
+    "sunset",
+    "beach",
+    "ocean",
+    "waves",
+    "golden-hour"
+  ],
+  "scene_summary": "golden hour sunset over the Pacific Ocean",
+  "gps_lat": null,
+  "gps_lon": null,
+  "nearest_place": null,
+  "nearest_city": null,
+  "nearest_region": null,
+  "nearest_country": null,
+  "processing_status": "ok",
+  "error_message": null,
+  "phash": null,
+  "scene_category": "outdoor_leisure",
+  "emotional_tone": "positive",
+  "cleanup_class": "keep",
+  "has_text": false,
+  "text_summary": null,
+  "event_hint": "outing",
+  "significance": "high"
+}
