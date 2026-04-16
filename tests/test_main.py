@@ -557,6 +557,7 @@ class TestFacesReviewSubcommand:
 
 class TestFacesClusterSubcommand:
     def test_cluster_empty_db(self, tmp_path, capsys):
+        pytest.importorskip("sklearn", reason="scikit-learn not installed")
         db_path = str(tmp_path / "test.db")
         result = main(["faces", "cluster", "--db", db_path])
         assert result == 0
