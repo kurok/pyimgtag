@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pyimgtag.raw_converter import RAW_EXTENSIONS, extract_raw_thumbnail, is_raw
+from pyimgtag.raw_converter import (
+    RAW_EXTENSIONS,
+    convert_raw_with_rawpy,
+    extract_raw_thumbnail,
+    is_raw,
+    rawpy_available,
+)
 
 
 class TestIsRaw:
@@ -203,3 +210,74 @@ class TestExtractRawThumbnail:
 
         assert result.exists()
         assert call_count[0] == 3
+
+
+class TestRawpyAvailable:
+    def test_returns_bool(self):
+        result = rawpy_available()
+        assert isinstance(result, bool)
+
+    def test_returns_false_when_rawpy_not_importable(self):
+        original = sys.modules.get("rawpy", "ABSENT")
+        sys.modules["rawpy"] = None  # type: ignore[assignment]
+        try:
+            import importlib
+
+            import pyimgtag.raw_converter as rc
+
+            importlib.reload(rc)
+            assert rc.rawpy_available() is False
+        finally:
+            if original == "ABSENT":
+                del sys.modules["rawpy"]
+            else:
+                sys.modules["rawpy"] = original
+            importlib.reload(rc)
+
+
+class TestConvertRawWithRawpy:
+    def test_raises_when_rawpy_not_installed(self, tmp_path):
+        with patch("pyimgtag.raw_converter.rawpy_available", return_value=False):
+            with pytest.raises(RuntimeError, match="rawpy is not installed"):
+                convert_raw_with_rawpy("photo.cr2", output_dir=tmp_path)
+
+    def test_raises_when_input_not_found(self, tmp_path):
+        with patch("pyimgtag.raw_converter.rawpy_available", return_value=True):
+            with pytest.raises(FileNotFoundError):
+                convert_raw_with_rawpy(tmp_path / "nonexistent.cr2", output_dir=tmp_path)
+
+    def test_output_stem_is_raw(self, tmp_path):
+        import numpy as np
+
+        fake_cr2 = tmp_path / "IMG_001.cr2"
+        fake_cr2.write_bytes(b"\x00" * 16)
+        mock_rgb_array = np.zeros((10, 10, 3), dtype=np.uint8)
+        mock_raw = MagicMock()
+        mock_raw.__enter__ = MagicMock(return_value=mock_raw)
+        mock_raw.__exit__ = MagicMock(return_value=False)
+        mock_raw.postprocess.return_value = mock_rgb_array
+        mock_rawpy = MagicMock()
+        mock_rawpy.imread.return_value = mock_raw
+        with patch("pyimgtag.raw_converter.rawpy_available", return_value=True):
+            with patch.dict(sys.modules, {"rawpy": mock_rawpy}):
+                result = convert_raw_with_rawpy(fake_cr2, output_dir=tmp_path)
+        assert result.stem == "IMG_001_raw"
+        assert result.suffix == ".jpg"
+
+    def test_output_file_is_written(self, tmp_path):
+        import numpy as np
+
+        fake_cr2 = tmp_path / "photo.cr2"
+        fake_cr2.write_bytes(b"\x00" * 16)
+        mock_rgb_array = np.zeros((10, 10, 3), dtype=np.uint8)
+        mock_raw = MagicMock()
+        mock_raw.__enter__ = MagicMock(return_value=mock_raw)
+        mock_raw.__exit__ = MagicMock(return_value=False)
+        mock_raw.postprocess.return_value = mock_rgb_array
+        mock_rawpy = MagicMock()
+        mock_rawpy.imread.return_value = mock_raw
+        with patch("pyimgtag.raw_converter.rawpy_available", return_value=True):
+            with patch.dict(sys.modules, {"rawpy": mock_rawpy}):
+                result = convert_raw_with_rawpy(fake_cr2, output_dir=tmp_path)
+        assert result.exists()
+        assert result.stat().st_size > 0
