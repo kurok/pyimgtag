@@ -23,7 +23,7 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim with local disk cache
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `status`, `reprocess`, `cleanup`, `preflight`
+- Subcommands: `run`, `status`, `reprocess`, `cleanup`, `preflight`, `query`, `tags`
 - Dry-run mode, date/limit filters, JSON/CSV export
 - SQLite progress DB with schema versioning for incremental re-runs
 
@@ -225,6 +225,35 @@ pyimgtag cleanup --include-review
 #   [delete]  /path/to/screenshot.png    | 2026-04-01  | tags: screenshot, text
 ```
 
+#### `pyimgtag query` — search tagged images
+
+```bash
+# Search by tag
+pyimgtag query --tag sunset
+
+# Search by location
+pyimgtag query --location "San Francisco"
+
+# Output as JSON
+pyimgtag query --tag beach --output-json matches.json
+```
+
+#### `pyimgtag tags` — manage tags
+
+```bash
+# List all tags with image counts
+pyimgtag tags list
+
+# Rename a tag across all images
+pyimgtag tags rename old-name new-name
+
+# Delete a tag from all images
+pyimgtag tags delete unwanted-tag --dry-run
+
+# Merge one tag into another
+pyimgtag tags merge source-tag target-tag
+```
+
 #### `pyimgtag preflight` — check prerequisites
 
 ```bash
@@ -291,7 +320,7 @@ Each result (JSON/CSV) includes:
 
 ```
 src/pyimgtag/
-  main.py              CLI entry point, subcommand dispatch
+  main.py              CLI entry point and subcommand dispatch (thin)
   models.py            Data classes (ExifData, TagResult, GeoResult, ImageResult)
   scanner.py           Directory and Photos library scanning
   exif_reader.py       EXIF GPS + date extraction (exiftool + Pillow)
@@ -304,6 +333,14 @@ src/pyimgtag/
   dedup.py             Perceptual hash duplicate detection
   heic_converter.py    HEIC to JPEG conversion (macOS sips)
   cache.py             Simple JSON disk cache
+  commands/
+    run.py             `pyimgtag run` handler
+    db.py              `pyimgtag status/reprocess/cleanup` handlers
+    query.py           `pyimgtag query` handler
+    tags.py            `pyimgtag tags` handler
+    faces.py           `pyimgtag faces` handler
+    preflight_cmd.py   `pyimgtag preflight` handler
+    review_cmd.py      `pyimgtag review` handler
 ```
 
 ## Development
