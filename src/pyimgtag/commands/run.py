@@ -18,6 +18,37 @@ from pyimgtag.progress_db import ProgressDB
 from pyimgtag.scanner import scan_directory, scan_photos_library
 
 
+def _compute_dedup_map(files: list[Path], threshold: int) -> tuple[dict[str, str], set[str]]:
+    """Build a perceptual-hash dedup map and the set of paths to skip.
+
+    Returns a tuple of:
+      - phash_map: dict mapping file path (str) to its perceptual hash
+      - skipped_dedup: set of file paths that are duplicates to be skipped
+    """
+    from pyimgtag.dedup import compute_phash, find_duplicate_groups
+
+    print("Computing perceptual hashes...", file=sys.stderr)
+    records: list[tuple[str, str]] = []
+    phash_map: dict[str, str] = {}
+    for f in files:
+        h = compute_phash(f)
+        if h is not None:
+            records.append((str(f), h))
+            phash_map[str(f)] = h
+    groups = find_duplicate_groups(records, threshold=threshold)
+    skipped_dedup: set[str] = set()
+    dup_count = 0
+    for group in groups:
+        for path in sorted(group)[1:]:
+            skipped_dedup.add(path)
+            dup_count += 1
+    print(
+        f"Found {len(groups)} duplicate groups ({dup_count} images skipped, keeping 1 per group)",
+        file=sys.stderr,
+    )
+    return phash_map, skipped_dedup
+
+
 def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     """Execute the run subcommand (image tagging)."""
     if not args.input_dir and not args.photos_library:
@@ -67,26 +98,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     phash_map: dict[str, str] = {}
     skipped_dedup: set[str] = set()
     if args.dedup:
-        from pyimgtag.dedup import compute_phash, find_duplicate_groups
-
-        print("Computing perceptual hashes...", file=sys.stderr)
-        records: list[tuple[str, str]] = []
-        for f in files:
-            h = compute_phash(f)
-            if h is not None:
-                records.append((str(f), h))
-                phash_map[str(f)] = h
-        groups = find_duplicate_groups(records, threshold=args.dedup_threshold)
-        dup_count = 0
-        for group in groups:
-            for path in sorted(group)[1:]:
-                skipped_dedup.add(path)
-                dup_count += 1
-        print(
-            f"Found {len(groups)} duplicate groups ({dup_count} images skipped, "
-            f"keeping 1 per group)",
-            file=sys.stderr,
-        )
+        phash_map, skipped_dedup = _compute_dedup_map(files, args.dedup_threshold)
 
     ollama = OllamaClient(
         model=args.model, base_url=args.ollama_url, max_dim=args.max_dim, timeout=args.timeout

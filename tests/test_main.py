@@ -225,6 +225,13 @@ class TestMainNoSource:
         result = main(["run", "--input-dir", "/nonexistent/path/12345"])
         assert result == 1
 
+    def test_compute_dedup_map_empty(self, tmp_path):
+        from pyimgtag.commands.run import _compute_dedup_map
+
+        phash_map, skipped_dedup = _compute_dedup_map([], threshold=10)
+        assert phash_map == {}
+        assert skipped_dedup == set()
+
 
 class TestStatusSubcommand:
     def test_status_empty_db(self, tmp_path):
