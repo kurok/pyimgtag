@@ -16,3 +16,7 @@ venv/
 *.swo
 .DS_Store
 *.db
+site/
+docs/superpowers/
+junit.xml
+.coverage

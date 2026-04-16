@@ -1,0 +1,40 @@
+site_name: pyimgtag
+site_url: https://kurok.github.io/pyimgtag/
+site_description: Tag images using a local Gemma model with EXIF GPS reverse geocoding.
+repo_name: kurok/pyimgtag
+repo_url: https://github.com/kurok/pyimgtag
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.top
+    - search.suggest
+    - content.code.copy
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path: ['.']
+  - tables
+  - admonition
+
+nav:
+  - Home: index.md
+  - Changelog: changelog.md
+  - Contributing: contributing.md
+  - Security: security.md
