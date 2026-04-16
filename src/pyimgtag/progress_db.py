@@ -685,5 +685,11 @@ class ProgressDB:
         """Return total number of detected faces."""
         return self._conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0]
 
+    def __enter__(self) -> "ProgressDB":
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.close()
+
     def close(self) -> None:
         self._conn.close()
