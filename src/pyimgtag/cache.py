@@ -32,5 +32,9 @@ class DiskCache:
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._data, ensure_ascii=False))
-        tmp.replace(self._path)
+        try:
+            tmp.write_text(json.dumps(self._data, ensure_ascii=False))
+            tmp.replace(self._path)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise

@@ -6,6 +6,7 @@ import sqlite3
 import time
 
 import numpy as np
+import pytest
 
 from pyimgtag.models import FaceDetection, ImageResult
 from pyimgtag.progress_db import ProgressDB
@@ -185,6 +186,16 @@ class TestProgressDB:
             assert db.get_stats()["total"] == 1
         finally:
             db.close()
+
+    def test_context_manager_closes_connection(self, tmp_path):
+        db_path = tmp_path / "cm.db"
+        img = tmp_path / "img.jpg"
+        img.write_bytes(b"\x00" * 10)
+        with ProgressDB(db_path=db_path) as db:
+            db.mark_done(img, ImageResult(file_path=str(img), file_name="img.jpg", tags=[]))
+        # After __exit__, connection should be closed; further ops raise ProgrammingError
+        with pytest.raises(Exception):
+            db._conn.execute("SELECT 1")
 
 
 _NEW_COLUMN_NAMES = {

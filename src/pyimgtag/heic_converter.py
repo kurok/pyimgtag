@@ -45,8 +45,10 @@ def convert_heic_to_jpeg(
     if not input_path.is_file():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
+    _owned_temp_dir: str | None = None
     if output_dir is None:
-        output_dir = Path(tempfile.mkdtemp(prefix="pyimgtag_heic_"))
+        _owned_temp_dir = tempfile.mkdtemp(prefix="pyimgtag_heic_")
+        output_dir = Path(_owned_temp_dir)
     else:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -61,7 +63,13 @@ def convert_heic_to_jpeg(
             timeout=30,
         )
     except subprocess.TimeoutExpired as exc:
+        if _owned_temp_dir is not None:
+            shutil.rmtree(_owned_temp_dir, ignore_errors=True)
         raise RuntimeError(f"sips conversion timed out for {input_path}") from exc
+    except Exception:
+        if _owned_temp_dir is not None:
+            shutil.rmtree(_owned_temp_dir, ignore_errors=True)
+        raise
 
     if proc.returncode != 0:
         raise RuntimeError(f"sips conversion failed (rc={proc.returncode}): {proc.stderr.strip()}")

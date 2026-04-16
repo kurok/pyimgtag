@@ -76,35 +76,42 @@ def extract_raw_thumbnail(
     if not input_path.is_file():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
+    _owned_temp_dir: str | None = None
     if output_dir is None:
-        output_dir = Path(tempfile.mkdtemp(prefix="pyimgtag_raw_"))
+        _owned_temp_dir = tempfile.mkdtemp(prefix="pyimgtag_raw_")
+        output_dir = Path(_owned_temp_dir)
     else:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = output_dir / f"{input_path.stem}_thumb.jpg"
 
-    for tag in _THUMBNAIL_TAGS:
-        try:
-            proc = subprocess.run(
-                ["exiftool", "-b", f"-{tag}", str(input_path)],
-                capture_output=True,
-                timeout=30,
-            )
-        except (subprocess.TimeoutExpired, OSError):
-            continue
+    try:
+        for tag in _THUMBNAIL_TAGS:
+            try:
+                proc = subprocess.run(
+                    ["exiftool", "-b", f"-{tag}", str(input_path)],
+                    capture_output=True,
+                    timeout=30,
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                continue
 
-        if proc.returncode != 0:
-            # Non-zero may mean the tag doesn't exist (rc=1) or a real error (rc=2+).
-            # Either way, try the next tag — if all fail the final raise gives context.
-            continue
+            if proc.returncode != 0:
+                # Non-zero may mean the tag doesn't exist (rc=1) or a real error (rc=2+).
+                # Either way, try the next tag — if all fail the final raise gives context.
+                continue
 
-        if proc.stdout:
-            output_path.write_bytes(proc.stdout)
-            return output_path
-        # Empty stdout = tag absent, try next
+            if proc.stdout:
+                output_path.write_bytes(proc.stdout)
+                return output_path
+            # Empty stdout = tag absent, try next
 
-    raise RuntimeError(f"No embedded JPEG found in {input_path}")
+        raise RuntimeError(f"No embedded JPEG found in {input_path}")
+    except Exception:
+        if _owned_temp_dir is not None:
+            shutil.rmtree(_owned_temp_dir, ignore_errors=True)
+        raise
 
 
 def rawpy_available() -> bool:
@@ -141,21 +148,28 @@ def convert_raw_with_rawpy(
     if not input_path.is_file():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
+    _owned_temp_dir: str | None = None
     if output_dir is None:
-        output_dir = Path(tempfile.mkdtemp(prefix="pyimgtag_raw_"))
+        _owned_temp_dir = tempfile.mkdtemp(prefix="pyimgtag_raw_")
+        output_dir = Path(_owned_temp_dir)
     else:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
     output_path = output_dir / f"{input_path.stem}_raw.jpg"
 
-    import rawpy  # noqa: F811  # guarded by rawpy_available() above
-    from PIL import Image
+    try:
+        import rawpy  # noqa: F811  # guarded by rawpy_available() above
+        from PIL import Image
 
-    with rawpy.imread(str(input_path)) as raw:
-        rgb = raw.postprocess(use_camera_wb=True, output_bps=8)
+        with rawpy.imread(str(input_path)) as raw:
+            rgb = raw.postprocess(use_camera_wb=True, output_bps=8)
 
-    image = Image.fromarray(rgb)
-    image.save(output_path, format="JPEG", quality=85)
+        image = Image.fromarray(rgb)
+        image.save(output_path, format="JPEG", quality=85)
+    except Exception:
+        if _owned_temp_dir is not None:
+            shutil.rmtree(_owned_temp_dir, ignore_errors=True)
+        raise
 
     return output_path

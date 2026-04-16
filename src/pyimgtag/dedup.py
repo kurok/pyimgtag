@@ -28,7 +28,7 @@ def compute_phash(image_path: str | Path) -> str | None:
     try:
         with Image.open(image_path) as img:
             return str(imagehash.phash(img))
-    except Exception:
+    except (OSError, ValueError, TypeError):
         return None
 
 

@@ -37,19 +37,25 @@ _CSV_FIELDS = [
 
 
 def write_json(results: list[ImageResult], output_path: str | Path) -> None:
-    Path(output_path).write_text(
-        json.dumps([asdict(r) for r in results], indent=2, ensure_ascii=False, default=str)
-    )
+    try:
+        Path(output_path).write_text(
+            json.dumps([asdict(r) for r in results], indent=2, ensure_ascii=False, default=str)
+        )
+    except OSError as e:
+        raise OSError(f"Failed to write JSON to {output_path}: {e}") from e
 
 
 def write_csv(results: list[ImageResult], output_path: str | Path) -> None:
-    with open(output_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
-        writer.writeheader()
-        for r in results:
-            row = asdict(r)
-            row["tags"] = ";".join(row.get("tags") or [])
-            writer.writerow(row)
+    try:
+        with open(output_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
+            writer.writeheader()
+            for r in results:
+                row = asdict(r)
+                row["tags"] = ";".join(row.get("tags") or [])
+                writer.writerow(row)
+    except OSError as e:
+        raise OSError(f"Failed to write CSV to {output_path}: {e}") from e
 
 
 def result_to_jsonl(result: ImageResult) -> str:
