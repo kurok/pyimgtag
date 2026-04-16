@@ -169,17 +169,23 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 3. Make changes in `src/pyimgtag/`, add tests in `tests/`
 4. Run all checks before committing:
    ```bash
-   ruff format src/ tests/
-   ruff check src/ tests/ --fix
+   pre-commit run --all-files          # MUST run this — uses pinned ruff v0.9.10
    python -m pytest tests/ -v
    python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
    python -m bandit -r src/pyimgtag/ -c pyproject.toml
-   pre-commit run --all-files
    ```
 5. Commit with Conventional Commits: `feat: add x`, `fix: resolve y`
 6. Push: `git push -u origin feature/descriptive-name`
 7. Create PR using the repo template: `gh pr create --title "type: description"`
 8. Monitor CI: `gh run list --branch feature/descriptive-name`
+
+> **Why `pre-commit run --all-files` must run last and is the source of truth:**
+> The pre-commit config pins `ruff` at **v0.9.10** (`rev: v0.9.10` in `.pre-commit-config.yaml`).
+> The locally installed `ruff` will often be a newer version with different formatting rules.
+> Running `ruff format` directly uses the local version and may leave diffs that the pinned
+> CI version will reformat, failing the `pre-commit` CI job.
+> Always use `pre-commit run --all-files` as the final format/lint step — it installs and
+> runs the exact pinned version that CI uses.
 
 ## Important Notes
 

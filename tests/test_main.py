@@ -712,7 +712,6 @@ class TestTagsParserArgs:
 
 class TestQuerySubcommand:
     def _make_db(self, tmp_path):
-
         from pyimgtag.models import ImageResult
         from pyimgtag.progress_db import ProgressDB
 
