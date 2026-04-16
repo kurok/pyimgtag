@@ -123,11 +123,21 @@ class TestBuildApplescript:
 class TestIsApplescriptAvailable:
     def test_returns_true_when_osascript_found(self):
         with patch("pyimgtag.applescript_writer.shutil.which", return_value="/usr/bin/osascript"):
-            assert is_applescript_available() is True
+            with patch("pyimgtag.applescript_writer._IS_MACOS", True):
+                assert is_applescript_available() is True
 
     def test_returns_false_when_osascript_not_found(self):
         with patch("pyimgtag.applescript_writer.shutil.which", return_value=None):
-            assert is_applescript_available() is False
+            with patch("pyimgtag.applescript_writer._IS_MACOS", True):
+                assert is_applescript_available() is False
+
+    def test_returns_false_on_non_macos(self):
+        # Should return False on non-macOS even if osascript exists
+        with patch("pyimgtag.applescript_writer._IS_MACOS", False):
+            with patch(
+                "pyimgtag.applescript_writer.shutil.which", return_value="/usr/bin/osascript"
+            ):
+                assert is_applescript_available() is False
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +196,13 @@ class TestWriteToPhotos:
                 result = write_to_photos("/path/to/photo.jpg", ["tag"], None)
                 assert result is not None
                 assert "1" in result  # exit code mentioned
+
+    def test_returns_error_on_non_macos(self):
+        # write_to_photos should gracefully fail on non-macOS
+        with patch("pyimgtag.applescript_writer._IS_MACOS", False):
+            result = write_to_photos("/path/photo.jpg", ["tag"], None)
+            assert result is not None
+            assert "macOS" in result
 
     def test_osascript_not_available(self):
         with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=False):

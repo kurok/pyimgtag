@@ -4,14 +4,16 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Tag macOS Photos library images using a local Gemma model for searchable tags.
+Tag images using a local Gemma model for searchable tags, with optional Apple Photos integration on macOS.
 
 ## Overview
 
 pyimgtag uses a locally-running Gemma model (via [Ollama](https://ollama.ai)) to
 analyse images and generate 1-5 descriptive tags per photo.  It reads EXIF GPS
 coordinates and resolves them to the nearest city/place using OpenStreetMap
-Nominatim.  Everything runs on-device -- no cloud, no data leaves your Mac.
+Nominatim.  Everything runs on-device -- no cloud, no data leaves your computer.
+
+Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is macOS-only.
 
 **Key features:**
 
@@ -19,20 +21,27 @@ Nominatim.  Everything runs on-device -- no cloud, no data leaves your Mac.
 - Rich AI metadata: scene category, emotional tone, cleanup classification, text detection, event hints
 - EXIF GPS as source of truth for location (never guessed from image content)
 - Open reverse geocoding via Nominatim with local disk cache
-- Supports exported folders and Apple Photos library originals
-- Apple Photos write-back: push AI tags and descriptions back as keywords/captions
+- Supports exported folders and Apple Photos library originals (macOS only)
+- Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
 - Subcommands: `run`, `status`, `reprocess`, `cleanup`, `preflight`
 - Dry-run mode, date/limit filters, JSON/CSV export
 - SQLite progress DB with schema versioning for incremental re-runs
 
 ## Requirements
 
-- macOS (Apple Silicon recommended)
 - Python 3.11+
 - [Ollama](https://ollama.ai) installed and running
 - Gemma 4 model pulled: `ollama pull gemma4:e4b`
+
+**macOS-specific:**
+- Apple Silicon or Intel Mac
 - Optional: `exiftool` for reliable HEIC EXIF (falls back to Pillow)
 - Optional: `pillow-heif` for HEIC image loading
+
+**All platforms:**
+- Works on macOS, Linux, and Windows
+- EXIF writing via `exiftool` (if installed) works across platforms
+- Apple Photos write-back requires macOS
 
 ## Quick Start
 
@@ -82,6 +91,19 @@ pip install pillow-heif
 brew install exiftool
 ```
 
+## Platform Support
+
+| Feature | macOS | Linux | Windows |
+|---------|-------|-------|---------|
+| Image tagging via Ollama | ✅ | ✅ | ✅ |
+| EXIF reading (GPS, dates) | ✅ | ✅ | ✅ |
+| Reverse geocoding (Nominatim) | ✅ | ✅ | ✅ |
+| EXIF writing via `exiftool` | ✅ | ✅ | ✅ |
+| Apple Photos library scanning | ✅ | ❌ | ❌ |
+| Apple Photos write-back | ✅ | ❌ | ❌ |
+
+**Note:** Most features work cross-platform. Apple Photos integration is macOS-only since it requires macOS-specific AppleScript functionality.
+
 ## Usage
 
 ### Subcommands
@@ -117,7 +139,7 @@ pyimgtag run --input-dir /path/to/photos --output-json results.json
 | Flag | Description |
 |---|---|
 | `--input-dir PATH` | Exported image folder |
-| `--photos-library PATH` | Apple Photos library package |
+| `--photos-library PATH` | Apple Photos library package *(macOS only)* |
 | `--limit N` | Max images to process |
 | `--date YYYY-MM-DD` | Single date filter |
 | `--date-from` / `--date-to` | Date range filter |
@@ -128,7 +150,8 @@ pyimgtag run --input-dir /path/to/photos --output-json results.json
 | `--output-json FILE` | Write results to JSON |
 | `--output-csv FILE` | Write results to CSV |
 | `--jsonl-stdout` | JSONL output to stdout |
-| `--write-back` | Write tags/description back to Apple Photos |
+| `--write-back` | Write tags/description back to Apple Photos *(macOS only)* |
+| `--write-exif` | Write description and keywords to image EXIF |
 | `--dedup` | Skip duplicates via perceptual hash |
 | `--dedup-threshold N` | Hamming distance threshold (default: 5) |
 | `--model NAME` | Ollama model (default: gemma4:e4b) |
