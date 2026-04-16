@@ -31,6 +31,9 @@ try:
 except ImportError:
     pass
 
+_MODEL_TEMPERATURE: float = 0.3
+_MODEL_MAX_TOKENS: int = 512
+
 _RESPONSE_SCHEMA: dict = {
     "type": "object",
     "properties": {
@@ -157,7 +160,10 @@ class OllamaClient:
                     "format": _RESPONSE_SCHEMA,
                     "stream": False,
                     "think": False,
-                    "options": {"temperature": 0.3, "num_predict": 512},
+                    "options": {
+                        "temperature": _MODEL_TEMPERATURE,
+                        "num_predict": _MODEL_MAX_TOKENS,
+                    },
                 },
                 timeout=self.timeout,
             )
