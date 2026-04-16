@@ -153,6 +153,7 @@ def _make_completed_process(returncode: int = 0, stdout: str = "", stderr: str =
     return mock
 
 
+@patch("pyimgtag.applescript_writer._IS_MACOS", True)
 @patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False)
 class TestWriteToPhotos:
     # Tests for the osascript fallback path (photoscript disabled).
@@ -455,6 +456,7 @@ class TestWriteViaPhotoscript:
         assert mock_photo.description == "original"
 
 
+@patch("pyimgtag.applescript_writer._IS_MACOS", True)
 class TestWriteToPhotosBackendSelection:
     def test_uses_photoscript_when_available(self):
         with patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True):
