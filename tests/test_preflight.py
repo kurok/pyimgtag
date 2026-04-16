@@ -101,7 +101,8 @@ class TestCheckExiftool:
         ok, msg = check_exiftool()
         assert ok is False
         assert "not installed" in msg
-        assert "brew install" in msg
+        assert "exiftool.org" in msg          # cross-platform hint
+        assert "brew install" not in msg      # no macOS-only hint
 
 
 class TestCheckPhotosLibrary:
