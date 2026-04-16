@@ -60,7 +60,7 @@ class ProgressDB:
             db_path = Path.home() / ".cache" / "pyimgtag" / "progress.db"
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._path))
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._create_table()
 
@@ -232,6 +232,116 @@ class ProgressDB:
                 }
             )
         return result
+
+    # --- review UI query/update methods ---
+
+    def get_images(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        status: str | None = None,
+        cleanup_class: str | None = None,
+    ) -> list[dict]:
+        """Return paginated image records with all metadata.
+
+        Args:
+            limit: Max rows to return.
+            offset: Row offset for pagination.
+            status: Optional filter by status ('ok', 'error').
+            cleanup_class: Optional filter by cleanup_class ('delete', 'review').
+
+        Returns:
+            List of image metadata dicts.
+        """
+        conditions: list[str] = []
+        params: list[object] = []
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        if cleanup_class is not None:
+            conditions.append("cleanup_class = ?")
+            params.append(cleanup_class)
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        query = (  # nosec B608
+            "SELECT file_path, tags, scene_summary, processed_at, status, "
+            "cleanup_class, scene_category, emotional_tone, event_hint, significance "
+            "FROM processed_images "
+            + where  # nosec B608
+            + " ORDER BY file_path LIMIT ? OFFSET ?"
+        )
+        params.extend([limit, offset])
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._image_row_to_dict(r) for r in rows]
+
+    def count_images(
+        self,
+        status: str | None = None,
+        cleanup_class: str | None = None,
+    ) -> int:
+        """Count images matching optional filters."""
+        conditions: list[str] = []
+        params: list[object] = []
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        if cleanup_class is not None:
+            conditions.append("cleanup_class = ?")
+            params.append(cleanup_class)
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        query = "SELECT COUNT(*) FROM processed_images " + where  # nosec B608
+        return self._conn.execute(query, params).fetchone()[0]
+
+    def get_image(self, file_path: str) -> dict | None:
+        """Return metadata for a single image, or None if not found."""
+        row = self._conn.execute(
+            "SELECT file_path, tags, scene_summary, processed_at, status, "
+            "cleanup_class, scene_category, emotional_tone, event_hint, significance "
+            "FROM processed_images WHERE file_path = ?",
+            (file_path,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._image_row_to_dict(row)
+
+    def update_image_tags(self, file_path: str, tags: list[str]) -> None:
+        """Overwrite the tags list for an image."""
+        self._conn.execute(
+            "UPDATE processed_images SET tags = ? WHERE file_path = ?",
+            (json.dumps(tags), file_path),
+        )
+        self._conn.commit()
+
+    def update_image_cleanup(self, file_path: str, cleanup_class: str | None) -> None:
+        """Set or clear the cleanup_class for an image."""
+        self._conn.execute(
+            "UPDATE processed_images SET cleanup_class = ? WHERE file_path = ?",
+            (cleanup_class, file_path),
+        )
+        self._conn.commit()
+
+    @staticmethod
+    def _image_row_to_dict(row: tuple) -> dict:
+        """Convert a processed_images SELECT row to a metadata dict."""
+        file_path: str = row[0]
+        tags_raw: str | None = row[1]
+        try:
+            tags_list: list[str] = json.loads(tags_raw) if tags_raw else []
+        except (json.JSONDecodeError, TypeError):
+            tags_list = []
+        return {
+            "file_path": file_path,
+            "file_name": Path(file_path).name,
+            "tags": tags_raw,
+            "tags_list": tags_list,
+            "scene_summary": row[2],
+            "processed_at": row[3],
+            "status": row[4],
+            "cleanup_class": row[5],
+            "scene_category": row[6],
+            "emotional_tone": row[7],
+            "event_hint": row[8],
+            "significance": row[9],
+        }
 
     # --- face pipeline methods ---
 

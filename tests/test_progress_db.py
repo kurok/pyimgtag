@@ -512,6 +512,144 @@ class TestGetCleanupCandidates:
             db.close()
 
 
+class TestReviewMethods:
+    """Tests for review UI query and update methods."""
+
+    def _populate(self, db: ProgressDB, tmp_path) -> list[str]:
+        """Insert 3 images with varied metadata. Returns list of file_path strings."""
+        paths = []
+        specs = [
+            ("a.jpg", ["sunset", "beach"], "A warm sunset.", "delete"),
+            ("b.jpg", ["dog", "park"], "A dog running.", "review"),
+            ("c.jpg", ["mountain"], "Snowy peaks.", None),
+        ]
+        for name, tags, summary, cleanup in specs:
+            img = tmp_path / name
+            img.write_bytes(b"\x00" * 10)
+            result = ImageResult(
+                file_path=str(img),
+                file_name=name,
+                tags=tags,
+                scene_summary=summary,
+                cleanup_class=cleanup,
+            )
+            db.mark_done(img, result)
+            paths.append(str(img))
+        return paths
+
+    def test_get_images_returns_all(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.get_images(limit=10)
+            assert len(rows) == 3
+        finally:
+            db.close()
+
+    def test_get_images_pagination(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            page1 = db.get_images(limit=2, offset=0)
+            page2 = db.get_images(limit=2, offset=2)
+            assert len(page1) == 2
+            assert len(page2) == 1
+            assert page1[0]["file_path"] != page2[0]["file_path"]
+        finally:
+            db.close()
+
+    def test_get_images_filter_cleanup(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.get_images(cleanup_class="delete")
+            assert len(rows) == 1
+            assert rows[0]["cleanup_class"] == "delete"
+        finally:
+            db.close()
+
+    def test_get_images_dict_has_tags_list(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            rows = db.get_images()
+            for row in rows:
+                assert "tags_list" in row
+                assert isinstance(row["tags_list"], list)
+        finally:
+            db.close()
+
+    def test_count_images_total(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            assert db.count_images() == 3
+        finally:
+            db.close()
+
+    def test_count_images_filter(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            self._populate(db, tmp_path)
+            assert db.count_images(cleanup_class="delete") == 1
+            assert db.count_images(cleanup_class="review") == 1
+            assert db.count_images(cleanup_class="nonexistent") == 0
+        finally:
+            db.close()
+
+    def test_get_image_found(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            paths = self._populate(db, tmp_path)
+            row = db.get_image(paths[0])
+            assert row is not None
+            assert row["file_path"] == paths[0]
+            assert row["tags_list"] == ["sunset", "beach"]
+            assert row["cleanup_class"] == "delete"
+        finally:
+            db.close()
+
+    def test_get_image_not_found(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            assert db.get_image("/nonexistent/path.jpg") is None
+        finally:
+            db.close()
+
+    def test_update_image_tags(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            paths = self._populate(db, tmp_path)
+            db.update_image_tags(paths[0], ["new", "tags"])
+            row = db.get_image(paths[0])
+            assert row is not None
+            assert row["tags_list"] == ["new", "tags"]
+        finally:
+            db.close()
+
+    def test_update_image_cleanup_set(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            paths = self._populate(db, tmp_path)
+            db.update_image_cleanup(paths[2], "delete")
+            row = db.get_image(paths[2])
+            assert row is not None
+            assert row["cleanup_class"] == "delete"
+        finally:
+            db.close()
+
+    def test_update_image_cleanup_clear(self, tmp_path):
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            paths = self._populate(db, tmp_path)
+            db.update_image_cleanup(paths[0], None)
+            row = db.get_image(paths[0])
+            assert row is not None
+            assert row["cleanup_class"] is None
+        finally:
+            db.close()
+
+
 class TestFaceDB:
     """Tests for face pipeline database methods."""
 
