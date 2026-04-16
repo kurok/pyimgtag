@@ -36,6 +36,9 @@ class ReverseGeocoder:
         if lat is None or lon is None:
             return GeoResult()
 
+        if not (-90.0 <= lat <= 90.0) or not (-180.0 <= lon <= 180.0):
+            return GeoResult(error=f"GPS coordinates out of range: lat={lat}, lon={lon}")
+
         key = f"{round(lat, _CACHE_PRECISION)},{round(lon, _CACHE_PRECISION)}"
         cached = self._cache.get(key)
         if cached is not None:
