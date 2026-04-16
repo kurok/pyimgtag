@@ -23,7 +23,7 @@ def check_ollama(base_url: str = "http://localhost:11434") -> tuple[bool, str]:
         resp.raise_for_status()
         models = resp.json().get("models", [])
         return (True, f"Ollama is running ({len(models)} models available)")
-    except Exception as e:
+    except requests.RequestException as e:
         return (False, f"Ollama is not reachable at {base_url}: {e}")
 
 
@@ -45,8 +45,8 @@ def check_ollama_model(model: str, base_url: str = "http://localhost:11434") -> 
         if model in names:
             return (True, f"Model '{model}' is available")
         return (False, f"Model '{model}' not found. Available: {names}")
-    except Exception:
-        return (False, "Cannot check model: Ollama not reachable")
+    except requests.RequestException as e:
+        return (False, f"Cannot check model: Ollama not reachable ({e})")
 
 
 def check_exiftool() -> tuple[bool, str]:
@@ -69,7 +69,7 @@ def check_exiftool() -> tuple[bool, str]:
             False,
             "exiftool is not installed. See https://exiftool.org for install instructions.",
         )
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         return (False, f"exiftool check failed: {e}")
 
 

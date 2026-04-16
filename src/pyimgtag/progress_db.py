@@ -107,7 +107,9 @@ class ProgressDB:
                     # on an already-migrated DB is safe.
                     if "duplicate column name" not in str(exc).lower():
                         raise
-            self._conn.execute(f"PRAGMA user_version = {target_ver}")
+            if not isinstance(target_ver, int):
+                raise TypeError(f"Migration version must be int, got {type(target_ver)}")
+            self._conn.execute(f"PRAGMA user_version = {target_ver}")  # nosec B608
         self._conn.commit()
 
     def is_processed(self, file_path: Path) -> bool:
@@ -443,7 +445,7 @@ class ProgressDB:
                 "ORDER BY file_path"
             )
             rows = self._conn.execute(query, params).fetchall()
-        except Exception:
+        except sqlite3.Error:
             return []
 
         result = []

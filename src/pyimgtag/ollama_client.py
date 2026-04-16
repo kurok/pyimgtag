@@ -142,7 +142,7 @@ class OllamaClient:
         """Tag an image using the vision model.  One call per image."""
         try:
             img_b64 = self._prepare_image(file_path)
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError) as e:
             return TagResult(error=f"Image load failed: {e}")
 
         prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
@@ -168,7 +168,7 @@ class OllamaClient:
         try:
             text = resp.json().get("message", {}).get("content", "")
             parsed = _parse_response(text)
-        except Exception as e:
+        except (KeyError, ValueError, AttributeError) as e:
             return TagResult(error=f"Response parse failed: {e}")
         return parsed
 
