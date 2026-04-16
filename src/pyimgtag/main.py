@@ -142,6 +142,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also show photos flagged as 'review' (default: delete only)",
     )
 
+    # --- review subcommand ---
+    review_p = subparsers.add_parser(
+        "review", help="Launch the local review UI (requires pyimgtag[review])"
+    )
+    review_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    review_p.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    review_p.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765)")
+    review_p.add_argument(
+        "--no-browser", action="store_true", help="Do not open the browser automatically"
+    )
+
     # --- faces subcommand group ---
     faces_p = subparsers.add_parser("faces", help="Face detection, clustering, and tagging")
     faces_sub = faces_p.add_subparsers(dest="faces_action")
@@ -230,6 +241,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.subcommand == "cleanup":
         return _handle_cleanup(args)
+
+    if args.subcommand == "review":
+        return _handle_review(args)
 
     if args.subcommand == "faces":
         return _handle_faces(args)
@@ -477,6 +491,27 @@ def _handle_cleanup(args: argparse.Namespace) -> int:
             parts.append(f"| {item['image_date'][:10]}")
         parts.append(f"| tags: {tags}")
         print("  " + "  ".join(parts))
+    return 0
+
+
+def _handle_review(args: argparse.Namespace) -> int:
+    """Launch the local review UI server."""
+    try:
+        from pyimgtag.review_server import serve
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        serve(
+            db_path=args.db,
+            host=args.host,
+            port=args.port,
+            open_browser=not args.no_browser,
+        )
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
