@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from platform import system as get_platform_name
@@ -16,6 +18,39 @@ from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
 from pyimgtag.preflight import check_ollama
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.scanner import scan_directory, scan_photos_library
+
+_FDA_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+
+_FDA_DIALOG_SCRIPT = (
+    'tell application "System Events"\n'
+    "    set btn to button returned of (display dialog \u00ac\n"
+    '        "pyimgtag cannot read your Photos Library." & return & return & \u00ac\n'
+    '        "Grant Full Disk Access to Terminal in:" & return & \u00ac\n'
+    '        "System Settings \u2192 Privacy & Security \u2192 Full Disk Access" \u00ac\n'
+    '        buttons {"Open System Settings", "Cancel"} \u00ac\n'
+    '        default button "Open System Settings" \u00ac\n'
+    "        with icon caution \u00ac\n"
+    '        with title "Photos Library Access Required")\n'
+    '    if btn is "Open System Settings" then\n'
+    "        open location " + '"' + _FDA_SETTINGS_URL + '"\n'
+    "    end if\n"
+    "end tell"
+)
+
+
+def _request_photos_access_dialog() -> None:
+    """Show a native macOS dialog offering to open Full Disk Access settings."""
+    if get_platform_name() != "Darwin" or not shutil.which("osascript"):
+        return
+    try:
+        subprocess.run(  # noqa: S603
+            ["osascript", "-e", _FDA_DIALOG_SCRIPT],  # noqa: S607
+            check=False,
+            timeout=120,
+            capture_output=True,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def _compute_dedup_map(files: list[Path], threshold: int) -> tuple[dict[str, str], set[str]]:
@@ -83,8 +118,13 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         else:
             source_type = "photos_library"
             files = scan_photos_library(args.photos_library, extensions)
-    except (FileNotFoundError, PermissionError) as e:
+    except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
+        return 1
+    except PermissionError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        if args.photos_library:
+            _request_photos_access_dialog()
         return 1
 
     if not files:
