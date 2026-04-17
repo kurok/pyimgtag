@@ -100,6 +100,45 @@ class TestParseResponse:
         assert r.has_text is False
         assert r.text_summary is None
 
+    def test_has_text_integer_one_treated_as_true(self):
+        """Model returning integer 1 for has_text must set has_text=True and keep text_summary."""
+        r = _parse_response('{"tags":["sign"],"has_text":1,"text_summary":"STOP"}')
+        assert r.has_text is True
+        assert r.text_summary == "STOP"
+
+    def test_has_text_integer_zero_treated_as_false(self):
+        """Model returning integer 0 for has_text must set has_text=False and clear text_summary."""
+        r = _parse_response('{"tags":["road"],"has_text":0,"text_summary":"some text"}')
+        assert r.has_text is False
+        assert r.text_summary is None
+
+    def test_json_extracted_when_braces_appear_in_preamble_prose(self):
+        """Greedy regex fails when model emits {word} prose before the JSON object."""
+        text = (
+            "The {image} shows outdoor {scene} with citrus {fruit}.\n"
+            '{"tags":["mandarine tree","portugal"],"summary":"A grove.",'
+            '"scene_category":"outdoor_leisure","emotional_tone":"positive",'
+            '"cleanup_class":"keep","has_text":false,'
+            '"event_hint":"outing","significance":"medium"}'
+        )
+        r = _parse_response(text)
+        assert r.error is None
+        assert "mandarine tree" in r.tags
+        assert r.scene_category == "outdoor_leisure"
+
+    def test_json_extracted_when_thinking_tokens_contain_braces(self):
+        """<think>...{x}...</think> preamble before JSON must not break parsing."""
+        text = (
+            "<think>This {image} shows {citrus fruit} in a grove.</think>\n"
+            '{"tags":["citrus","tree","portugal"],"summary":"Mandarine grove.",'
+            '"scene_category":"outdoor_leisure","emotional_tone":"positive",'
+            '"cleanup_class":"keep","has_text":false,'
+            '"event_hint":"outing","significance":"low"}'
+        )
+        r = _parse_response(text)
+        assert r.error is None
+        assert "citrus" in r.tags
+
     def test_new_fields_absent_when_not_provided(self):
         r = _parse_response('{"tags":["mountain"],"summary":"a peak"}')
         assert r.scene_category is None

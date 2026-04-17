@@ -20,3 +20,4 @@ site/
 docs/superpowers/
 junit.xml
 .coverage
+.worktrees/

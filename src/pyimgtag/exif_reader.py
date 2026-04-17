@@ -84,7 +84,13 @@ def _read_exiftool(path: Path) -> ExifData | None:
             date_original=date_iso,
             has_gps=has_gps,
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+    except (
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        OSError,
+        ValueError,
+    ):
         return None
 
 
