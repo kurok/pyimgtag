@@ -21,19 +21,28 @@ WEIGHTS: dict[str, int] = {
 }
 
 _CORE = [
-    "impact", "story_subject", "composition_center", "lighting",
-    "creativity_style", "color_mood", "presentation_crop", "technical_excellence",
+    "impact",
+    "story_subject",
+    "composition_center",
+    "lighting",
+    "creativity_style",
+    "color_mood",
+    "presentation_crop",
+    "technical_excellence",
 ]
 _VISIBLE = [
-    "focus_sharpness", "exposure_tonal", "noise_cleanliness",
-    "subject_separation", "edit_integrity",
+    "focus_sharpness",
+    "exposure_tonal",
+    "noise_cleanliness",
+    "subject_separation",
+    "edit_integrity",
 ]
 
 
 def _wavg(vals: dict[str, float], keys: list[str]) -> float:
     total = sum(vals[k] * WEIGHTS[k] for k in keys)
     weight = sum(WEIGHTS[k] for k in keys)
-    return total / weight
+    return total / weight if weight else 0.0
 
 
 def compute_scores(scores: JudgeScores) -> tuple[float, float, float]:

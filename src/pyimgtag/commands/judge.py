@@ -89,6 +89,10 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
 
     exts = {e.lstrip(".") for e in args.extensions.split(",")}
 
+    if not getattr(args, "photos_library", None) and not getattr(args, "input_dir", None):
+        print("Error: one of --input-dir or --photos-library is required", file=sys.stderr)
+        return 1
+
     if getattr(args, "photos_library", None):
         try:
             files = scan_photos_library(
@@ -100,11 +104,15 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
             print(f"Error scanning Photos library: {exc}", file=sys.stderr)
             return 1
     else:
-        files = scan_directory(
-            args.input_dir,
-            extensions=exts,
-            recursive=not getattr(args, "no_recursive", False),
-        )
+        try:
+            files = scan_directory(
+                args.input_dir,
+                extensions=exts,
+                recursive=not getattr(args, "no_recursive", False),
+            )
+        except (PermissionError, FileNotFoundError) as exc:
+            print(f"Error scanning directory: {exc}", file=sys.stderr)
+            return 1
 
     if not files:
         print("No image files found.", file=sys.stderr)

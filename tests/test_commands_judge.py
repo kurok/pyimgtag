@@ -80,6 +80,19 @@ class TestCmdJudgeBasic:
 
         assert rc == 0
 
+    def test_returns_1_when_no_source(self, tmp_path: Path) -> None:
+        """cmd_judge must return 1 when neither --input-dir nor --photos-library is given."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        args = _make_args(tmp_path)
+        args.input_dir = None
+        args.photos_library = None
+
+        with patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")):
+            rc = cmd_judge(args, MagicMock())
+
+        assert rc == 1
+
     def test_returns_1_when_ollama_unavailable(self, tmp_path: Path) -> None:
         from pyimgtag.commands.judge import cmd_judge
 
