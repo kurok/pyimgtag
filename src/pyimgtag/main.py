@@ -243,6 +243,71 @@ def build_parser() -> argparse.ArgumentParser:
     )
     query_p.add_argument("--limit", type=int, help="Max results to return")
 
+    # --- judge subcommand ---
+    judge_p = subparsers.add_parser(
+        "judge",
+        help="Score photos with the professional photo-judge rubric",
+    )
+    judge_src = judge_p.add_mutually_exclusive_group(required=False)
+    judge_src.add_argument(
+        "--input-dir",
+        metavar="DIR",
+        help="Directory of images to judge",
+    )
+    judge_src.add_argument(
+        "--photos-library",
+        metavar="LIBRARY",
+        help="Path to Photos library (.photoslibrary)",
+    )
+    judge_p.add_argument(
+        "--extensions",
+        default="jpg,jpeg,heic,png,tiff,webp",
+        help="Comma-separated file extensions (default: jpg,jpeg,heic,png,tiff,webp)",
+    )
+    judge_p.add_argument("--limit", type=int, metavar="N", help="Process at most N images")
+    judge_p.add_argument(
+        "--min-score",
+        type=float,
+        metavar="SCORE",
+        help="Only show images with weighted score >= SCORE",
+    )
+    judge_p.add_argument(
+        "--sort-by",
+        choices=("score", "name"),
+        default="score",
+        help="Final sort order (default: score)",
+    )
+    judge_p.add_argument("--output-json", metavar="FILE", help="Write results to JSON file")
+    judge_p.add_argument(
+        "--verbose", action="store_true", help="Show detailed per-criterion breakdown"
+    )
+    judge_p.add_argument("--no-recursive", action="store_true", help="Do not scan subdirectories")
+    judge_p.add_argument(
+        "--model",
+        default="gemma4:e4b",
+        help="Ollama model name (default: gemma4:e4b)",
+    )
+    judge_p.add_argument(
+        "--ollama-url",
+        default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+        metavar="URL",
+        help="Ollama API base URL",
+    )
+    judge_p.add_argument(
+        "--max-dim",
+        type=int,
+        default=1280,
+        metavar="PX",
+        help="Max image dimension before resize",
+    )
+    judge_p.add_argument(
+        "--timeout",
+        type=int,
+        default=120,
+        metavar="SEC",
+        help="Ollama request timeout",
+    )
+
     # --- tags subcommand group ---
     tags_p = subparsers.add_parser("tags", help="Manage tags across the image database")
     tags_sub = tags_p.add_subparsers(dest="tags_action")
@@ -286,6 +351,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from pyimgtag.commands.db import cmd_cleanup, cmd_reprocess, cmd_status
     from pyimgtag.commands.faces import cmd_faces
+    from pyimgtag.commands.judge import cmd_judge
     from pyimgtag.commands.preflight_cmd import cmd_preflight
     from pyimgtag.commands.query import cmd_query
     from pyimgtag.commands.review_cmd import cmd_review
@@ -301,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         "review": lambda: cmd_review(args),
         "faces": lambda: cmd_faces(args),
         "query": lambda: cmd_query(args),
+        "judge": lambda: cmd_judge(args, None),
         "tags": lambda: cmd_tags(args),
     }
 

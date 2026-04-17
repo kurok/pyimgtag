@@ -160,3 +160,35 @@ class PersonCluster:
     label: str = ""
     confirmed: bool = False
     face_ids: list[int] = field(default_factory=list)
+
+
+@dataclass
+class JudgeScores:
+    """Rubric scores from the photo-judge prompt (1-5 each)."""
+
+    impact: float = 0.0
+    story_subject: float = 0.0
+    composition_center: float = 0.0
+    lighting: float = 0.0
+    creativity_style: float = 0.0
+    color_mood: float = 0.0
+    presentation_crop: float = 0.0
+    technical_excellence: float = 0.0
+    focus_sharpness: float = 0.0
+    exposure_tonal: float = 0.0
+    noise_cleanliness: float = 0.0
+    subject_separation: float = 0.0
+    edit_integrity: float = 0.0
+    verdict: str = ""
+
+
+@dataclass
+class JudgeResult:
+    """Complete judge output for one image."""
+
+    file_path: str = ""
+    file_name: str = ""
+    scores: JudgeScores = field(default_factory=JudgeScores)
+    weighted_score: float = 0.0
+    core_score: float = 0.0
+    visible_score: float = 0.0

@@ -26,7 +26,8 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim with local disk cache
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `status`, `reprocess`, `cleanup`, `preflight`, `query`, `tags`
+- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `preflight`, `query`, `tags`
+- Photo quality scoring with professional 13-criterion rubric (new: `judge` subcommand)
 - Dry-run mode, date/limit filters, JSON/CSV export
 - SQLite progress DB with schema versioning for incremental re-runs
 
@@ -77,6 +78,13 @@ pyimgtag reprocess
 
 # List photos flagged for deletion
 pyimgtag cleanup
+
+# Score photos by quality (judge)
+pyimgtag judge --input-dir ~/Pictures/exported --limit 20 --verbose
+
+# Filter to only strong photos, save ranking to JSON
+pyimgtag judge --input-dir ~/Pictures/exported \
+  --min-score 3.5 --output-json ranking.json
 ```
 
 ## Installation
@@ -264,6 +272,67 @@ pyimgtag tags merge source-tag target-tag
 pyimgtag preflight --input-dir ~/Pictures/exported
 ```
 
+#### `pyimgtag judge` — score photo quality
+
+Score each image against a 13-criterion professional rubric. Outputs a ranked list with weighted scores on a 1–5 scale. Requires Ollama.
+
+```bash
+# Score all images in a folder
+pyimgtag judge --input-dir ~/Pictures/exported
+
+# Only show photos scoring 3.5 or above
+pyimgtag judge --input-dir ~/Pictures/exported --min-score 3.5
+
+# Verbose breakdown (per-criterion scores)
+pyimgtag judge --input-dir ~/Pictures/exported --limit 20 --verbose
+
+# Sort by filename instead of score
+pyimgtag judge --input-dir ~/Pictures/exported --sort-by name
+
+# Score Photos library
+pyimgtag judge --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+  --limit 50 --min-score 4.0
+
+# Save full ranking to JSON
+pyimgtag judge --input-dir ~/Pictures/exported \
+  --output-json ranking.json
+```
+
+**Sample output (brief mode):**
+```
+[1/5] golden_hour.jpg → 4.32/5 strong | + impact, composition_center | - edit_integrity, noise_cleanliness
+  Golden light over the cityscape; strong composition but slight haloing on edges.
+[2/5] portrait.jpg → 3.87/5 solid | + focus_sharpness, lighting | - creativity_style, color_mood
+  Well-lit portrait; technically solid but conventional treatment.
+```
+
+**Sample output (--verbose):**
+```
+[1/5] golden_hour.jpg
+  Score:   4.32/5  (core: 4.55, visible: 3.90)
+  Best:    impact=5, composition_center=5, lighting=4
+  Weakest: edit_integrity=3, noise_cleanliness=3, subject_separation=3
+  Verdict: Golden light over the cityscape; strong composition but slight haloing on edges.
+```
+
+**Judge flags:**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input-dir PATH` | — | Exported image folder |
+| `--photos-library PATH` | — | Apple Photos library *(macOS only)* |
+| `--limit N` | unlimited | Max images to score |
+| `--extensions EXT,...` | `jpg,jpeg,heic,png,tiff,webp` | File types |
+| `--min-score SCORE` | — | Only show images scoring ≥ SCORE |
+| `--sort-by score\|name` | `score` | Final sort order |
+| `--output-json FILE` | — | Write ranked results to JSON |
+| `--verbose` | false | Per-criterion breakdown |
+| `--no-recursive` | false | Do not scan subdirectories |
+| `--model NAME` | `gemma4:e4b` | Ollama model |
+| `--ollama-url URL` | `http://localhost:11434` | Ollama API URL |
+| `--max-dim N` | `1280` | Max image dimension before resize |
+| `--timeout N` | `120` | Request timeout (seconds) |
+
 ### Sample verbose output
 
 ```
@@ -319,6 +388,32 @@ Each result (JSON/CSV) includes:
 | `error_message` | Error details if any |
 | `phash` | Perceptual hash (when `--dedup` used) |
 
+### Judge output schema
+
+Results from `pyimgtag judge --output-json` use a different structure:
+
+| Field | Description |
+|---|---|
+| `file_path` | Full path to image |
+| `file_name` | Filename |
+| `weighted_score` | Overall weighted score (1.0–5.0) |
+| `core_score` | Artistic criteria average (impact, composition, lighting, etc.) |
+| `visible_score` | Technical criteria average (focus, exposure, noise, etc.) |
+| `verdict` | One-sentence summary of key strength and weakness |
+| `scores.impact` | Emotional pull and memorability (1–5) |
+| `scores.story_subject` | Clear subject and meaning (1–5) |
+| `scores.composition_center` | Visual flow, balance, center of interest (1–5) |
+| `scores.lighting` | Quality, control, mood support (1–5) |
+| `scores.creativity_style` | Originality of treatment (1–5) |
+| `scores.color_mood` | Color balance and mood fit (1–5) |
+| `scores.presentation_crop` | Crop, framing, aspect ratio (1–5) |
+| `scores.technical_excellence` | Exposure, retouching, overall finish (1–5) |
+| `scores.focus_sharpness` | Critical detail is sharp (1–5) |
+| `scores.exposure_tonal` | Highlights and shadows under control (1–5) |
+| `scores.noise_cleanliness` | Clean detail, no distracting grain (1–5) |
+| `scores.subject_separation` | Subject stands out from background (1–5) |
+| `scores.edit_integrity` | No halos, overprocessing, or clone artefacts (1–5) |
+
 ## Architecture
 
 ```
@@ -336,8 +431,10 @@ src/pyimgtag/
   dedup.py             Perceptual hash duplicate detection
   heic_converter.py    HEIC to JPEG conversion (macOS sips)
   cache.py             Simple JSON disk cache
+  judge_scorer.py        Weighted rubric score computation (13-criterion)
   commands/
     run.py             `pyimgtag run` handler
+    judge.py           `pyimgtag judge` handler
     db.py              `pyimgtag status/reprocess/cleanup` handlers
     query.py           `pyimgtag query` handler
     tags.py            `pyimgtag tags` handler

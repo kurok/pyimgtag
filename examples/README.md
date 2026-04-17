@@ -16,6 +16,7 @@ Runnable shell scripts covering every major use case. Each script uses `--dry-ru
 | `08_faces_workflow.sh` | Face scan → cluster → review → apply | [Face Recognition](https://github.com/kurok/pyimgtag/wiki/Face-Recognition) |
 | `09_raw_heic.sh` | RAW (CR2/NEF/ARW/DNG) + HEIC tagging | [Advanced Topics](https://github.com/kurok/pyimgtag/wiki/Advanced-Topics) |
 | `10_dedup_and_reprocess.sh` | Perceptual dedup + reprocess after model change | [Managing Your Library](https://github.com/kurok/pyimgtag/wiki/Managing-Your-Library) |
+| `11_judge_subcommand.sh` | Score photos with the 13-criterion quality rubric | [Scoring Photos](https://github.com/kurok/pyimgtag/wiki/Scoring-Photos) |
 
 ## Mock Ollama
 

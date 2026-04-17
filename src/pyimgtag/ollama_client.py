@@ -17,7 +17,7 @@ import requests
 from PIL import Image
 
 from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic, sips_available
-from pyimgtag.models import TagResult, normalize_tags
+from pyimgtag.models import JudgeScores, TagResult, normalize_tags
 from pyimgtag.raw_converter import (
     convert_raw_with_rawpy,
     extract_raw_thumbnail,
@@ -47,6 +47,44 @@ Reply with ONLY a valid JSON object — no markdown, no explanation. Required fi
 - significance: one of high | medium | low"""
 
 _PROMPT_BASE = "Tag this image for a photo gallery.\n\n" + _PROMPT_FIELDS
+
+_JUDGE_PROMPT = """\
+You are a professional photo judge. Score this photograph on each criterion \
+from 1 to 5 where 1=poor, 2=weak, 3=acceptable, 4=strong, 5=exceptional.
+
+Respond with ONLY a valid JSON object. Required fields:
+- impact: 1-5  (emotional pull, memorability)
+- story_subject: 1-5  (clear subject and meaning)
+- composition_center: 1-5  (visual flow, balance, center of interest)
+- lighting: 1-5  (quality, control, mood support)
+- creativity_style: 1-5  (originality of treatment)
+- color_mood: 1-5  (color balance and mood fit)
+- presentation_crop: 1-5  (crop, framing, aspect ratio)
+- technical_excellence: 1-5  (exposure, retouching, overall finish)
+- focus_sharpness: 1-5  (critical detail is sharp; blur is intentional)
+- exposure_tonal: 1-5  (highlights and shadows under control)
+- noise_cleanliness: 1-5  (clean detail, no distracting grain)
+- subject_separation: 1-5  (subject stands out from background)
+- edit_integrity: 1-5  (no halos, overprocessing, or clone artefacts)
+- verdict: one sentence naming the key strength and key weakness
+
+Score honestly. A 3 means competent and deliverable. A 5 means exceptional."""
+
+_JUDGE_SCORE_FIELDS: tuple[str, ...] = (
+    "impact",
+    "story_subject",
+    "composition_center",
+    "lighting",
+    "creativity_style",
+    "color_mood",
+    "presentation_crop",
+    "technical_excellence",
+    "focus_sharpness",
+    "exposure_tonal",
+    "noise_cleanliness",
+    "subject_separation",
+    "edit_integrity",
+)
 
 
 def _build_prompt_with_context(context: dict) -> str:
@@ -126,6 +164,41 @@ class OllamaClient:
         except (KeyError, ValueError, AttributeError) as e:
             return TagResult(error=f"Response parse failed: {e}")
         return parsed
+
+    def judge_image(self, file_path: str) -> JudgeScores | None:
+        """Score an image with the photo-judge rubric. Returns None on failure."""
+        try:
+            img_b64 = self._prepare_image(file_path)
+        except (OSError, ValueError, RuntimeError):
+            return None
+
+        try:
+            resp = self._session.post(
+                f"{self.base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "user", "content": _JUDGE_PROMPT, "images": [img_b64]},
+                    ],
+                    "format": "json",
+                    "stream": False,
+                    "think": False,
+                    "options": {
+                        "temperature": _MODEL_TEMPERATURE,
+                        "num_predict": _MODEL_MAX_TOKENS,
+                    },
+                },
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+        except requests.RequestException:
+            return None
+
+        try:
+            text = resp.json().get("message", {}).get("content", "")
+            return _parse_judge_response(text)
+        except (KeyError, ValueError, AttributeError):
+            return None
 
     def _prepare_image(self, file_path: str) -> str:
         """Load, resize to *max_dim*, convert to JPEG, and base64-encode."""
@@ -235,6 +308,35 @@ def _parse_response(text: str) -> TagResult:
         text_summary=text_summary,
         event_hint=event_hint,
         significance=significance,
+    )
+
+
+def _parse_judge_response(text: str) -> JudgeScores | None:
+    raw = text.strip()
+    parsed = _try_json(raw)
+    if parsed is None:
+        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+        if m:
+            parsed = _try_json(m.group(1))
+    if parsed is None:
+        parsed = _extract_first_json_object(raw)
+    if parsed is None:
+        return None
+
+    def _score(key: str) -> float:
+        val = parsed.get(key, 3)
+        try:
+            return float(max(1.0, min(5.0, float(val))))
+        except (TypeError, ValueError):
+            return 3.0
+
+    verdict = parsed.get("verdict", "")
+    if not isinstance(verdict, str):
+        verdict = ""
+
+    return JudgeScores(
+        **{k: _score(k) for k in _JUDGE_SCORE_FIELDS},
+        verdict=verdict,
     )
 
 
