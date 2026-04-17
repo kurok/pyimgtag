@@ -244,3 +244,42 @@ class TestPrepareImageRaw:
         with patch("pyimgtag.ollama_client.extract_raw_thumbnail") as mock_extract:
             client._prepare_image(str(jpeg))
         mock_extract.assert_not_called()
+
+    def test_image_open_oserror_propagates(self, tmp_path):
+        fake = tmp_path / "photo.jpg"
+        fake.write_bytes(self._jpeg_bytes())
+        client = self._make_client()
+        with patch("pyimgtag.ollama_client.is_raw", return_value=False):
+            with patch("pyimgtag.ollama_client.is_heic", return_value=False):
+                with patch("pyimgtag.ollama_client.Image.open", side_effect=OSError("disk error")):
+                    with pytest.raises(OSError, match="disk error"):
+                        client._prepare_image(str(fake))
+
+    def test_tag_image_returns_error_on_image_load_failure(self, tmp_path):
+        fake = tmp_path / "bad.jpg"
+        fake.write_bytes(b"\x00" * 10)
+        client = self._make_client()
+        with patch("pyimgtag.ollama_client.is_raw", return_value=False):
+            with patch("pyimgtag.ollama_client.is_heic", return_value=False):
+                with patch("pyimgtag.ollama_client.Image.open", side_effect=OSError("cannot read")):
+                    result = client.tag_image(str(fake))
+        assert result.error is not None
+        assert "Image load failed" in result.error
+
+    def test_close_runs_without_error(self):
+        client = self._make_client()
+        client.close()  # must not raise
+
+    def test_heic_sips_unavailable_raises(self, tmp_path):
+        fake = tmp_path / "photo.heic"
+        fake.write_bytes(b"\x00" * 10)
+        client = self._make_client()
+        with patch("pyimgtag.ollama_client.is_heic", return_value=True):
+            with patch("pyimgtag.ollama_client.sips_available", return_value=False):
+                with patch("pyimgtag.ollama_client.is_raw", return_value=False):
+                    with patch(
+                        "pyimgtag.ollama_client.Image.open",
+                        side_effect=OSError("not a JPEG"),
+                    ):
+                        with pytest.raises(OSError):
+                            client._prepare_image(str(fake))

@@ -743,12 +743,52 @@ class TestMigrationV4:
 class TestQueryImages:
     def _populate(self, db: ProgressDB, tmp_path) -> None:
         images = [
-            ("a.jpg", ["cat", "indoor"], "tabby on couch", None, False, "home", "UA"),
-            ("b.jpg", ["cat", "outdoor"], "cat in garden", "review", False, "Kyiv", "UA"),
-            ("c.jpg", ["dog", "outdoor"], "labrador running", "delete", False, "Berlin", "DE"),
-            ("d.jpg", ["cat", "sign"], "street sign with text", None, True, "Paris", "FR"),
+            (
+                "a.jpg",
+                ["cat", "indoor"],
+                "tabby on couch",
+                None,
+                False,
+                "home",
+                "UA",
+                "indoor_home",
+                "ok",
+            ),
+            (
+                "b.jpg",
+                ["cat", "outdoor"],
+                "cat in garden",
+                "review",
+                False,
+                "Kyiv",
+                "UA",
+                "outdoor_leisure",
+                "ok",
+            ),
+            (
+                "c.jpg",
+                ["dog", "outdoor"],
+                "labrador running",
+                "delete",
+                False,
+                "Berlin",
+                "DE",
+                "outdoor_travel",
+                "ok",
+            ),
+            (
+                "d.jpg",
+                ["cat", "sign"],
+                "street sign with text",
+                None,
+                True,
+                "Paris",
+                "FR",
+                "indoor_home",
+                "error",
+            ),
         ]
-        for name, tags, summary, cleanup, has_text, city, country in images:
+        for name, tags, summary, cleanup, has_text, city, country, scene_cat, status in images:
             img = _make_image(tmp_path, name)
             result = ImageResult(
                 file_path=str(img),
@@ -759,6 +799,8 @@ class TestQueryImages:
                 has_text=has_text,
                 nearest_city=city,
                 nearest_country=country,
+                scene_category=scene_cat,
+                processing_status=status,
             )
             db.mark_done(img, result)
 
@@ -841,6 +883,91 @@ class TestQueryImages:
             self._populate(db, tmp_path)
             rows = db.query_images(tag="unicorn")
             assert rows == []
+
+    def test_query_by_scene_category(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._populate(db, tmp_path)
+            rows = db.query_images(scene_category="indoor_home")
+            assert len(rows) == 2
+            for r in rows:
+                assert r["scene_category"] == "indoor_home"
+
+    def test_query_by_status(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._populate(db, tmp_path)
+            rows = db.query_images(status="error")
+            assert len(rows) == 1
+            rows_ok = db.query_images(status="ok")
+            assert len(rows_ok) == 3
+
+    def test_query_row_to_dict_malformed_json(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db._conn.execute(
+                "INSERT INTO processed_images (file_path, tags, status) VALUES (?, ?, ?)",
+                ("/bad/tags.jpg", "not-valid-json", "ok"),
+            )
+            db._conn.commit()
+            rows = db.query_images()
+            bad = next(r for r in rows if r["file_path"] == "/bad/tags.jpg")
+            assert bad["tags_list"] == []
+
+
+class TestGetImagesFilters:
+    def _populate(self, db: ProgressDB, tmp_path) -> None:
+        specs = [
+            ("x.jpg", "ok", "delete"),
+            ("y.jpg", "ok", "review"),
+            ("z.jpg", "error", None),
+        ]
+        for name, status, cleanup in specs:
+            img = _make_image(tmp_path, name)
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name=name,
+                    tags=[],
+                    processing_status=status,
+                    cleanup_class=cleanup,
+                ),
+            )
+
+    def test_get_images_filter_by_status(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._populate(db, tmp_path)
+            rows = db.get_images(status="error")
+            assert len(rows) == 1
+            assert rows[0]["status"] == "error"
+
+    def test_get_images_filter_by_status_and_cleanup(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._populate(db, tmp_path)
+            rows = db.get_images(status="ok", cleanup_class="delete")
+            assert len(rows) == 1
+            assert rows[0]["cleanup_class"] == "delete"
+
+    def test_count_images_filter_by_status(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._populate(db, tmp_path)
+            assert db.count_images(status="ok") == 2
+            assert db.count_images(status="error") == 1
+
+    def test_count_images_filter_by_cleanup_class(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._populate(db, tmp_path)
+            assert db.count_images(cleanup_class="delete") == 1
+            assert db.count_images(cleanup_class="review") == 1
+
+    def test_image_row_to_dict_malformed_json(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db._conn.execute(
+                "INSERT INTO processed_images (file_path, tags, status) VALUES (?, ?, ?)",
+                ("/broken/img.jpg", "{not json}", "ok"),
+            )
+            db._conn.commit()
+            rows = db.get_images()
+            bad = next(r for r in rows if r["file_path"] == "/broken/img.jpg")
+            assert bad["tags_list"] == []
 
 
 class TestTagCounts:

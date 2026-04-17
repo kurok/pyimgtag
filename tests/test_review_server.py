@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
@@ -9,7 +11,7 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from pyimgtag.models import ImageResult  # noqa: E402
 from pyimgtag.progress_db import ProgressDB  # noqa: E402
-from pyimgtag.review_server import create_app  # noqa: E402
+from pyimgtag.review_server import _make_thumbnail, create_app  # noqa: E402
 
 
 def _make_db(tmp_path):
@@ -171,3 +173,49 @@ class TestReviewServerRoutes:
             json={"file_path": "/no/such/image.jpg", "cleanup_class": "delete"},
         )
         assert r.status_code == 404
+
+    def test_images_empty_result_for_nonexistent_filter(self, tmp_path):
+        app = create_app(db_path=_make_db(tmp_path))
+        client = TestClient(app)
+        r = client.get("/api/images?cleanup=nonexistent_class")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 0
+        assert data["items"] == []
+
+    def test_images_out_of_range_offset_returns_empty(self, tmp_path):
+        app = create_app(db_path=_make_db(tmp_path))
+        client = TestClient(app)
+        r = client.get("/api/images?limit=50&offset=9999")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["items"] == []
+
+
+class TestMakeThumbnailExtra:
+    def test_creates_cache_dir_if_missing(self, tmp_path, monkeypatch):
+        thumb_dir = tmp_path / "new_thumbs"
+        assert not thumb_dir.exists()
+        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        from PIL import Image
+
+        img_path = tmp_path / "img.jpg"
+        img = Image.new("RGB", (40, 40), color="red")
+        img.save(str(img_path), "JPEG")
+
+        result = _make_thumbnail(str(img_path), 20)
+        assert result is not None
+        assert thumb_dir.exists()
+
+    def test_returns_none_on_pil_exception(self, tmp_path, monkeypatch):
+        thumb_dir = tmp_path / "thumbs"
+        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        from PIL import Image
+
+        img_path = tmp_path / "img.jpg"
+        img = Image.new("RGB", (40, 40), color="blue")
+        img.save(str(img_path), "JPEG")
+
+        with patch("PIL.Image.open", side_effect=Exception("PIL broke")):
+            result = _make_thumbnail(str(img_path), 20)
+        assert result is None

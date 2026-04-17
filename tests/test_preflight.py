@@ -44,6 +44,16 @@ class TestCheckOllama:
         assert ok is False
         assert "not reachable" in msg
 
+    @patch("pyimgtag.preflight.requests.get")
+    def test_request_exception_returns_fail(self, mock_get: MagicMock) -> None:
+        import requests
+
+        mock_get.side_effect = requests.RequestException("timeout")
+
+        ok, msg = check_ollama()
+        assert ok is False
+        assert "not reachable" in msg
+
 
 class TestCheckOllamaModel:
     @patch("pyimgtag.preflight.requests.get")
@@ -78,6 +88,16 @@ class TestCheckOllamaModel:
         assert ok is False
         assert "not found" in msg
         assert "llama3:8b" in msg
+
+    @patch("pyimgtag.preflight.requests.get")
+    def test_request_exception_returns_fail(self, mock_get: MagicMock) -> None:
+        import requests
+
+        mock_get.side_effect = requests.RequestException("connection refused")
+
+        ok, msg = check_ollama_model("gemma4:e4b")
+        assert ok is False
+        assert "not reachable" in msg
 
 
 class TestCheckExiftool:
@@ -140,6 +160,14 @@ class TestCheckDirectory:
         ok, msg = check_directory("/nonexistent/path/12345")
         assert ok is False
         assert "not found" in msg
+
+    def test_permission_error_returns_fail(self, tmp_path: Path) -> None:
+        subdir = tmp_path / "locked"
+        subdir.mkdir()
+        with patch("pyimgtag.preflight.Path.rglob", side_effect=PermissionError("denied")):
+            ok, msg = check_directory(str(subdir))
+        assert ok is False
+        assert "Cannot read directory" in msg
 
 
 class TestRunPreflight:
