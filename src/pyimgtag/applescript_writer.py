@@ -61,7 +61,8 @@ def _build_applescript(
     Returns:
         AppleScript source string ready to pass to ``osascript -e``.
     """
-    safe_name = _escape_applescript_string(file_name)
+    # UUID is the filename stem — Photos uses it as the media item id for O(1) lookup.
+    uuid = _escape_applescript_string(PurePosixPath(file_name).stem)
 
     # Build AppleScript list literal: {"tag1", "tag2", ...}
     escaped_tags = [f'"{_escape_applescript_string(t)}"' for t in tags]
@@ -70,24 +71,19 @@ def _build_applescript(
     description_line = ""
     if summary is not None:
         safe_summary = _escape_applescript_string(summary)
-        description_line = f'\n        set description of theItem to "{safe_summary}"'
+        description_line = f'\n    set description of theItem to "{safe_summary}"'
 
     title_line = ""
     if title is not None:
         safe_title = _escape_applescript_string(title)
-        title_line = f'\n        set name of theItem to "{safe_title}"'
+        title_line = f'\n    set name of theItem to "{safe_title}"'
 
     script = (
         'tell application "Photos"\n'
-        f'    set theItems to media items whose filename is "{safe_name}"\n'
-        "    if (count of theItems) > 0 then\n"
-        "        set theItem to item 1 of theItems\n"
-        f"        set keywords of theItem to {tag_list}"
+        f'    set theItem to media item id "{uuid}"\n'
+        f"    set keywords of theItem to {tag_list}"
         f"{description_line}"
         f"{title_line}\n"
-        "    else\n"
-        f'        error "No Photos item found with filename: {safe_name}"\n'
-        "    end if\n"
         "end tell"
     )
     return script
