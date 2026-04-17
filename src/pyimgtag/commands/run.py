@@ -178,7 +178,12 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
             rich_desc = result.build_description()
 
-            if args.write_back and result.source_type == "photos_library" and result.tags:
+            if (
+                args.write_back
+                and not args.dry_run
+                and result.source_type == "photos_library"
+                and result.tags
+            ):
                 from pyimgtag.applescript_writer import write_to_photos
 
                 err = write_to_photos(

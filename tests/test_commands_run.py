@@ -255,3 +255,80 @@ class TestPhotosLibraryPermissionDialog:
             _request_photos_access_dialog()
 
         mock_run.assert_not_called()
+
+
+class TestWriteBackDryRun:
+    """--write-back must be suppressed when --dry-run is set."""
+
+    def _make_args(self, tmp_path: Path, *, dry_run: bool) -> MagicMock:
+        args = MagicMock()
+        args.input_dir = None
+        args.photos_library = str(tmp_path)
+        args.extensions = "jpg"
+        args.newest_first = False
+        args.no_cache = True
+        args.dedup = False
+        args.limit = None
+        args.date = None
+        args.date_from = None
+        args.date_to = None
+        args.skip_no_gps = False
+        args.write_back = True
+        args.write_exif = False
+        args.sidecar_only = False
+        args.dry_run = dry_run
+        args.verbose = False
+        args.jsonl_stdout = False
+        args.output_json = None
+        args.output_csv = None
+        args.ollama_url = "http://localhost:11434"
+        args.model = "test"
+        args.max_dim = 512
+        args.timeout = 5
+        args.cache_dir = None
+        args.no_recursive = False
+        return args
+
+    def test_write_back_skipped_in_dry_run(self, tmp_path: Path) -> None:
+        """write_to_photos must NOT be called when --dry-run is active."""
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "AABBCCDD.jpg"
+        img.write_bytes(b"x")
+        args = self._make_args(tmp_path, dry_run=True)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.applescript_writer.write_to_photos") as mock_write,
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["tag"], summary="desc")
+            mock_client_cls.return_value = mock_client
+            cmd_run(args, MagicMock())
+
+        mock_write.assert_not_called()
+
+    def test_write_back_runs_without_dry_run(self, tmp_path: Path) -> None:
+        """write_to_photos must be called when --write-back is set and --dry-run is not."""
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "AABBCCDD.jpg"
+        img.write_bytes(b"x")
+        args = self._make_args(tmp_path, dry_run=False)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.applescript_writer.write_to_photos", return_value=None) as mock_write,
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["tag"], summary="desc")
+            mock_client_cls.return_value = mock_client
+            cmd_run(args, MagicMock())
+
+        mock_write.assert_called_once()
