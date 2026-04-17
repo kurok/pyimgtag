@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-17
+
+### Fixed
+- Resolved all CodeQL code scanning alerts (`py/empty-except`, `py/unused-global-variable`)
+- Expanded CI test matrix to include Python 3.11 and 3.13
+- Added MkDocs-based documentation site with GitHub Pages deployment
+- Upgraded CI actions (codeql-action v4, upload-artifact v7, codecov-action v6)
+- Switched CI to `uv` for faster installs; merged quality job
+- Removed `--strict` from `mkdocs build` to allow expected cross-repo links
+- Added Codecov patch/project checks as informational (non-blocking)
+
 ## [0.2.0] - 2026-04-16
 
 ### Added
