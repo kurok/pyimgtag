@@ -166,19 +166,19 @@ class PersonCluster:
 class JudgeScores:
     """Rubric scores from the photo-judge prompt (1-5 each)."""
 
-    impact: float
-    story_subject: float
-    composition_center: float
-    lighting: float
-    creativity_style: float
-    color_mood: float
-    presentation_crop: float
-    technical_excellence: float
-    focus_sharpness: float
-    exposure_tonal: float
-    noise_cleanliness: float
-    subject_separation: float
-    edit_integrity: float
+    impact: float = 0.0
+    story_subject: float = 0.0
+    composition_center: float = 0.0
+    lighting: float = 0.0
+    creativity_style: float = 0.0
+    color_mood: float = 0.0
+    presentation_crop: float = 0.0
+    technical_excellence: float = 0.0
+    focus_sharpness: float = 0.0
+    exposure_tonal: float = 0.0
+    noise_cleanliness: float = 0.0
+    subject_separation: float = 0.0
+    edit_integrity: float = 0.0
     verdict: str = ""
 
 
@@ -186,9 +186,9 @@ class JudgeScores:
 class JudgeResult:
     """Complete judge output for one image."""
 
-    file_path: str
-    file_name: str
-    scores: JudgeScores
-    weighted_score: float
-    core_score: float
-    visible_score: float
+    file_path: str = ""
+    file_name: str = ""
+    scores: JudgeScores = field(default_factory=JudgeScores)
+    weighted_score: float = 0.0
+    core_score: float = 0.0
+    visible_score: float = 0.0
