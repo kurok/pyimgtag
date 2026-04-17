@@ -70,6 +70,22 @@ Respond with ONLY a valid JSON object. Required fields:
 
 Score honestly. A 3 means competent and deliverable. A 5 means exceptional."""
 
+_JUDGE_SCORE_FIELDS: tuple[str, ...] = (
+    "impact",
+    "story_subject",
+    "composition_center",
+    "lighting",
+    "creativity_style",
+    "color_mood",
+    "presentation_crop",
+    "technical_excellence",
+    "focus_sharpness",
+    "exposure_tonal",
+    "noise_cleanliness",
+    "subject_separation",
+    "edit_integrity",
+)
+
 
 def _build_prompt_with_context(context: dict) -> str:
     """Build a context-enriched prompt from EXIF/geocoding data."""
@@ -319,19 +335,7 @@ def _parse_judge_response(text: str) -> JudgeScores | None:
         verdict = ""
 
     return JudgeScores(
-        impact=_score("impact"),
-        story_subject=_score("story_subject"),
-        composition_center=_score("composition_center"),
-        lighting=_score("lighting"),
-        creativity_style=_score("creativity_style"),
-        color_mood=_score("color_mood"),
-        presentation_crop=_score("presentation_crop"),
-        technical_excellence=_score("technical_excellence"),
-        focus_sharpness=_score("focus_sharpness"),
-        exposure_tonal=_score("exposure_tonal"),
-        noise_cleanliness=_score("noise_cleanliness"),
-        subject_separation=_score("subject_separation"),
-        edit_integrity=_score("edit_integrity"),
+        **{k: _score(k) for k in _JUDGE_SCORE_FIELDS},
         verdict=verdict,
     )
 
