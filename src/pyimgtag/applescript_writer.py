@@ -102,12 +102,11 @@ def _write_via_photoscript(
     """Write to Photos using photoscript library."""
     try:
         photos_app = photoscript.PhotosLibrary()
-        results = photos_app.search(file_name)
-        # Filter to exact filename match
-        matched = [p for p in results if p.filename == file_name]
-        if not matched:
+        uuid = PurePosixPath(file_name).stem
+        try:
+            photo = photos_app.photo(uuid=uuid)
+        except Exception:
             return f"No Photos item found with filename: {file_name}"
-        photo = matched[0]
         photo.keywords = tags
         if summary is not None:
             photo.description = summary
