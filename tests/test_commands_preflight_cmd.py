@@ -37,9 +37,7 @@ class TestCmdPreflight:
     def test_input_dir_sets_source_type_directory(self):
         from pyimgtag.commands.preflight_cmd import cmd_preflight
 
-        with patch(
-            "pyimgtag.commands.preflight_cmd.run_preflight", return_value=[]
-        ) as mock_run:
+        with patch("pyimgtag.commands.preflight_cmd.run_preflight", return_value=[]) as mock_run:
             cmd_preflight(self._args(input_dir="/tmp/photos"))
         mock_run.assert_called_once_with(
             "http://localhost:11434", "gemma4:e4b", "/tmp/photos", "directory"
@@ -48,9 +46,7 @@ class TestCmdPreflight:
     def test_photos_library_sets_source_type(self):
         from pyimgtag.commands.preflight_cmd import cmd_preflight
 
-        with patch(
-            "pyimgtag.commands.preflight_cmd.run_preflight", return_value=[]
-        ) as mock_run:
+        with patch("pyimgtag.commands.preflight_cmd.run_preflight", return_value=[]) as mock_run:
             cmd_preflight(self._args(photos_library="/tmp/lib.photoslibrary"))
         mock_run.assert_called_once_with(
             "http://localhost:11434",
