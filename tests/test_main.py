@@ -683,6 +683,43 @@ class TestQueryParserArgs:
         assert args.status == "error"
 
 
+class TestJudgeParser:
+    def test_judge_subcommand_exists(self):
+        from pyimgtag.main import build_parser
+
+        p = build_parser()
+        args = p.parse_args(["judge", "--input-dir", "/tmp"])
+        assert args.subcommand == "judge"
+
+    def test_judge_default_sort_by_score(self):
+        from pyimgtag.main import build_parser
+
+        p = build_parser()
+        args = p.parse_args(["judge", "--input-dir", "/tmp"])
+        assert args.sort_by == "score"
+
+    def test_judge_min_score_flag(self):
+        from pyimgtag.main import build_parser
+
+        p = build_parser()
+        args = p.parse_args(["judge", "--input-dir", "/tmp", "--min-score", "3.5"])
+        assert args.min_score == 3.5
+
+    def test_judge_output_json_flag(self):
+        from pyimgtag.main import build_parser
+
+        p = build_parser()
+        args = p.parse_args(["judge", "--input-dir", "/tmp", "--output-json", "out.json"])
+        assert args.output_json == "out.json"
+
+    def test_judge_limit_flag(self):
+        from pyimgtag.main import build_parser
+
+        p = build_parser()
+        args = p.parse_args(["judge", "--input-dir", "/tmp", "--limit", "50"])
+        assert args.limit == 50
+
+
 class TestTagsParserArgs:
     def test_tags_list_parses(self):
         args = build_parser().parse_args(["tags", "list"])
