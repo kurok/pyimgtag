@@ -134,12 +134,21 @@ class TestPersonCluster:
 class TestJudgeScores:
     def test_all_fields_accessible(self):
         from pyimgtag.models import JudgeScores
+
         s = JudgeScores(
-            impact=4.0, story_subject=3.0, composition_center=5.0,
-            lighting=4.0, creativity_style=3.0, color_mood=4.0,
-            presentation_crop=4.0, technical_excellence=4.0,
-            focus_sharpness=5.0, exposure_tonal=4.0, noise_cleanliness=3.0,
-            subject_separation=4.0, edit_integrity=4.0,
+            impact=4.0,
+            story_subject=3.0,
+            composition_center=5.0,
+            lighting=4.0,
+            creativity_style=3.0,
+            color_mood=4.0,
+            presentation_crop=4.0,
+            technical_excellence=4.0,
+            focus_sharpness=5.0,
+            exposure_tonal=4.0,
+            noise_cleanliness=3.0,
+            subject_separation=4.0,
+            edit_integrity=4.0,
         )
         assert s.impact == 4.0
         assert s.focus_sharpness == 5.0
@@ -147,12 +156,21 @@ class TestJudgeScores:
 
     def test_verdict_field(self):
         from pyimgtag.models import JudgeScores
+
         s = JudgeScores(
-            impact=3.0, story_subject=3.0, composition_center=3.0,
-            lighting=3.0, creativity_style=3.0, color_mood=3.0,
-            presentation_crop=3.0, technical_excellence=3.0,
-            focus_sharpness=3.0, exposure_tonal=3.0, noise_cleanliness=3.0,
-            subject_separation=3.0, edit_integrity=3.0,
+            impact=3.0,
+            story_subject=3.0,
+            composition_center=3.0,
+            lighting=3.0,
+            creativity_style=3.0,
+            color_mood=3.0,
+            presentation_crop=3.0,
+            technical_excellence=3.0,
+            focus_sharpness=3.0,
+            exposure_tonal=3.0,
+            noise_cleanliness=3.0,
+            subject_separation=3.0,
+            edit_integrity=3.0,
             verdict="Solid but unremarkable.",
         )
         assert s.verdict == "Solid but unremarkable."
@@ -161,16 +179,26 @@ class TestJudgeScores:
 class TestJudgeResult:
     def _make_scores(self):
         from pyimgtag.models import JudgeScores
+
         return JudgeScores(
-            impact=4.0, story_subject=4.0, composition_center=4.0,
-            lighting=4.0, creativity_style=4.0, color_mood=4.0,
-            presentation_crop=4.0, technical_excellence=4.0,
-            focus_sharpness=4.0, exposure_tonal=4.0, noise_cleanliness=4.0,
-            subject_separation=4.0, edit_integrity=4.0,
+            impact=4.0,
+            story_subject=4.0,
+            composition_center=4.0,
+            lighting=4.0,
+            creativity_style=4.0,
+            color_mood=4.0,
+            presentation_crop=4.0,
+            technical_excellence=4.0,
+            focus_sharpness=4.0,
+            exposure_tonal=4.0,
+            noise_cleanliness=4.0,
+            subject_separation=4.0,
+            edit_integrity=4.0,
         )
 
     def test_fields(self):
         from pyimgtag.models import JudgeResult
+
         r = JudgeResult(
             file_path="/tmp/photo.jpg",
             file_name="photo.jpg",
