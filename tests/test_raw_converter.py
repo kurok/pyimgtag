@@ -268,3 +268,105 @@ class TestConvertRawWithRawpy:
                 result = convert_raw_with_rawpy(fake_cr2, output_dir=tmp_path)
         assert result.exists()
         assert result.stat().st_size > 0
+
+
+class TestExtractRawThumbnailErrorPaths:
+    _FAKE_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+
+    def test_timeout_in_loop_continues_to_next_tag(self, tmp_path: Path):
+        import subprocess as _subprocess
+
+        src = tmp_path / "photo.cr2"
+        src.write_bytes(b"fake")
+
+        call_count = [0]
+
+        def fake_run(args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] < 3:
+                raise _subprocess.TimeoutExpired(cmd="exiftool", timeout=30)
+            proc = MagicMock()
+            proc.returncode = 0
+            proc.stdout = self._FAKE_JPEG
+            return proc
+
+        with (
+            patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
+            patch("pyimgtag.raw_converter.subprocess.run", side_effect=fake_run),
+        ):
+            result = extract_raw_thumbnail(src, output_dir=tmp_path)
+
+        assert result.exists()
+        assert call_count[0] == 3
+
+    def test_nonzero_returncode_continues_to_next_tag(self, tmp_path: Path):
+        src = tmp_path / "photo.cr2"
+        src.write_bytes(b"fake")
+
+        call_count = [0]
+
+        def fake_run(args, **kwargs):
+            call_count[0] += 1
+            proc = MagicMock()
+            if call_count[0] < 3:
+                proc.returncode = 1
+                proc.stdout = b""
+            else:
+                proc.returncode = 0
+                proc.stdout = self._FAKE_JPEG
+            return proc
+
+        with (
+            patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
+            patch("pyimgtag.raw_converter.subprocess.run", side_effect=fake_run),
+        ):
+            result = extract_raw_thumbnail(src, output_dir=tmp_path)
+
+        assert result.exists()
+        assert call_count[0] == 3
+
+    def test_empty_stdout_continues_to_next_tag(self, tmp_path: Path):
+        src = tmp_path / "photo.cr2"
+        src.write_bytes(b"fake")
+
+        responses = [
+            MagicMock(returncode=0, stdout=b""),
+            MagicMock(returncode=0, stdout=b""),
+            MagicMock(returncode=0, stdout=self._FAKE_JPEG),
+        ]
+
+        with (
+            patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
+            patch("pyimgtag.raw_converter.subprocess.run", side_effect=responses),
+        ):
+            result = extract_raw_thumbnail(src, output_dir=tmp_path)
+
+        assert result.exists()
+
+    def test_timeout_in_main_path_cleans_up_temp_dir(self, tmp_path: Path):
+        import subprocess as _subprocess
+
+        src = tmp_path / "photo.cr2"
+        src.write_bytes(b"fake")
+
+        cleaned = []
+
+        def fake_rmtree(path, **kwargs):
+            cleaned.append(str(path))
+
+        with (
+            patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
+            patch(
+                "pyimgtag.raw_converter.subprocess.run",
+                side_effect=_subprocess.TimeoutExpired(cmd="exiftool", timeout=30),
+            ),
+            patch("pyimgtag.raw_converter.shutil.rmtree", side_effect=fake_rmtree),
+            patch(
+                "pyimgtag.raw_converter.tempfile.mkdtemp",
+                return_value=str(tmp_path / "pyimgtag_raw_tmp"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="No embedded JPEG"):
+                extract_raw_thumbnail(src, output_dir=None)
+
+        assert any("pyimgtag_raw_tmp" in p for p in cleaned)
