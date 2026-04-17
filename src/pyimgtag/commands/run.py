@@ -50,7 +50,7 @@ def _request_photos_access_dialog() -> None:
             capture_output=True,
         )
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        pass  # dialog is best-effort; silently ignore launch and timeout failures
 
 
 def _compute_dedup_map(files: list[Path], threshold: int) -> tuple[dict[str, str], set[str]]:
