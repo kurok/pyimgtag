@@ -140,6 +140,21 @@ class TestConvertHeicToJpeg:
 
     @patch("pyimgtag.heic_converter.sips_available", return_value=True)
     @patch("pyimgtag.heic_converter.subprocess.run")
+    def test_timeout_cleans_up_temp_dir(
+        self, mock_run: MagicMock, mock_sips: MagicMock, tmp_path: Path
+    ) -> None:
+        import subprocess as _subprocess
+
+        input_file = tmp_path / "photo.heic"
+        input_file.write_bytes(b"fake heic data")
+
+        mock_run.side_effect = _subprocess.TimeoutExpired(cmd="sips", timeout=30)
+
+        with pytest.raises(RuntimeError, match="sips conversion timed out"):
+            convert_heic_to_jpeg(input_file)
+
+    @patch("pyimgtag.heic_converter.sips_available", return_value=True)
+    @patch("pyimgtag.heic_converter.subprocess.run")
     def test_raises_when_output_not_created(
         self, mock_run: MagicMock, mock_sips: MagicMock, tmp_path: Path
     ) -> None:

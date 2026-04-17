@@ -69,3 +69,22 @@ class TestResolveOutOfRange:
         with patch.object(geo._session, "get", return_value=mock_resp):
             result = geo.resolve(0.0, 180.0)
         assert result.error is None
+
+
+class TestFetchErrors:
+    def test_request_exception_returns_error_geo_result(self, tmp_path):
+        import requests as req
+
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        with patch.object(
+            geo._session, "get", side_effect=req.RequestException("connection refused")
+        ):
+            with patch("time.sleep"):
+                result = geo.resolve(48.85, 2.35)
+        assert result.error is not None
+        assert "Geocoding failed" in result.error
+        assert result.nearest_place is None
+
+    def test_close_session(self, tmp_path):
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        geo.close()  # must not raise

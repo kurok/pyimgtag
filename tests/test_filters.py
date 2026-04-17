@@ -88,3 +88,13 @@ class TestPassesDateFilter:
         f = tmp_path / "img.jpg"
         # File doesn't exist -> no date -> filter fails
         assert passes_date_filter(self._exif(), f, date="2026-04-01") is False
+
+    def test_invalid_exif_date_falls_back_to_file_mtime(self, tmp_path):
+        # date_original is set but matches neither supported format —
+        # both strptime attempts raise ValueError (lines 47-48 in filters.py)
+        # and the function falls back to file mtime.
+        f = tmp_path / "img.jpg"
+        f.touch()
+        exif = self._exif(date="not-a-valid-date-format")
+        # File was just created, so a wide date_from well in the past should pass.
+        assert passes_date_filter(exif, f, date_from="2000-01-01") is True
