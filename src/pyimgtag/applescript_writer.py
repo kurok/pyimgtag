@@ -182,5 +182,8 @@ def write_to_photos(
     file_name = PurePosixPath(file_path).name
 
     if _HAS_PHOTOSCRIPT:
-        return _write_via_photoscript(file_name, tags, summary, title=title)
+        result = _write_via_photoscript(file_name, tags, summary, title=title)
+        if result is None:
+            return None
+        # UUID lookup failed; try filename search via osascript
     return _write_via_osascript(file_name, tags, summary, title=title)

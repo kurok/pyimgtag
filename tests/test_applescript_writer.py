@@ -460,7 +460,7 @@ class TestWriteToPhotosBackendSelection:
                 assert result is None
                 mock_ps.assert_called_once_with("photo.jpg", ["tag"], "desc", title=None)
 
-    def test_falls_back_to_osascript(self):
+    def test_falls_back_to_osascript_when_no_photoscript(self):
         with patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False):
             with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
                 with patch(
@@ -469,3 +469,20 @@ class TestWriteToPhotosBackendSelection:
                 ):
                     result = write_to_photos("/path/photo.jpg", ["tag"], None)
                     assert result is None
+
+    def test_falls_back_to_osascript_when_photoscript_uuid_fails(self):
+        with patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True):
+            with patch(
+                "pyimgtag.applescript_writer._write_via_photoscript",
+                return_value="No Photos item found with filename: photo.jpg",
+            ):
+                with patch(
+                    "pyimgtag.applescript_writer.is_applescript_available",
+                    return_value=True,
+                ):
+                    with patch(
+                        "pyimgtag.applescript_writer.subprocess.run",
+                        return_value=_make_completed_process(0),
+                    ):
+                        result = write_to_photos("/path/photo.jpg", ["tag"], None)
+                        assert result is None
