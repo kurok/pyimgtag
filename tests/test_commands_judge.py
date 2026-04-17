@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 def _make_args(tmp_path: Path, **overrides) -> MagicMock:
     args = MagicMock()
@@ -33,12 +31,21 @@ def _make_args(tmp_path: Path, **overrides) -> MagicMock:
 
 def _make_scores(**overrides):
     from pyimgtag.models import JudgeScores
+
     defaults = dict(
-        impact=4.0, story_subject=4.0, composition_center=4.0,
-        lighting=4.0, creativity_style=4.0, color_mood=4.0,
-        presentation_crop=4.0, technical_excellence=4.0,
-        focus_sharpness=4.0, exposure_tonal=4.0, noise_cleanliness=4.0,
-        subject_separation=4.0, edit_integrity=4.0,
+        impact=4.0,
+        story_subject=4.0,
+        composition_center=4.0,
+        lighting=4.0,
+        creativity_style=4.0,
+        color_mood=4.0,
+        presentation_crop=4.0,
+        technical_excellence=4.0,
+        focus_sharpness=4.0,
+        exposure_tonal=4.0,
+        noise_cleanliness=4.0,
+        subject_separation=4.0,
+        edit_integrity=4.0,
         verdict="Good overall.",
     )
     defaults.update(overrides)
@@ -48,6 +55,7 @@ def _make_scores(**overrides):
 class TestCmdJudgeBasic:
     def test_returns_0_on_success(self, tmp_path: Path) -> None:
         from pyimgtag.commands.judge import cmd_judge
+
         (tmp_path / "photo.jpg").write_bytes(b"x")
         args = _make_args(tmp_path)
 
@@ -64,6 +72,7 @@ class TestCmdJudgeBasic:
 
     def test_returns_0_when_no_files(self, tmp_path: Path) -> None:
         from pyimgtag.commands.judge import cmd_judge
+
         args = _make_args(tmp_path)
 
         with patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")):
@@ -73,6 +82,7 @@ class TestCmdJudgeBasic:
 
     def test_returns_1_when_ollama_unavailable(self, tmp_path: Path) -> None:
         from pyimgtag.commands.judge import cmd_judge
+
         args = _make_args(tmp_path)
 
         with patch("pyimgtag.commands.judge.check_ollama", return_value=(False, "not running")):
@@ -82,6 +92,7 @@ class TestCmdJudgeBasic:
 
     def test_judge_image_called_per_file(self, tmp_path: Path) -> None:
         from pyimgtag.commands.judge import cmd_judge
+
         (tmp_path / "a.jpg").write_bytes(b"x")
         (tmp_path / "b.jpg").write_bytes(b"x")
         args = _make_args(tmp_path)
@@ -99,6 +110,7 @@ class TestCmdJudgeBasic:
 
     def test_min_score_filter(self, tmp_path: Path) -> None:
         from pyimgtag.commands.judge import cmd_judge
+
         (tmp_path / "photo.jpg").write_bytes(b"x")
         args = _make_args(tmp_path, min_score=4.5)
 
@@ -115,7 +127,9 @@ class TestCmdJudgeBasic:
 
     def test_output_json_written(self, tmp_path: Path) -> None:
         import json
+
         from pyimgtag.commands.judge import cmd_judge
+
         (tmp_path / "photo.jpg").write_bytes(b"x")
         out = tmp_path / "results.json"
         args = _make_args(tmp_path, output_json=str(out))
@@ -135,3 +149,96 @@ class TestCmdJudgeBasic:
         assert data[0]["file_name"] == "photo.jpg"
         assert "weighted_score" in data[0]
         assert "scores" in data[0]
+
+    def test_limit_applied(self, tmp_path: Path) -> None:
+        """Only first N files are scored when --limit is set."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        for i in range(5):
+            (tmp_path / f"photo{i}.jpg").write_bytes(b"x")
+        args = _make_args(tmp_path, limit=2)
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.judge_image.return_value = _make_scores()
+            mock_cls.return_value = mock_client
+            cmd_judge(args, MagicMock())
+
+        assert mock_client.judge_image.call_count == 2
+
+    def test_judge_failure_skipped(self, tmp_path: Path) -> None:
+        """Files where judge_image returns None are skipped gracefully."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        (tmp_path / "photo.jpg").write_bytes(b"x")
+        args = _make_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.judge_image.return_value = None  # simulate failure
+            mock_cls.return_value = mock_client
+            rc = cmd_judge(args, MagicMock())
+
+        assert rc == 0  # must not crash
+
+    def test_sort_by_score_descending(self, tmp_path: Path) -> None:
+        """Results sorted by score descending when sort_by='score'."""
+        import json
+
+        from pyimgtag.commands.judge import cmd_judge
+
+        (tmp_path / "a.jpg").write_bytes(b"x")
+        (tmp_path / "b.jpg").write_bytes(b"x")
+        out = tmp_path / "out.json"
+        args = _make_args(tmp_path, sort_by="score", output_json=str(out))
+
+        scores_high = _make_scores(impact=5.0, composition_center=5.0)
+        scores_low = _make_scores(impact=1.0, composition_center=1.0)
+        call_count = 0
+
+        def fake_judge(path):
+            nonlocal call_count
+            call_count += 1
+            return scores_high if call_count == 1 else scores_low
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.judge_image.side_effect = fake_judge
+            mock_cls.return_value = mock_client
+            cmd_judge(args, MagicMock())
+
+        data = json.loads(out.read_text())
+        assert data[0]["weighted_score"] >= data[1]["weighted_score"]
+
+    def test_sort_by_name(self, tmp_path: Path) -> None:
+        """Results sorted by filename when sort_by='name'."""
+        import json
+
+        from pyimgtag.commands.judge import cmd_judge
+
+        (tmp_path / "z.jpg").write_bytes(b"x")
+        (tmp_path / "a.jpg").write_bytes(b"x")
+        out = tmp_path / "out.json"
+        args = _make_args(tmp_path, sort_by="name", output_json=str(out))
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.judge_image.return_value = _make_scores()
+            mock_cls.return_value = mock_client
+            cmd_judge(args, MagicMock())
+
+        data = json.loads(out.read_text())
+        names = [d["file_name"] for d in data]
+        assert names == sorted(names)

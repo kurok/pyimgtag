@@ -82,7 +82,7 @@ def _result_to_dict(result: JudgeResult) -> dict[str, Any]:
 
 
 def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
-    ok, msg = check_ollama(getattr(args, "ollama_url", "http://localhost:11434"))
+    ok, msg = check_ollama(args.ollama_url)
     if not ok:
         print(f"Ollama not available: {msg}", file=sys.stderr)
         return 1
