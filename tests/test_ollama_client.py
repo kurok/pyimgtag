@@ -10,6 +10,7 @@ from pyimgtag.ollama_client import (
     _PROMPT_BASE,
     _PROMPT_FIELDS,
     _build_prompt_with_context,
+    _parse_judge_response,
     _parse_response,
 )
 
@@ -336,16 +337,26 @@ class TestPrepareImageRaw:
 
 class TestParseJudgeResponse:
     def test_valid_json_returns_judge_scores(self):
-        from pyimgtag.ollama_client import _parse_judge_response
         import json
-        raw = json.dumps({
-            "impact": 4, "story_subject": 3, "composition_center": 5,
-            "lighting": 4, "creativity_style": 3, "color_mood": 4,
-            "presentation_crop": 4, "technical_excellence": 4,
-            "focus_sharpness": 5, "exposure_tonal": 4, "noise_cleanliness": 3,
-            "subject_separation": 4, "edit_integrity": 4,
-            "verdict": "Strong composition, weak noise.",
-        })
+
+        raw = json.dumps(
+            {
+                "impact": 4,
+                "story_subject": 3,
+                "composition_center": 5,
+                "lighting": 4,
+                "creativity_style": 3,
+                "color_mood": 4,
+                "presentation_crop": 4,
+                "technical_excellence": 4,
+                "focus_sharpness": 5,
+                "exposure_tonal": 4,
+                "noise_cleanliness": 3,
+                "subject_separation": 4,
+                "edit_integrity": 4,
+                "verdict": "Strong composition, weak noise.",
+            }
+        )
         result = _parse_judge_response(raw)
         assert result is not None
         assert result.impact == 4.0
@@ -353,50 +364,78 @@ class TestParseJudgeResponse:
         assert result.verdict == "Strong composition, weak noise."
 
     def test_missing_verdict_defaults_to_empty(self):
-        from pyimgtag.ollama_client import _parse_judge_response
         import json
-        raw = json.dumps({
-            "impact": 3, "story_subject": 3, "composition_center": 3,
-            "lighting": 3, "creativity_style": 3, "color_mood": 3,
-            "presentation_crop": 3, "technical_excellence": 3,
-            "focus_sharpness": 3, "exposure_tonal": 3, "noise_cleanliness": 3,
-            "subject_separation": 3, "edit_integrity": 3,
-        })
+
+        raw = json.dumps(
+            {
+                "impact": 3,
+                "story_subject": 3,
+                "composition_center": 3,
+                "lighting": 3,
+                "creativity_style": 3,
+                "color_mood": 3,
+                "presentation_crop": 3,
+                "technical_excellence": 3,
+                "focus_sharpness": 3,
+                "exposure_tonal": 3,
+                "noise_cleanliness": 3,
+                "subject_separation": 3,
+                "edit_integrity": 3,
+            }
+        )
         result = _parse_judge_response(raw)
         assert result is not None
         assert result.verdict == ""
 
     def test_score_clamped_to_1_5(self):
-        from pyimgtag.ollama_client import _parse_judge_response
         import json
-        raw = json.dumps({
-            "impact": 6, "story_subject": 0, "composition_center": 3,
-            "lighting": 3, "creativity_style": 3, "color_mood": 3,
-            "presentation_crop": 3, "technical_excellence": 3,
-            "focus_sharpness": 3, "exposure_tonal": 3, "noise_cleanliness": 3,
-            "subject_separation": 3, "edit_integrity": 3,
-        })
+
+        raw = json.dumps(
+            {
+                "impact": 6,
+                "story_subject": 0,
+                "composition_center": 3,
+                "lighting": 3,
+                "creativity_style": 3,
+                "color_mood": 3,
+                "presentation_crop": 3,
+                "technical_excellence": 3,
+                "focus_sharpness": 3,
+                "exposure_tonal": 3,
+                "noise_cleanliness": 3,
+                "subject_separation": 3,
+                "edit_integrity": 3,
+            }
+        )
         result = _parse_judge_response(raw)
         assert result is not None
         assert result.impact == 5.0
         assert result.story_subject == 1.0
 
     def test_missing_score_field_defaults_to_3(self):
-        from pyimgtag.ollama_client import _parse_judge_response
         import json
-        raw = json.dumps({
-            "impact": 4, "story_subject": 4, "composition_center": 4,
-            "lighting": 4, "creativity_style": 4, "color_mood": 4,
-            "presentation_crop": 4, "technical_excellence": 4,
-            "focus_sharpness": 4, "exposure_tonal": 4,
-            "subject_separation": 4, "edit_integrity": 4,
-        })
+
+        raw = json.dumps(
+            {
+                "impact": 4,
+                "story_subject": 4,
+                "composition_center": 4,
+                "lighting": 4,
+                "creativity_style": 4,
+                "color_mood": 4,
+                "presentation_crop": 4,
+                "technical_excellence": 4,
+                "focus_sharpness": 4,
+                "exposure_tonal": 4,
+                "subject_separation": 4,
+                "edit_integrity": 4,
+            }
+        )
         result = _parse_judge_response(raw)
         assert result is not None
         assert result.noise_cleanliness == 3.0
 
     def test_unparseable_returns_none(self):
-        from pyimgtag.ollama_client import _parse_judge_response
         assert _parse_judge_response("not json at all") is None
 
 
@@ -404,16 +443,27 @@ class TestOllamaClientJudgeImage:
     def test_judge_image_returns_judge_scores_on_success(self, tmp_path):
         import json
         from unittest.mock import MagicMock, patch
+
         from PIL import Image as PILImage
+
         from pyimgtag.ollama_client import OllamaClient
+
         img = tmp_path / "photo.jpg"
         PILImage.new("RGB", (100, 100), color=(128, 128, 128)).save(str(img))
         payload = {
-            "impact": 4, "story_subject": 4, "composition_center": 4,
-            "lighting": 4, "creativity_style": 4, "color_mood": 4,
-            "presentation_crop": 4, "technical_excellence": 4,
-            "focus_sharpness": 4, "exposure_tonal": 4, "noise_cleanliness": 4,
-            "subject_separation": 4, "edit_integrity": 4,
+            "impact": 4,
+            "story_subject": 4,
+            "composition_center": 4,
+            "lighting": 4,
+            "creativity_style": 4,
+            "color_mood": 4,
+            "presentation_crop": 4,
+            "technical_excellence": 4,
+            "focus_sharpness": 4,
+            "exposure_tonal": 4,
+            "noise_cleanliness": 4,
+            "subject_separation": 4,
+            "edit_integrity": 4,
             "verdict": "Solid neutral image.",
         }
         mock_response = MagicMock()
@@ -427,10 +477,13 @@ class TestOllamaClientJudgeImage:
         assert result.verdict == "Solid neutral image."
 
     def test_judge_image_returns_none_on_request_error(self, tmp_path):
-        import requests as req
         from unittest.mock import patch
+
+        import requests as req
         from PIL import Image as PILImage
+
         from pyimgtag.ollama_client import OllamaClient
+
         img = tmp_path / "photo.jpg"
         PILImage.new("RGB", (100, 100)).save(str(img))
         client = OllamaClient()
