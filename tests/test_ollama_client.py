@@ -7,7 +7,8 @@ from unittest.mock import patch
 import pytest
 
 from pyimgtag.ollama_client import (
-    _RESPONSE_SCHEMA,
+    _PROMPT_BASE,
+    _PROMPT_FIELDS,
     _build_prompt_with_context,
     _parse_response,
 )
@@ -179,23 +180,24 @@ class TestBuildPromptWithContext:
         assert "- GPS:" not in prompt
 
 
-class TestResponseSchema:
-    def test_schema_has_required_fields(self):
-        assert "tags" in _RESPONSE_SCHEMA["properties"]
-        assert "summary" in _RESPONSE_SCHEMA["properties"]
-        assert "scene_category" in _RESPONSE_SCHEMA["properties"]
-        assert "emotional_tone" in _RESPONSE_SCHEMA["properties"]
-        assert "cleanup_class" in _RESPONSE_SCHEMA["properties"]
-        assert "has_text" in _RESPONSE_SCHEMA["properties"]
-        assert "event_hint" in _RESPONSE_SCHEMA["properties"]
-        assert "significance" in _RESPONSE_SCHEMA["properties"]
+class TestPromptFields:
+    """Verify _PROMPT_FIELDS and _PROMPT_BASE contain all required field descriptions."""
 
-    def test_tags_is_array_of_strings(self):
-        tags = _RESPONSE_SCHEMA["properties"]["tags"]
-        assert tags["type"] == "array"
-        assert tags["items"]["type"] == "string"
+    def test_prompt_fields_contains_required_fields(self):
+        for field in (
+            "tags",
+            "summary",
+            "scene_category",
+            "emotional_tone",
+            "cleanup_class",
+            "has_text",
+            "text_summary",
+            "event_hint",
+            "significance",
+        ):
+            assert field in _PROMPT_FIELDS, f"_PROMPT_FIELDS missing field: {field}"
 
-    def test_enums_match_validation(self):
+    def test_prompt_fields_contains_enum_values(self):
         from pyimgtag.ollama_client import (
             _CLEANUP_CLASS_ALLOWED,
             _EMOTIONAL_TONE_ALLOWED,
@@ -204,12 +206,20 @@ class TestResponseSchema:
             _SIGNIFICANCE_ALLOWED,
         )
 
-        props = _RESPONSE_SCHEMA["properties"]
-        assert set(props["scene_category"]["enum"]) == _SCENE_CATEGORY_ALLOWED
-        assert set(props["emotional_tone"]["enum"]) == _EMOTIONAL_TONE_ALLOWED
-        assert set(props["cleanup_class"]["enum"]) == _CLEANUP_CLASS_ALLOWED
-        assert set(props["event_hint"]["enum"]) == _EVENT_HINT_ALLOWED
-        assert set(props["significance"]["enum"]) == _SIGNIFICANCE_ALLOWED
+        for val in _SCENE_CATEGORY_ALLOWED:
+            assert val in _PROMPT_FIELDS, f"scene_category value '{val}' missing from prompt"
+        for val in _EMOTIONAL_TONE_ALLOWED:
+            assert val in _PROMPT_FIELDS, f"emotional_tone value '{val}' missing from prompt"
+        for val in _CLEANUP_CLASS_ALLOWED:
+            assert val in _PROMPT_FIELDS, f"cleanup_class value '{val}' missing from prompt"
+        for val in _EVENT_HINT_ALLOWED:
+            assert val in _PROMPT_FIELDS, f"event_hint value '{val}' missing from prompt"
+        for val in _SIGNIFICANCE_ALLOWED:
+            assert val in _PROMPT_FIELDS, f"significance value '{val}' missing from prompt"
+
+    def test_prompt_base_includes_fields(self):
+        assert "Tag this image" in _PROMPT_BASE
+        assert _PROMPT_FIELDS in _PROMPT_BASE
 
 
 class TestPrepareImageRaw:

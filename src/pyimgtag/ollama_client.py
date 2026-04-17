@@ -33,66 +33,20 @@ with contextlib.suppress(ImportError):
 _MODEL_TEMPERATURE: float = 0.3
 _MODEL_MAX_TOKENS: int = 512
 
-_RESPONSE_SCHEMA: dict = {
-    "type": "object",
-    "properties": {
-        "tags": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "maxItems": 5,
-        },
-        "summary": {"type": "string"},
-        "scene_category": {
-            "type": "string",
-            "enum": [
-                "indoor_home",
-                "indoor_work",
-                "outdoor_leisure",
-                "outdoor_travel",
-                "transport",
-                "other",
-            ],
-        },
-        "emotional_tone": {
-            "type": "string",
-            "enum": ["positive", "neutral", "negative", "mixed"],
-        },
-        "cleanup_class": {
-            "type": "string",
-            "enum": ["keep", "review", "delete"],
-        },
-        "has_text": {"type": "boolean"},
-        "text_summary": {"type": "string"},
-        "event_hint": {
-            "type": "string",
-            "enum": ["outing", "gathering", "work", "travel", "daily", "other"],
-        },
-        "significance": {
-            "type": "string",
-            "enum": ["high", "medium", "low"],
-        },
-    },
-    "required": [
-        "tags",
-        "summary",
-        "scene_category",
-        "emotional_tone",
-        "cleanup_class",
-        "has_text",
-        "event_hint",
-        "significance",
-    ],
-}
 
-_PROMPT_BASE = (
-    "Tag this image for a photo gallery. "
-    "1-5 short lowercase noun phrase tags. "
-    "No people names. No city guesses from image content. "
-    "cleanup_class: keep (clear value), review (uncertain), "
-    "delete (blurry/duplicate/screenshot junk). "
-    "text_summary: only if has_text is true."
-)
+_PROMPT_FIELDS = """\
+Reply with ONLY a valid JSON object — no markdown, no explanation. Required fields:
+- tags: list of 1-5 short lowercase noun phrases (no names, no location guesses from image)
+- summary: one sentence describing the image
+- scene_category: indoor_home | indoor_work | outdoor_leisure | outdoor_travel | transport | other
+- emotional_tone: one of positive | neutral | negative | mixed
+- cleanup_class: keep (clear value) | review (uncertain) | delete (blurry/duplicate/junk)
+- has_text: true or false
+- text_summary: visible text description if has_text is true, otherwise null
+- event_hint: one of outing | gathering | work | travel | daily | other
+- significance: one of high | medium | low"""
+
+_PROMPT_BASE = "Tag this image for a photo gallery.\n\n" + _PROMPT_FIELDS
 
 
 def _build_prompt_with_context(context: dict) -> str:
@@ -114,13 +68,9 @@ def _build_prompt_with_context(context: dict) -> str:
         "Tag this image for a photo gallery.\n\n"
         "Context (use to improve tag relevance, not as tags themselves):\n"
         f"{ctx_block}\n\n"
-        "Rules: 1-5 short lowercase noun phrase tags. "
         "Prefer broad useful tags. Ignore small background objects. "
-        "No names. No place guesses from image content "
-        "(location context above is from GPS metadata). "
-        "cleanup_class: keep (clear value), review (uncertain), "
-        "delete (blurry/duplicate/screenshot junk). "
-        "text_summary: only if has_text is true."
+        "No place guesses from image content "
+        "(location context above is from GPS metadata).\n\n" + _PROMPT_FIELDS
     )
 
 
@@ -156,7 +106,7 @@ class OllamaClient:
                     "messages": [
                         {"role": "user", "content": prompt, "images": [img_b64]},
                     ],
-                    "format": _RESPONSE_SCHEMA,
+                    "format": "json",
                     "stream": False,
                     "think": False,
                     "options": {
