@@ -311,6 +311,6 @@ def _extract_first_json_object(text: str) -> dict | None:
                 if isinstance(obj, dict):
                     return obj
             except (json.JSONDecodeError, ValueError):
-                pass
+                pass  # not valid JSON at this position; try the next {
         i += 1
     return None
