@@ -245,9 +245,7 @@ def _parse_response(text: str) -> TagResult:
         if m:
             parsed = _try_json(m.group(1))
     if parsed is None:
-        m = re.search(r"\{.*\}", raw, re.DOTALL)
-        if m:
-            parsed = _try_json(m.group(0))
+        parsed = _extract_first_json_object(raw)
     if parsed is None:
         return TagResult(raw_response=raw, error="Could not parse JSON from model response")
 
@@ -296,3 +294,23 @@ def _try_json(text: str) -> dict | None:
         return obj if isinstance(obj, dict) else None
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+def _extract_first_json_object(text: str) -> dict | None:
+    """Scan text character-by-character and return the first valid JSON object found.
+
+    Handles model responses that include {word} placeholders, thinking tokens, or other
+    prose before the actual JSON — cases where a greedy regex would capture too much.
+    """
+    decoder = json.JSONDecoder()
+    i = 0
+    while i < len(text):
+        if text[i] == "{":
+            try:
+                obj, _ = decoder.raw_decode(text, i)
+                if isinstance(obj, dict):
+                    return obj
+            except (json.JSONDecodeError, ValueError):
+                pass
+        i += 1
+    return None

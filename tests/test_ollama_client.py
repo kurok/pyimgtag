@@ -112,6 +112,33 @@ class TestParseResponse:
         assert r.has_text is False
         assert r.text_summary is None
 
+    def test_json_extracted_when_braces_appear_in_preamble_prose(self):
+        """Greedy regex fails when model emits {word} prose before the JSON object."""
+        text = (
+            'The {image} shows outdoor {scene} with citrus {fruit}.\n'
+            '{"tags":["mandarine tree","portugal"],"summary":"A grove.",'
+            '"scene_category":"outdoor_leisure","emotional_tone":"positive",'
+            '"cleanup_class":"keep","has_text":false,'
+            '"event_hint":"outing","significance":"medium"}'
+        )
+        r = _parse_response(text)
+        assert r.error is None
+        assert "mandarine tree" in r.tags
+        assert r.scene_category == "outdoor_leisure"
+
+    def test_json_extracted_when_thinking_tokens_contain_braces(self):
+        """<think>...{x}...</think> preamble before JSON must not break parsing."""
+        text = (
+            "<think>This {image} shows {citrus fruit} in a grove.</think>\n"
+            '{"tags":["citrus","tree","portugal"],"summary":"Mandarine grove.",'
+            '"scene_category":"outdoor_leisure","emotional_tone":"positive",'
+            '"cleanup_class":"keep","has_text":false,'
+            '"event_hint":"outing","significance":"low"}'
+        )
+        r = _parse_response(text)
+        assert r.error is None
+        assert "citrus" in r.tags
+
     def test_new_fields_absent_when_not_provided(self):
         r = _parse_response('{"tags":["mountain"],"summary":"a peak"}')
         assert r.scene_category is None
