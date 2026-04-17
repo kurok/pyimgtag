@@ -90,8 +90,7 @@ class TestScanAndStore:
 
     def test_stores_faces_in_db(self, tmp_path):
         path = _make_image(tmp_path)
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             faces = [
                 FaceDetection(image_path=str(path), bbox_x=10, bbox_y=20, bbox_w=50, bbox_h=60),
             ]
@@ -103,13 +102,10 @@ class TestScanAndStore:
             stored = db.get_faces_for_image(str(path))
             assert len(stored) == 1
             assert stored[0]["bbox_x"] == 10
-        finally:
-            db.close()
 
     def test_stores_embedding_in_db(self, tmp_path):
         path = _make_image(tmp_path)
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             faces = [FaceDetection(image_path=str(path))]
             emb = np.ones(128) * 0.5
             p_detect, p_embed = self._mock_detect_and_embed(faces, [emb])
@@ -118,13 +114,10 @@ class TestScanAndStore:
             all_emb = db.get_all_embeddings()
             assert len(all_emb) == 1
             np.testing.assert_array_almost_equal(all_emb[0][1], emb)
-        finally:
-            db.close()
 
     def test_skips_already_scanned_image(self, tmp_path):
         path = _make_image(tmp_path)
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             # First scan
             faces = [FaceDetection(image_path=str(path), bbox_x=5, bbox_y=5)]
             emb = np.zeros(128)
@@ -138,25 +131,19 @@ class TestScanAndStore:
                 count = scan_and_store(path, db)
             assert count == 0
             mock_d.assert_not_called()
-        finally:
-            db.close()
 
     def test_returns_zero_for_no_faces(self, tmp_path):
         path = _make_image(tmp_path)
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             p_detect, p_embed = self._mock_detect_and_embed([], [])
             with p_detect, p_embed:
                 count = scan_and_store(path, db)
             assert count == 0
             assert db.get_face_count() == 0
-        finally:
-            db.close()
 
     def test_multiple_faces_stored(self, tmp_path):
         path = _make_image(tmp_path)
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             faces = [
                 FaceDetection(image_path=str(path), bbox_x=10, bbox_y=20),
                 FaceDetection(image_path=str(path), bbox_x=200, bbox_y=100),
@@ -169,14 +156,11 @@ class TestScanAndStore:
             assert db.get_face_count() == 2
             all_emb = db.get_all_embeddings()
             assert len(all_emb) == 2
-        finally:
-            db.close()
 
     def test_handles_fewer_embeddings_than_faces(self, tmp_path):
         """If face_recognition returns fewer encodings than faces, store None for the rest."""
         path = _make_image(tmp_path)
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             faces = [
                 FaceDetection(image_path=str(path), bbox_x=10, bbox_y=20),
                 FaceDetection(image_path=str(path), bbox_x=200, bbox_y=100),
@@ -190,18 +174,12 @@ class TestScanAndStore:
             all_emb = db.get_all_embeddings()
             assert len(all_emb) == 1  # only 1 has embedding
 
-        finally:
-            db.close()
-
     def test_passes_model_and_max_dim(self, tmp_path):
         path = _make_image(tmp_path)
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             with (
                 patch("pyimgtag.face_embedding.detect_faces", return_value=[]) as mock_d,
                 patch("pyimgtag.face_embedding.compute_embeddings", return_value=[]),
             ):
                 scan_and_store(path, db, max_dim=800, model="cnn")
             mock_d.assert_called_once_with(path, max_dim=800, model="cnn")
-        finally:
-            db.close()
