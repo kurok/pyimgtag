@@ -52,6 +52,46 @@ def _make_scores(**overrides):
     return JudgeScores(**defaults)
 
 
+class TestScoreLabel:
+    """Tests for the _score_label function."""
+
+    def test_outstanding_at_4_5(self) -> None:
+        from pyimgtag.commands.judge import _score_label
+
+        assert _score_label(4.5) == "outstanding"
+
+    def test_outstanding_at_5_0(self) -> None:
+        from pyimgtag.commands.judge import _score_label
+
+        assert _score_label(5.0) == "outstanding"
+
+    def test_strong_at_4_0(self) -> None:
+        from pyimgtag.commands.judge import _score_label
+
+        assert _score_label(4.0) == "strong"
+
+    def test_strong_at_4_4(self) -> None:
+        from pyimgtag.commands.judge import _score_label
+
+        assert _score_label(4.4) == "strong"
+
+    def test_solid_at_3_5(self) -> None:
+        from pyimgtag.commands.judge import _score_label
+
+        assert _score_label(3.5) == "solid"
+
+    def test_acceptable_at_3_0(self) -> None:
+        from pyimgtag.commands.judge import _score_label
+
+        assert _score_label(3.0) == "acceptable"
+
+    def test_weak_below_3_0(self) -> None:
+        from pyimgtag.commands.judge import _score_label
+
+        assert _score_label(2.9) == "weak"
+        assert _score_label(1.0) == "weak"
+
+
 class TestCmdJudgeBasic:
     def test_returns_0_on_success(self, tmp_path: Path) -> None:
         from pyimgtag.commands.judge import cmd_judge
@@ -255,3 +295,96 @@ class TestCmdJudgeBasic:
         data = json.loads(out.read_text())
         names = [d["file_name"] for d in data]
         assert names == sorted(names)
+
+    def test_verbose_output(self, tmp_path: Path) -> None:
+        """--verbose flag uses _print_verbose path."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        (tmp_path / "photo.jpg").write_bytes(b"x")
+        args = _make_args(tmp_path, verbose=True)
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.judge_image.return_value = _make_scores()
+            mock_cls.return_value = mock_client
+            rc = cmd_judge(args, MagicMock())
+
+        assert rc == 0
+
+    def test_scan_directory_permission_error(self, tmp_path: Path) -> None:
+        """PermissionError from scan_directory returns 1."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        args = _make_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch(
+                "pyimgtag.commands.judge.scan_directory",
+                side_effect=PermissionError("denied"),
+            ),
+        ):
+            rc = cmd_judge(args, MagicMock())
+
+        assert rc == 1
+
+    def test_scan_directory_file_not_found_error(self, tmp_path: Path) -> None:
+        """FileNotFoundError from scan_directory returns 1."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        args = _make_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch(
+                "pyimgtag.commands.judge.scan_directory",
+                side_effect=FileNotFoundError("not found"),
+            ),
+        ):
+            rc = cmd_judge(args, MagicMock())
+
+        assert rc == 1
+
+    def test_photos_library_success(self, tmp_path: Path) -> None:
+        """scan_photos_library happy path returns results."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        args = _make_args(tmp_path)
+        args.input_dir = None
+        args.photos_library = str(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.judge_image.return_value = _make_scores()
+            mock_cls.return_value = mock_client
+            rc = cmd_judge(args, MagicMock())
+
+        assert rc == 0
+
+    def test_photos_library_permission_error(self, tmp_path: Path) -> None:
+        """PermissionError from scan_photos_library returns 1."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        args = _make_args(tmp_path)
+        args.input_dir = None
+        args.photos_library = str(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch(
+                "pyimgtag.commands.judge.scan_photos_library",
+                side_effect=PermissionError("denied"),
+            ),
+        ):
+            rc = cmd_judge(args, MagicMock())
+
+        assert rc == 1

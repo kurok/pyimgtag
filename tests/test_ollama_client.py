@@ -490,3 +490,154 @@ class TestOllamaClientJudgeImage:
         with patch.object(client._session, "post", side_effect=req.RequestException("down")):
             result = client.judge_image(str(img))
         assert result is None
+
+    def test_judge_image_returns_none_on_image_load_failure(self, tmp_path):
+        from unittest.mock import patch
+
+        from pyimgtag.ollama_client import OllamaClient
+
+        fake = tmp_path / "bad.jpg"
+        fake.write_bytes(b"\x00" * 10)
+        client = OllamaClient()
+        with patch("pyimgtag.ollama_client.is_raw", return_value=False):
+            with patch("pyimgtag.ollama_client.is_heic", return_value=False):
+                with patch("pyimgtag.ollama_client.Image.open", side_effect=OSError("cannot read")):
+                    result = client.judge_image(str(fake))
+        assert result is None
+
+    def test_judge_image_returns_none_on_response_parse_error(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+
+        from PIL import Image as PILImage
+
+        from pyimgtag.ollama_client import OllamaClient
+
+        img = tmp_path / "photo.jpg"
+        PILImage.new("RGB", (100, 100), color=(128, 128, 128)).save(str(img))
+        mock_response = MagicMock()
+        mock_response.json.side_effect = KeyError("missing key")
+        mock_response.raise_for_status = MagicMock()
+        client = OllamaClient()
+        with patch.object(client._session, "post", return_value=mock_response):
+            result = client.judge_image(str(img))
+        assert result is None
+
+
+class TestParseJudgeResponseEdgeCases:
+    """Additional tests for _parse_judge_response edge cases."""
+
+    def test_non_string_verdict_defaults_to_empty(self):
+        import json
+
+        raw = json.dumps(
+            {
+                "impact": 4,
+                "story_subject": 3,
+                "composition_center": 4,
+                "lighting": 4,
+                "creativity_style": 3,
+                "color_mood": 4,
+                "presentation_crop": 4,
+                "technical_excellence": 4,
+                "focus_sharpness": 4,
+                "exposure_tonal": 4,
+                "noise_cleanliness": 3,
+                "subject_separation": 4,
+                "edit_integrity": 4,
+                "verdict": 123,  # integer instead of string
+            }
+        )
+        result = _parse_judge_response(raw)
+        assert result is not None
+        assert result.verdict == ""
+
+    def test_markdown_fenced_judge_response(self):
+        import json
+
+        text = (
+            "```json\n"
+            + json.dumps(
+                {
+                    "impact": 4,
+                    "story_subject": 3,
+                    "composition_center": 4,
+                    "lighting": 4,
+                    "creativity_style": 3,
+                    "color_mood": 4,
+                    "presentation_crop": 4,
+                    "technical_excellence": 4,
+                    "focus_sharpness": 4,
+                    "exposure_tonal": 4,
+                    "noise_cleanliness": 3,
+                    "subject_separation": 4,
+                    "edit_integrity": 4,
+                    "verdict": "Good overall",
+                }
+            )
+            + "\n```"
+        )
+        result = _parse_judge_response(text)
+        assert result is not None
+        assert result.impact == 4.0
+        assert result.verdict == "Good overall"
+
+    def test_judge_response_with_text_around_json(self):
+        import json
+
+        text = "The photo is excellent. " + json.dumps(
+            {
+                "impact": 5,
+                "story_subject": 4,
+                "composition_center": 5,
+                "lighting": 4,
+                "creativity_style": 4,
+                "color_mood": 4,
+                "presentation_crop": 4,
+                "technical_excellence": 4,
+                "focus_sharpness": 4,
+                "exposure_tonal": 4,
+                "noise_cleanliness": 4,
+                "subject_separation": 4,
+                "edit_integrity": 4,
+                "verdict": "Excellent composition and light.",
+            }
+        )
+        result = _parse_judge_response(text)
+        assert result is not None
+        assert result.impact == 5.0
+
+    def test_judge_response_missing_all_scores_defaults_to_3(self):
+        import json
+
+        raw = json.dumps({"verdict": "No scores provided"})
+        result = _parse_judge_response(raw)
+        assert result is not None
+        assert result.impact == 3.0
+        assert result.story_subject == 3.0
+        assert result.composition_center == 3.0
+
+    def test_judge_response_string_scores_converted_to_float(self):
+        import json
+
+        raw = json.dumps(
+            {
+                "impact": "4.5",
+                "story_subject": "3",
+                "composition_center": 4,
+                "lighting": 4,
+                "creativity_style": 3,
+                "color_mood": 4,
+                "presentation_crop": 4,
+                "technical_excellence": 4,
+                "focus_sharpness": 4,
+                "exposure_tonal": 4,
+                "noise_cleanliness": 3,
+                "subject_separation": 4,
+                "edit_integrity": 4,
+                "verdict": "Good",
+            }
+        )
+        result = _parse_judge_response(raw)
+        assert result is not None
+        assert result.impact == 4.5
+        assert result.story_subject == 3.0
