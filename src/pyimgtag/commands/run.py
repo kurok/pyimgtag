@@ -70,7 +70,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             file=sys.stderr,
         )
 
-    extensions = {e.strip().lower() for e in args.extensions.split(",")}
+    extensions = {e.strip().lstrip(".").lower() for e in args.extensions.split(",")}
 
     ok, msg = check_ollama(args.ollama_url)
     if not ok:
@@ -92,7 +92,14 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         return 0
 
     if args.newest_first:
-        files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+
+        def _mtime(f: Path) -> float:
+            try:
+                return f.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        files.sort(key=_mtime, reverse=True)
 
     # --- dedup ---
     phash_map: dict[str, str] = {}

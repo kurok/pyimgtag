@@ -265,7 +265,7 @@ def _parse_response(text: str) -> TagResult:
     cleanup_class = _validated_enum(parsed.get("cleanup_class"), _CLEANUP_CLASS_ALLOWED)
 
     has_text_raw = parsed.get("has_text", False)
-    has_text = bool(has_text_raw) if isinstance(has_text_raw, bool) else False
+    has_text = bool(has_text_raw) if isinstance(has_text_raw, (bool, int)) else False
 
     text_summary = parsed.get("text_summary")
     if text_summary and not isinstance(text_summary, str):

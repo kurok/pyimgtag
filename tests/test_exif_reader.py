@@ -182,6 +182,21 @@ class TestReadExiftool:
             result = _read_exiftool(fake_img)
         assert result is None
 
+    def test_non_numeric_gps_returns_none_not_crash(self, tmp_path: Path):
+        """exiftool returning a non-numeric GPS value must return None, not raise ValueError."""
+        import json
+
+        fake_img = tmp_path / "photo.jpg"
+        fake_img.write_bytes(b"fake")
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = json.dumps([{"GPSLatitude": "N/A", "GPSLongitude": "W/A"}])
+        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+            from pyimgtag.exif_reader import _read_exiftool
+
+            result = _read_exiftool(fake_img)
+        assert result is None
+
 
 class TestGetFileDate:
     def test_uses_st_birthtime_when_present(self, tmp_path: Path):
