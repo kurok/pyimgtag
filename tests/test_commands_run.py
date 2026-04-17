@@ -159,3 +159,99 @@ class TestExtensionsWithDots:
         assert len(processed_files) == 1, (
             f"Expected photo.jpg to be processed when --extensions .jpg, got: {processed_files}"
         )
+
+
+class TestPhotosLibraryPermissionDialog:
+    """PermissionError from Photos Library scan triggers osascript dialog on macOS."""
+
+    def _make_args(self, tmp_path: Path) -> MagicMock:
+        args = MagicMock()
+        args.input_dir = None
+        args.photos_library = str(tmp_path)
+        args.extensions = "jpg"
+        args.newest_first = False
+        args.no_cache = True
+        args.dedup = False
+        args.limit = None
+        args.date = None
+        args.date_from = None
+        args.date_to = None
+        args.skip_no_gps = False
+        args.write_back = False
+        args.write_exif = False
+        args.sidecar_only = False
+        args.dry_run = True
+        args.verbose = False
+        args.jsonl_stdout = False
+        args.output_json = None
+        args.output_csv = None
+        args.ollama_url = "http://localhost:11434"
+        args.model = "test"
+        args.max_dim = 512
+        args.timeout = 5
+        args.cache_dir = None
+        args.no_recursive = False
+        return args
+
+    def test_dialog_invoked_on_permission_error(self, tmp_path: Path) -> None:
+        """cmd_run must call _request_photos_access_dialog when scan raises PermissionError."""
+        from pyimgtag.commands.run import cmd_run
+
+        args = self._make_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch(
+                "pyimgtag.commands.run.scan_photos_library",
+                side_effect=PermissionError("denied"),
+            ),
+            patch("pyimgtag.commands.run._request_photos_access_dialog") as mock_dialog,
+        ):
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 1
+        mock_dialog.assert_called_once()
+
+    def test_dialog_not_invoked_for_file_not_found(self, tmp_path: Path) -> None:
+        """FileNotFoundError must NOT trigger the dialog."""
+        from pyimgtag.commands.run import cmd_run
+
+        args = self._make_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch(
+                "pyimgtag.commands.run.scan_photos_library",
+                side_effect=FileNotFoundError("not found"),
+            ),
+            patch("pyimgtag.commands.run._request_photos_access_dialog") as mock_dialog,
+        ):
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 1
+        mock_dialog.assert_not_called()
+
+    def test_request_photos_access_dialog_skips_non_macos(self) -> None:
+        """Dialog helper must be a no-op on non-macOS platforms."""
+        from pyimgtag.commands.run import _request_photos_access_dialog
+
+        with (
+            patch("pyimgtag.commands.run.get_platform_name", return_value="Linux"),
+            patch("pyimgtag.commands.run.subprocess.run") as mock_run,
+        ):
+            _request_photos_access_dialog()
+
+        mock_run.assert_not_called()
+
+    def test_request_photos_access_dialog_skips_when_osascript_missing(self) -> None:
+        """Dialog helper must be a no-op when osascript is not on PATH."""
+        from pyimgtag.commands.run import _request_photos_access_dialog
+
+        with (
+            patch("pyimgtag.commands.run.get_platform_name", return_value="Darwin"),
+            patch("pyimgtag.commands.run.shutil.which", return_value=None),
+            patch("pyimgtag.commands.run.subprocess.run") as mock_run,
+        ):
+            _request_photos_access_dialog()
+
+        mock_run.assert_not_called()
