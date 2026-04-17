@@ -481,3 +481,75 @@ class TestWriteToPhotosBackendSelection:
                     ):
                         result = write_to_photos("/path/photo.jpg", ["tag"], None)
                         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# read_keywords_from_photos
+# ---------------------------------------------------------------------------
+
+
+class TestReadKeywordsFromPhotos:
+    def test_returns_list_from_osascript(self):
+        from pyimgtag.applescript_writer import read_keywords_from_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="sunset, beach, travel\n", stderr=""
+            )
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result == ["sunset", "beach", "travel"]
+
+    def test_returns_empty_list_on_not_macos(self):
+        from pyimgtag.applescript_writer import read_keywords_from_photos
+
+        with patch("pyimgtag.applescript_writer._IS_MACOS", False):
+            result = read_keywords_from_photos("/any/path.jpg")
+        assert result == []
+
+    def test_returns_empty_list_on_osascript_error(self):
+        from pyimgtag.applescript_writer import read_keywords_from_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result == []
+
+    def test_returns_empty_list_when_no_keywords(self):
+        from pyimgtag.applescript_writer import read_keywords_from_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_run.return_value = MagicMock(returncode=0, stdout="\n", stderr="")
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result == []
+
+    def test_reads_via_photoscript_when_available(self):
+        from pyimgtag.applescript_writer import read_keywords_from_photos
+
+        mock_photo = MagicMock()
+        mock_photo.keywords = ["dog", "park"]
+        mock_lib = MagicMock()
+        mock_lib.photo.return_value = mock_photo
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True),
+            patch("pyimgtag.applescript_writer.photoscript") as mock_ps,
+        ):
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result == ["dog", "park"]

@@ -148,6 +148,74 @@ def _write_via_osascript(
     return None
 
 
+def _build_read_applescript(file_name: str) -> str:
+    """Build AppleScript to read keywords list from a photo, returning comma-separated."""
+    uuid = _escape_applescript_string(PurePosixPath(file_name).stem)
+    return (
+        'tell application "Photos"\n'
+        f'    set theItem to media item id "{uuid}"\n'
+        "    set kws to keywords of theItem\n"
+        '    set AppleScript\'s text item delimiters to ", "\n'
+        "    return kws as text\n"
+        "end tell"
+    )
+
+
+def _read_via_photoscript(file_name: str) -> list[str]:
+    """Read keywords from Photos using photoscript library."""
+    try:
+        photos_app = photoscript.PhotosLibrary()
+        uuid = PurePosixPath(file_name).stem
+        try:
+            photo = photos_app.photo(uuid=uuid)
+        except Exception:
+            return []
+        return list(photo.keywords or [])
+    except Exception:
+        return []
+
+
+def _read_via_osascript(file_name: str) -> list[str]:
+    """Read keywords from Photos via raw osascript subprocess."""
+    if not is_applescript_available():
+        return []
+    script = _build_read_applescript(file_name)
+    try:
+        proc = subprocess.run(  # noqa: S603
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    if proc.returncode != 0:
+        return []
+    raw = proc.stdout.strip()
+    if not raw:
+        return []
+    return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+def read_keywords_from_photos(file_path: str) -> list[str]:
+    """Read the current keyword list for a photo from Apple Photos.
+
+    **macOS only.** Returns an empty list on non-macOS or on any error.
+
+    Args:
+        file_path: Full path to the image (only the basename is used for lookup).
+
+    Returns:
+        List of keyword strings currently on the photo, or ``[]`` on failure.
+    """
+    if not _IS_MACOS:
+        return []
+    file_name = PurePosixPath(file_path).name
+    if _HAS_PHOTOSCRIPT:
+        return _read_via_photoscript(file_name)
+    return _read_via_osascript(file_name)
+
+
 def write_to_photos(
     file_path: str,
     tags: list[str],
