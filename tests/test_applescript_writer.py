@@ -381,9 +381,8 @@ class TestWriteToPhotos:
 class TestWriteViaPhotoscript:
     def test_success_sets_keywords_and_description(self):
         mock_photo = MagicMock()
-        mock_photo.filename = "photo.jpg"
         mock_lib = MagicMock()
-        mock_lib.search.return_value = [mock_photo]
+        mock_lib.photo.return_value = mock_photo
 
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
             mock_ps.PhotosLibrary.return_value = mock_lib
@@ -395,9 +394,8 @@ class TestWriteViaPhotoscript:
 
     def test_success_with_title(self):
         mock_photo = MagicMock()
-        mock_photo.filename = "photo.jpg"
         mock_lib = MagicMock()
-        mock_lib.search.return_value = [mock_photo]
+        mock_lib.photo.return_value = mock_photo
 
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
             mock_ps.PhotosLibrary.return_value = mock_lib
@@ -408,7 +406,7 @@ class TestWriteViaPhotoscript:
 
     def test_no_match_returns_error(self):
         mock_lib = MagicMock()
-        mock_lib.search.return_value = []
+        mock_lib.photo.side_effect = Exception("photo not found")
 
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
             mock_ps.PhotosLibrary.return_value = mock_lib
@@ -417,20 +415,17 @@ class TestWriteViaPhotoscript:
         assert result is not None
         assert "missing.jpg" in result
 
-    def test_filters_to_exact_filename(self):
-        photo1 = MagicMock()
-        photo1.filename = "photo.jpg"
-        photo2 = MagicMock()
-        photo2.filename = "other_photo.jpg"
+    def test_lookup_uses_uuid_from_filename_stem(self):
+        mock_photo = MagicMock()
         mock_lib = MagicMock()
-        mock_lib.search.return_value = [photo1, photo2]
+        mock_lib.photo.return_value = mock_photo
 
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
             mock_ps.PhotosLibrary.return_value = mock_lib
-            result = _write_via_photoscript("photo.jpg", ["tag"], None)
+            result = _write_via_photoscript("AABBCCDD-1234.heic", ["tag"], None)
 
         assert result is None
-        assert photo1.keywords == ["tag"]
+        mock_lib.photo.assert_called_once_with(uuid="AABBCCDD-1234")
 
     def test_exception_returns_error(self):
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
@@ -442,11 +437,9 @@ class TestWriteViaPhotoscript:
 
     def test_skips_description_when_none(self):
         mock_photo = MagicMock()
-        mock_photo.filename = "photo.jpg"
-        # Reset the description attribute so we can check it wasn't set
         mock_photo.description = "original"
         mock_lib = MagicMock()
-        mock_lib.search.return_value = [mock_photo]
+        mock_lib.photo.return_value = mock_photo
 
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
             mock_ps.PhotosLibrary.return_value = mock_lib
