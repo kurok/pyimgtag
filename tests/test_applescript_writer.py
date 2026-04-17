@@ -57,9 +57,13 @@ class TestEscapeApplescriptString:
 
 
 class TestBuildApplescript:
-    def test_contains_filename(self):
+    def test_uses_media_item_id_lookup(self):
         script = _build_applescript("photo.jpg", ["sunset"], None)
-        assert 'whose filename is "photo.jpg"' in script
+        assert 'media item id "photo"' in script
+
+    def test_uuid_is_filename_stem(self):
+        script = _build_applescript("AABB-1234.heic", ["tag"], None)
+        assert 'media item id "AABB-1234"' in script
 
     def test_contains_tags_list(self):
         script = _build_applescript("photo.jpg", ["beach", "sunset"], None)
@@ -76,10 +80,6 @@ class TestBuildApplescript:
     def test_description_absent_when_summary_none(self):
         script = _build_applescript("img.jpg", ["tag"], None)
         assert "set description" not in script
-
-    def test_filename_with_spaces(self):
-        script = _build_applescript("my photo 01.jpg", ["tag"], None)
-        assert 'whose filename is "my photo 01.jpg"' in script
 
     def test_filename_with_quotes_escaped(self):
         script = _build_applescript('say "hi".jpg', ["tag"], None)
@@ -109,10 +109,6 @@ class TestBuildApplescript:
     def test_title_with_quotes_escaped(self):
         script = _build_applescript("img.jpg", ["tag"], None, title='A "great" shot')
         assert '\\"great\\"' in script
-
-    def test_error_when_no_item_found(self):
-        script = _build_applescript("photo.jpg", ["a"], None)
-        assert "error" in script
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +242,7 @@ class TestWriteToPhotos:
 
         assert captured, "subprocess.run was not called"
         script = captured[0]
-        assert 'whose filename is "vacation.jpg"' in script
-        # Full path must not appear verbatim in the filename lookup
+        assert 'media item id "vacation"' in script
         assert "/some/deep/path/" not in script
 
     def test_tags_formatted_as_applescript_list(self):
@@ -339,7 +334,7 @@ class TestWriteToPhotos:
                 write_to_photos("/path/my vacation photo.jpg", ["beach"], None)
 
         script = captured[0]
-        assert 'whose filename is "my vacation photo.jpg"' in script
+        assert 'media item id "my vacation photo"' in script
 
     def test_filename_with_quotes(self):
         """Filenames with double quotes must be escaped."""
