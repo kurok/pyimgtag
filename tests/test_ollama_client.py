@@ -115,7 +115,7 @@ class TestParseResponse:
     def test_json_extracted_when_braces_appear_in_preamble_prose(self):
         """Greedy regex fails when model emits {word} prose before the JSON object."""
         text = (
-            'The {image} shows outdoor {scene} with citrus {fruit}.\n'
+            "The {image} shows outdoor {scene} with citrus {fruit}.\n"
             '{"tags":["mandarine tree","portugal"],"summary":"A grove.",'
             '"scene_category":"outdoor_leisure","emotional_tone":"positive",'
             '"cleanup_class":"keep","has_text":false,'
