@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
+import pytest
+
 from pyimgtag.cache import DiskCache
 
 
@@ -28,3 +32,12 @@ class TestDiskCache:
         path.write_text("not json")
         c = DiskCache(path)
         assert c.get("any") is None
+
+    def test_atomic_write_cleans_up_tmp_on_rename_failure(self, tmp_path):
+        path = tmp_path / "cache.json"
+        c = DiskCache(path)
+        with patch("pathlib.Path.replace", side_effect=OSError("rename failed")):
+            with pytest.raises(OSError, match="rename failed"):
+                c.set("k", {"v": 1})
+        tmp = path.with_suffix(".tmp")
+        assert not tmp.exists()
