@@ -83,7 +83,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         else:
             source_type = "photos_library"
             files = scan_photos_library(args.photos_library, extensions)
-    except FileNotFoundError as e:
+    except (FileNotFoundError, PermissionError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 

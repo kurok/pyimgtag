@@ -79,3 +79,34 @@ class TestScanPhotosLibrary:
     def test_missing_library(self):
         with pytest.raises(FileNotFoundError):
             scan_photos_library("/nonexistent/12345.photoslibrary")
+
+    def test_permission_error_on_originals_raises_with_fda_hint(self, tmp_path):
+        """PermissionError on originals/ must surface with Full Disk Access hint."""
+        from unittest.mock import patch
+
+        originals = tmp_path / "originals"
+        originals.mkdir()
+
+        with patch("pyimgtag.scanner.Path.iterdir", side_effect=PermissionError("denied")):
+            with pytest.raises(PermissionError, match="Full Disk Access"):
+                scan_photos_library(tmp_path)
+
+    def test_permission_error_on_subdirectory_raises_with_fda_hint(self, tmp_path):
+        """PermissionError on originals/ subdirectory must surface with Full Disk Access hint."""
+        from unittest.mock import patch
+
+        originals = tmp_path / "originals"
+        originals.mkdir()
+        subdir = originals / "0"
+        subdir.mkdir()
+
+        real_iterdir = originals.iterdir
+
+        def fake_iterdir(self):
+            if self == originals:
+                return real_iterdir()
+            raise PermissionError("denied")
+
+        with patch("pyimgtag.scanner.Path.iterdir", fake_iterdir):
+            with pytest.raises(PermissionError, match="Full Disk Access"):
+                scan_photos_library(tmp_path)
