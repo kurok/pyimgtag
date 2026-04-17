@@ -98,7 +98,6 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
             files = scan_photos_library(
                 args.photos_library,
                 extensions=exts,
-                recursive=not getattr(args, "no_recursive", False),
             )
         except (PermissionError, FileNotFoundError) as exc:
             print(f"Error scanning Photos library: {exc}", file=sys.stderr)
