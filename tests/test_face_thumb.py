@@ -1,10 +1,10 @@
 """Tests for face_thumb module."""
+
 from __future__ import annotations
 
 import base64
 import io
 
-import pytest
 from PIL import Image
 
 from pyimgtag.face_thumb import face_thumbnail_b64
