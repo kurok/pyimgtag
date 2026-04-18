@@ -82,16 +82,6 @@ class ProgressDB:
                 edit_integrity     REAL
             )""",
         ),
-        (
-            6,
-            """CREATE TABLE IF NOT EXISTS persons (
-                id        INTEGER PRIMARY KEY AUTOINCREMENT,
-                label     TEXT NOT NULL DEFAULT '',
-                confirmed INTEGER NOT NULL DEFAULT 0,
-                source    TEXT NOT NULL DEFAULT 'auto',
-                trusted   INTEGER NOT NULL DEFAULT 0
-            )""",
-        ),
         (6, "ALTER TABLE persons ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'"),
         (6, "ALTER TABLE persons ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0"),
     )
@@ -731,6 +721,8 @@ class ProgressDB:
 
     def merge_persons(self, source_id: int, target_id: int) -> None:
         """Reassign all faces from source_id to target_id, then delete source_id."""
+        if not self._conn.execute("SELECT 1 FROM persons WHERE id = ?", (target_id,)).fetchone():
+            raise ValueError(f"merge target person {target_id} does not exist")
         self._conn.execute(
             "UPDATE faces SET person_id = ? WHERE person_id = ?", (target_id, source_id)
         )

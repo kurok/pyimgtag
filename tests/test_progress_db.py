@@ -716,7 +716,7 @@ class TestMigrationV4:
 
     def test_v3_db_migrates_to_v4(self, tmp_path):
         db_path = tmp_path / "test.db"
-        # Build a v3 database manually
+        # Build a v3 database manually (must include persons/faces created by real v3 migration)
         conn = sqlite3.connect(str(db_path))
         conn.execute(
             """CREATE TABLE processed_images (
@@ -725,6 +725,26 @@ class TestMigrationV4:
                 error_message TEXT, scene_category TEXT, emotional_tone TEXT,
                 cleanup_class TEXT, has_text INTEGER DEFAULT 0, text_summary TEXT,
                 event_hint TEXT, significance TEXT
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE persons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL DEFAULT '',
+                confirmed INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE faces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                image_path TEXT NOT NULL,
+                bbox_x INTEGER NOT NULL DEFAULT 0,
+                bbox_y INTEGER NOT NULL DEFAULT 0,
+                bbox_w INTEGER NOT NULL DEFAULT 0,
+                bbox_h INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                embedding BLOB,
+                person_id INTEGER REFERENCES persons(id)
             )"""
         )
         conn.execute("PRAGMA user_version = 3")
@@ -1101,26 +1121,23 @@ class TestDeleteTag:
 
 class TestPersonSourceTrusted:
     def test_migration_adds_source_column(self, tmp_path):
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        cols = [r[1] for r in db._conn.execute("PRAGMA table_info(persons)").fetchall()]
-        db.close()
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            cols = [r[1] for r in db._conn.execute("PRAGMA table_info(persons)").fetchall()]
         assert "source" in cols
         assert "trusted" in cols
 
     def test_create_person_defaults(self, tmp_path):
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        pid = db.create_person(label="Alice")
-        persons = db.get_persons()
-        db.close()
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="Alice")
+            persons = db.get_persons()
         p = next(p for p in persons if p.person_id == pid)
         assert p.source == "auto"
         assert p.trusted is False
 
     def test_create_person_photos_source(self, tmp_path):
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        pid = db.create_person(label="Bob", source="photos", trusted=True, confirmed=True)
-        persons = db.get_persons()
-        db.close()
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="Bob", source="photos", trusted=True, confirmed=True)
+            persons = db.get_persons()
         p = next(p for p in persons if p.person_id == pid)
         assert p.source == "photos"
         assert p.trusted is True
@@ -1129,54 +1146,57 @@ class TestPersonSourceTrusted:
     def test_merge_persons_reassigns_faces(self, tmp_path):
         from pyimgtag.models import FaceDetection
 
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        p1 = db.create_person(label="Alice")
-        p2 = db.create_person(label="Alice")
-        det = FaceDetection(
-            image_path="img.jpg", bbox_x=0, bbox_y=0, bbox_w=50, bbox_h=50, confidence=0.9
-        )
-        fid = db.insert_face("img.jpg", det)
-        db.set_person_id(fid, p2)
-        db.merge_persons(source_id=p2, target_id=p1)
-        row = db._conn.execute("SELECT person_id FROM faces WHERE id = ?", (fid,)).fetchone()
-        assert row[0] == p1
-        # p2 should be deleted
-        remaining = [p.person_id for p in db.get_persons()]
-        assert p2 not in remaining
-        db.close()
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            p1 = db.create_person(label="Alice")
+            p2 = db.create_person(label="Alice")
+            det = FaceDetection(
+                image_path="img.jpg", bbox_x=0, bbox_y=0, bbox_w=50, bbox_h=50, confidence=0.9
+            )
+            fid = db.insert_face("img.jpg", det)
+            db.set_person_id(fid, p2)
+            db.merge_persons(source_id=p2, target_id=p1)
+            row = db._conn.execute("SELECT person_id FROM faces WHERE id = ?", (fid,)).fetchone()
+            assert row[0] == p1
+            # p2 should be deleted
+            remaining = [p.person_id for p in db.get_persons()]
+            assert p2 not in remaining
+
+    def test_merge_persons_invalid_target_raises(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            p1 = db.create_person(label="Alice")
+            with pytest.raises(ValueError, match="does not exist"):
+                db.merge_persons(source_id=p1, target_id=9999)
 
     def test_delete_person_clears_faces(self, tmp_path):
         from pyimgtag.models import FaceDetection
 
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        pid = db.create_person(label="Charlie")
-        det = FaceDetection(
-            image_path="x.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.8
-        )
-        fid = db.insert_face("x.jpg", det)
-        db.set_person_id(fid, pid)
-        db.delete_person(pid)
-        row = db._conn.execute("SELECT person_id FROM faces WHERE id = ?", (fid,)).fetchone()
-        assert row[0] is None
-        assert all(p.person_id != pid for p in db.get_persons())
-        db.close()
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="Charlie")
+            det = FaceDetection(
+                image_path="x.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.8
+            )
+            fid = db.insert_face("x.jpg", det)
+            db.set_person_id(fid, pid)
+            db.delete_person(pid)
+            row = db._conn.execute("SELECT person_id FROM faces WHERE id = ?", (fid,)).fetchone()
+            assert row[0] is None
+            assert all(p.person_id != pid for p in db.get_persons())
 
     def test_get_unassigned_faces(self, tmp_path):
         from pyimgtag.models import FaceDetection
 
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        pid = db.create_person(label="Dan")
-        det1 = FaceDetection(
-            image_path="a.jpg", bbox_x=0, bbox_y=0, bbox_w=10, bbox_h=10, confidence=0.9
-        )
-        det2 = FaceDetection(
-            image_path="b.jpg", bbox_x=0, bbox_y=0, bbox_w=10, bbox_h=10, confidence=0.9
-        )
-        fid1 = db.insert_face("a.jpg", det1)
-        fid2 = db.insert_face("b.jpg", det2)
-        db.set_person_id(fid1, pid)
-        unassigned = db.get_unassigned_faces()
-        db.close()
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="Dan")
+            det1 = FaceDetection(
+                image_path="a.jpg", bbox_x=0, bbox_y=0, bbox_w=10, bbox_h=10, confidence=0.9
+            )
+            det2 = FaceDetection(
+                image_path="b.jpg", bbox_x=0, bbox_y=0, bbox_w=10, bbox_h=10, confidence=0.9
+            )
+            fid1 = db.insert_face("a.jpg", det1)
+            fid2 = db.insert_face("b.jpg", det2)
+            db.set_person_id(fid1, pid)
+            unassigned = db.get_unassigned_faces()
         ids = [f["id"] for f in unassigned]
         assert fid2 in ids
         assert fid1 not in ids
@@ -1184,15 +1204,14 @@ class TestPersonSourceTrusted:
     def test_get_faces_for_person(self, tmp_path):
         from pyimgtag.models import FaceDetection
 
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        pid = db.create_person(label="Eve")
-        det = FaceDetection(
-            image_path="c.jpg", bbox_x=5, bbox_y=10, bbox_w=40, bbox_h=40, confidence=0.85
-        )
-        fid = db.insert_face("c.jpg", det)
-        db.set_person_id(fid, pid)
-        faces = db.get_faces_for_person(pid)
-        db.close()
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="Eve")
+            det = FaceDetection(
+                image_path="c.jpg", bbox_x=5, bbox_y=10, bbox_w=40, bbox_h=40, confidence=0.85
+            )
+            fid = db.insert_face("c.jpg", det)
+            db.set_person_id(fid, pid)
+            faces = db.get_faces_for_person(pid)
         assert len(faces) == 1
         assert faces[0]["id"] == fid
         assert faces[0]["image_path"] == "c.jpg"
