@@ -111,6 +111,15 @@ class TestBuildApplescript:
         script = _build_applescript("img.jpg", ["tag"], None, title='A "great" shot')
         assert '\\"great\\"' in script
 
+    def test_fallback_filename_search_present(self):
+        script = _build_applescript("AABB-1234.heic", ["tag"], None)
+        assert "on error" in script
+        assert 'filename = "AABB-1234.heic"' in script
+
+    def test_fallback_not_found_error_message(self):
+        script = _build_applescript("AABB-1234.heic", ["tag"], None)
+        assert "Photo not found: AABB-1234.heic" in script
+
 
 # ---------------------------------------------------------------------------
 # is_applescript_available
