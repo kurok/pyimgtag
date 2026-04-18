@@ -1413,6 +1413,26 @@ class TestJudgeScores:
                 nearest_country TEXT
             )"""
         )
+        conn.execute(
+            """CREATE TABLE persons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL DEFAULT '',
+                confirmed INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        conn.execute(
+            """CREATE TABLE faces (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                image_path TEXT NOT NULL,
+                bbox_x INTEGER NOT NULL DEFAULT 0,
+                bbox_y INTEGER NOT NULL DEFAULT 0,
+                bbox_w INTEGER NOT NULL DEFAULT 0,
+                bbox_h INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                embedding BLOB,
+                person_id INTEGER REFERENCES persons(id)
+            )"""
+        )
         conn.execute("PRAGMA user_version = 4")
         conn.commit()
         conn.close()
