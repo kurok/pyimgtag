@@ -24,6 +24,8 @@ def cmd_faces(args: argparse.Namespace) -> int:
         return _handle_faces_review(args)
     if args.faces_action == "apply":
         return _handle_faces_apply(args)
+    if args.faces_action == "import-photos":
+        return _handle_faces_import_photos(args)
 
     return 1
 
@@ -186,6 +188,30 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
     else:
         print(f"\n{len(image_keywords)} image(s) have person keywords.", file=sys.stderr)
         print("Use --write-exif or --sidecar-only to write them to files.", file=sys.stderr)
+    return 0
+
+
+def _handle_faces_import_photos(args: argparse.Namespace) -> int:
+    """Import named persons from Apple Photos into the faces DB."""
+    try:
+        from pyimgtag.photos_faces_importer import import_photos_persons
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    with ProgressDB(db_path=args.db) as db:
+        try:
+            imported, skipped = import_photos_persons(db)
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    print(f"Imported {imported} person(s) from Apple Photos.", file=sys.stderr)
+    if skipped:
+        print(
+            f"{skipped} multi-face photo(s) could not be auto-assigned — use 'faces ui' to review.",
+            file=sys.stderr,
+        )
     return 0
 
 

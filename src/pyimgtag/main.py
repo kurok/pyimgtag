@@ -226,6 +226,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preview keyword changes without writing",
     )
 
+    # faces import-photos
+    faces_import = faces_sub.add_parser(
+        "import-photos", help="Import named persons from Apple Photos library"
+    )
+    faces_import.add_argument("--db", help=_DEFAULT_DB_HELP)
+
     # --- query subcommand ---
     query_p = subparsers.add_parser("query", help="Query images with advanced filters")
     query_p.add_argument("--db", help=_DEFAULT_DB_HELP)
