@@ -813,6 +813,13 @@ class ProgressDB:
             for r in rows
         ]
 
+    def get_assigned_faces(self) -> list[dict]:
+        """Return all faces that have a person assignment."""
+        rows = self._conn.execute(
+            "SELECT id, image_path FROM faces WHERE person_id IS NOT NULL"
+        ).fetchall()
+        return [{"id": r[0], "image_path": r[1]} for r in rows]
+
     def get_face_count(self) -> int:
         """Return total number of detected faces."""
         return self._conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0]

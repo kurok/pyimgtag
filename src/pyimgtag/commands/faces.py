@@ -148,10 +148,10 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
 
         # Build image_path -> list of person keywords
         image_keywords: dict[str, list[str]] = {}
-        rows = db._conn.execute(
-            "SELECT id, image_path FROM faces WHERE person_id IS NOT NULL"
-        ).fetchall()
-        for face_id, image_path in rows:
+        rows = db.get_assigned_faces()
+        for row in rows:
+            face_id = row["id"]
+            image_path = row["image_path"]
             label = face_to_label.get(face_id, "")
             if label:
                 keyword = f"person:{label}"

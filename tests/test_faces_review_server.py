@@ -1,7 +1,6 @@
 """Tests for faces_review_server FastAPI endpoints."""
-from __future__ import annotations
 
-from unittest.mock import patch
+from __future__ import annotations
 
 import pytest
 
@@ -11,7 +10,7 @@ pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
 from pyimgtag.faces_review_server import build_app
-from pyimgtag.models import FaceDetection, PersonCluster
+from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
 
 
@@ -35,7 +34,7 @@ class TestFacesReviewServerPersons:
         assert resp.json() == []
 
     def test_get_persons_with_data(self, client, db):
-        pid = db.create_person(label="Alice", source="photos", trusted=True)
+        db.create_person(label="Alice", source="photos", trusted=True)
         resp = client.get("/api/persons")
         assert resp.status_code == 200
         data = resp.json()
@@ -47,7 +46,9 @@ class TestFacesReviewServerPersons:
 
     def test_get_persons_face_count(self, client, db):
         pid = db.create_person(label="Bob")
-        det = FaceDetection(image_path="x.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9)
+        det = FaceDetection(
+            image_path="x.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9
+        )
         fid = db.insert_face("x.jpg", det)
         db.set_person_id(fid, pid)
         resp = client.get("/api/persons")
@@ -57,7 +58,9 @@ class TestFacesReviewServerPersons:
 class TestFacesReviewServerFaces:
     def test_get_faces_for_person(self, client, db):
         pid = db.create_person(label="Carol")
-        det = FaceDetection(image_path="img.jpg", bbox_x=10, bbox_y=20, bbox_w=40, bbox_h=40, confidence=0.8)
+        det = FaceDetection(
+            image_path="img.jpg", bbox_x=10, bbox_y=20, bbox_w=40, bbox_h=40, confidence=0.8
+        )
         fid = db.insert_face("img.jpg", det)
         db.set_person_id(fid, pid)
         resp = client.get(f"/api/persons/{pid}/faces")
@@ -74,7 +77,9 @@ class TestFacesReviewServerFaces:
 
     def test_unassign_face(self, client, db):
         pid = db.create_person(label="Dan")
-        det = FaceDetection(image_path="y.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.7)
+        det = FaceDetection(
+            image_path="y.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.7
+        )
         fid = db.insert_face("y.jpg", det)
         db.set_person_id(fid, pid)
         resp = client.post(f"/api/faces/{fid}/unassign")
@@ -87,7 +92,9 @@ class TestFacesReviewServerMerge:
     def test_merge_persons(self, client, db):
         p1 = db.create_person(label="Eve")
         p2 = db.create_person(label="Eve")
-        det = FaceDetection(image_path="z.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9)
+        det = FaceDetection(
+            image_path="z.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9
+        )
         fid = db.insert_face("z.jpg", det)
         db.set_person_id(fid, p2)
         resp = client.post(f"/api/persons/{p2}/merge/{p1}")
@@ -99,7 +106,9 @@ class TestFacesReviewServerMerge:
 
     def test_delete_person(self, client, db):
         pid = db.create_person(label="Frank")
-        det = FaceDetection(image_path="w.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9)
+        det = FaceDetection(
+            image_path="w.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9
+        )
         fid = db.insert_face("w.jpg", det)
         db.set_person_id(fid, pid)
         resp = client.delete(f"/api/persons/{pid}")

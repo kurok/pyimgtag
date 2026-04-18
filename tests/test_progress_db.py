@@ -1422,3 +1422,35 @@ class TestJudgeScores:
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='judge_scores'"
             ).fetchone()
             assert row is not None
+
+
+class TestGetAssignedFaces:
+    def test_returns_only_assigned(self, tmp_path):
+        from pyimgtag.models import FaceDetection
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="Alice")
+            det1 = FaceDetection(
+                image_path="a.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9
+            )
+            det2 = FaceDetection(
+                image_path="b.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9
+            )
+            fid1 = db.insert_face("a.jpg", det1)
+            fid2 = db.insert_face("b.jpg", det2)
+            db.set_person_id(fid1, pid)
+            assigned = db.get_assigned_faces()
+        ids = [f["id"] for f in assigned]
+        assert fid1 in ids
+        assert fid2 not in ids
+        assert all("image_path" in f for f in assigned)
+
+    def test_empty_when_no_assignments(self, tmp_path):
+        from pyimgtag.models import FaceDetection
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            det = FaceDetection(
+                image_path="x.jpg", bbox_x=0, bbox_y=0, bbox_w=30, bbox_h=30, confidence=0.9
+            )
+            db.insert_face("x.jpg", det)
+            assert db.get_assigned_faces() == []
