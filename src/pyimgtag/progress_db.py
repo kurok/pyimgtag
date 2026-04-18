@@ -788,6 +788,11 @@ class ProgressDB:
             for r in rows
         ]
 
+    def unassign_face(self, face_id: int) -> None:
+        """Remove the person assignment from a face."""
+        self._conn.execute("UPDATE faces SET person_id = NULL WHERE id = ?", (face_id,))
+        self._conn.commit()
+
     def get_faces_for_person(self, person_id: int) -> list[dict]:
         """Return all faces assigned to a person."""
         rows = self._conn.execute(
