@@ -381,6 +381,11 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.review_cmd import cmd_review
     from pyimgtag.commands.run import cmd_run
     from pyimgtag.commands.tags import cmd_tags
+    from pyimgtag.progress_db import ProgressDB
+
+    progress_db: ProgressDB | None = None
+    if args.subcommand == "judge" and getattr(args, "db", None) is not None:
+        progress_db = ProgressDB(db_path=args.db)
 
     dispatch: dict[str, Any] = {
         "run": lambda: cmd_run(args, parser),
@@ -391,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
         "review": lambda: cmd_review(args),
         "faces": lambda: cmd_faces(args),
         "query": lambda: cmd_query(args),
-        "judge": lambda: cmd_judge(args, None),
+        "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
     }
 
