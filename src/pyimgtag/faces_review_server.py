@@ -146,13 +146,6 @@ def build_app(db: ProgressDB) -> Any:
     class _LabelBody(BaseModel):
         label: str
 
-    # PEP 563 (`from __future__ import annotations`) turns all annotations into
-    # forward-ref strings.  FastAPI resolves them via `get_type_hints(func,
-    # globalns=func.__globals__)`.  Since `_LabelBody` is local to `build_app`
-    # it won't be found in module globals, so we publish it there before any
-    # route is registered.
-    globals()["_LabelBody"] = _LabelBody
-
     from pyimgtag.face_thumb import face_thumbnail_b64
 
     app = FastAPI(title="pyimgtag Faces")
@@ -194,10 +187,14 @@ def build_app(db: ProgressDB) -> Any:
             result.append({**f, "thumb": thumb})
         return result
 
-    @app.post("/api/persons/{person_id}/label")
     async def update_label(person_id: int, body: _LabelBody = Body(...)) -> dict:
         db.update_person_label(person_id, body.label)
         return {"ok": True}
+
+    # PEP 563 turns annotations into strings; patch the annotation to the
+    # actual class object before FastAPI builds the TypeAdapter for this route.
+    update_label.__annotations__["body"] = _LabelBody
+    app.post("/api/persons/{person_id}/label")(update_label)
 
     @app.post("/api/persons/{source_id}/merge/{target_id}")
     async def merge_persons(source_id: int, target_id: int) -> dict:
