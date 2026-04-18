@@ -544,3 +544,69 @@ class TestReadKeywordsFromPhotos:
             mock_ps.PhotosLibrary.return_value = mock_lib
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
         assert result == ["dog", "park"]
+
+
+# ---------------------------------------------------------------------------
+# write_to_photos mode parameter
+# ---------------------------------------------------------------------------
+
+
+class TestWriteToPhotosMode:
+    def test_overwrite_mode_does_not_read_existing(self):
+        """overwrite (default) calls write without reading existing keywords."""
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer.read_keywords_from_photos") as mock_read,
+            patch("pyimgtag.applescript_writer._write_via_osascript", return_value=None),
+        ):
+            write_to_photos("/path/img.jpg", ["new_tag"], None, mode="overwrite")
+        mock_read.assert_not_called()
+
+    def test_append_mode_merges_with_existing(self):
+        """append mode reads existing keywords and merges new ones in."""
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch(
+                "pyimgtag.applescript_writer.read_keywords_from_photos",
+                return_value=["existing", "score:3.5"],
+            ),
+            patch(
+                "pyimgtag.applescript_writer._write_via_osascript", return_value=None
+            ) as mock_write,
+        ):
+            write_to_photos("/path/img.jpg", ["new_tag", "score:4.2"], None, mode="append")
+        called_tags = mock_write.call_args[0][1]
+        assert "existing" in called_tags
+        assert "score:4.2" in called_tags
+        assert "new_tag" in called_tags
+        assert "score:3.5" not in called_tags  # old score removed
+
+    def test_append_mode_deduplicates(self):
+        """append mode does not produce duplicate tags."""
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch(
+                "pyimgtag.applescript_writer.read_keywords_from_photos",
+                return_value=["sunset", "beach"],
+            ),
+            patch(
+                "pyimgtag.applescript_writer._write_via_osascript", return_value=None
+            ) as mock_write,
+        ):
+            write_to_photos("/path/img.jpg", ["sunset", "travel"], None, mode="append")
+        called_tags = mock_write.call_args[0][1]
+        assert called_tags.count("sunset") == 1
+
+    def test_default_mode_is_overwrite(self):
+        """write_to_photos without mode= behaves as overwrite."""
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer.read_keywords_from_photos") as mock_read,
+            patch("pyimgtag.applescript_writer._write_via_osascript", return_value=None),
+        ):
+            write_to_photos("/path/img.jpg", ["tag"], None)
+        mock_read.assert_not_called()

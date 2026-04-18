@@ -221,33 +221,42 @@ def write_to_photos(
     tags: list[str],
     summary: str | None,
     title: str | None = None,
+    mode: str = "overwrite",
 ) -> str | None:
     """Set keywords, description, and title on a photo in Apple Photos.
 
     **macOS only.** Returns an error on non-macOS systems.
-
-    Uses photoscript when installed (cleaner API, better error handling),
-    falls back to raw AppleScript subprocess.
 
     Args:
         file_path: Full path to the image (only the basename is used for lookup).
         tags: List of keyword strings to assign to the photo.
         summary: Optional description/caption text. Skipped when ``None``.
         title: Optional title text. Skipped when ``None``.
+        mode: ``"overwrite"`` (default) replaces all keywords; ``"append"`` reads
+            existing keywords, removes any ``score:*`` entry, then merges with *tags*.
 
     Returns:
         ``None`` on success, or an error message string on failure.
     """
-
-    # AppleScript write-back is only available on macOS
     if not _IS_MACOS:
         return "Apple Photos write-back is only available on macOS"
 
     file_name = PurePosixPath(file_path).name
 
+    final_tags = tags
+    if mode == "append":
+        existing = read_keywords_from_photos(file_path)
+        cleaned_existing = [k for k in existing if not k.lower().startswith("score:")]
+        seen: set[str] = set(t.lower() for t in tags)
+        merged = list(tags)
+        for k in cleaned_existing:
+            if k.lower() not in seen:
+                seen.add(k.lower())
+                merged.append(k)
+        final_tags = merged
+
     if _HAS_PHOTOSCRIPT:
-        result = _write_via_photoscript(file_name, tags, summary, title=title)
+        result = _write_via_photoscript(file_name, final_tags, summary, title=title)
         if result is None:
             return None
-        # UUID lookup failed; try filename search via osascript
-    return _write_via_osascript(file_name, tags, summary, title=title)
+    return _write_via_osascript(file_name, final_tags, summary, title=title)
