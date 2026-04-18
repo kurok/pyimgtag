@@ -226,6 +226,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preview keyword changes without writing",
     )
 
+    # faces import-photos
+    faces_import = faces_sub.add_parser(
+        "import-photos", help="Import named persons from Apple Photos library"
+    )
+    faces_import.add_argument("--db", help=_DEFAULT_DB_HELP)
+
+    # faces ui
+    faces_ui = faces_sub.add_parser("ui", help="Start face management web UI")
+    faces_ui.add_argument("--db", help=_DEFAULT_DB_HELP)
+    faces_ui.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    faces_ui.add_argument("--port", type=int, default=8766, help="Port (default: 8766)")
+
     # --- query subcommand ---
     query_p = subparsers.add_parser("query", help="Query images with advanced filters")
     query_p.add_argument("--db", help=_DEFAULT_DB_HELP)

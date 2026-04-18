@@ -82,6 +82,8 @@ class ProgressDB:
                 edit_integrity     REAL
             )""",
         ),
+        (6, "ALTER TABLE persons ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'"),
+        (6, "ALTER TABLE persons ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -640,6 +642,40 @@ class ProgressDB:
         self._conn.commit()
         return cur.lastrowid  # type: ignore[return-value]
 
+    def get_faces_by_uuid(self, uuid: str) -> list[dict]:
+        """Return all face rows whose image path stem matches the given UUID.
+
+        Handles both full paths (``/library/abc123.jpg``) and bare filenames
+        (``abc123.jpg``) by using two LIKE patterns.
+        """
+        rows = self._conn.execute(
+            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
+            "FROM faces WHERE image_path LIKE ? OR image_path LIKE ?",
+            (f"%/{uuid}.%", f"{uuid}.%"),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "image_path": r[1],
+                "bbox_x": r[2],
+                "bbox_y": r[3],
+                "bbox_w": r[4],
+                "bbox_h": r[5],
+                "confidence": r[6],
+            }
+            for r in rows
+        ]
+
+    def has_photos_person(self, label: str) -> bool:
+        """Return True if a person with this label was already imported from Photos."""
+        return (
+            self._conn.execute(
+                "SELECT 1 FROM persons WHERE label = ? AND source = 'photos'",
+                (label,),
+            ).fetchone()
+            is not None
+        )
+
     def get_faces_for_image(self, image_path: str) -> list[dict]:
         """Return all face rows for an image path."""
         rows = self._conn.execute(
@@ -672,20 +708,28 @@ class ProgressDB:
         self._conn.execute("UPDATE faces SET person_id = ? WHERE id = ?", (person_id, face_id))
         self._conn.commit()
 
-    def create_person(self, label: str = "", confirmed: bool = False) -> int:
+    def create_person(
+        self,
+        label: str = "",
+        confirmed: bool = False,
+        source: str = "auto",
+        trusted: bool = False,
+    ) -> int:
         """Create a new person entry. Returns the person id."""
         cur = self._conn.execute(
-            "INSERT INTO persons (label, confirmed) VALUES (?, ?)",
-            (label, 1 if confirmed else 0),
+            "INSERT INTO persons (label, confirmed, source, trusted) VALUES (?, ?, ?, ?)",
+            (label, 1 if confirmed else 0, source, 1 if trusted else 0),
         )
         self._conn.commit()
         return cur.lastrowid  # type: ignore[return-value]
 
     def get_persons(self) -> list[PersonCluster]:
         """Return all persons with their assigned face ids."""
-        persons = self._conn.execute("SELECT id, label, confirmed FROM persons").fetchall()
+        persons = self._conn.execute(
+            "SELECT id, label, confirmed, source, trusted FROM persons"
+        ).fetchall()
         result = []
-        for pid, label, confirmed in persons:
+        for pid, label, confirmed, source, trusted in persons:
             face_ids = [
                 r[0]
                 for r in self._conn.execute(
@@ -698,6 +742,8 @@ class ProgressDB:
                     label=label,
                     confirmed=bool(confirmed),
                     face_ids=face_ids,
+                    source=source or "auto",
+                    trusted=bool(trusted),
                 )
             )
         return result
@@ -706,6 +752,73 @@ class ProgressDB:
         """Update the display label for a person."""
         self._conn.execute("UPDATE persons SET label = ? WHERE id = ?", (label, person_id))
         self._conn.commit()
+
+    def merge_persons(self, source_id: int, target_id: int) -> None:
+        """Reassign all faces from source_id to target_id, then delete source_id."""
+        if not self._conn.execute("SELECT 1 FROM persons WHERE id = ?", (target_id,)).fetchone():
+            raise ValueError(f"merge target person {target_id} does not exist")
+        self._conn.execute(
+            "UPDATE faces SET person_id = ? WHERE person_id = ?", (target_id, source_id)
+        )
+        self._conn.execute("DELETE FROM persons WHERE id = ?", (source_id,))
+        self._conn.commit()
+
+    def delete_person(self, person_id: int) -> None:
+        """Delete a person and set person_id to NULL on all their faces."""
+        self._conn.execute("UPDATE faces SET person_id = NULL WHERE person_id = ?", (person_id,))
+        self._conn.execute("DELETE FROM persons WHERE id = ?", (person_id,))
+        self._conn.commit()
+
+    def get_unassigned_faces(self) -> list[dict]:
+        """Return faces that have no person assignment."""
+        rows = self._conn.execute(
+            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
+            "FROM faces WHERE person_id IS NULL"
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "image_path": r[1],
+                "bbox_x": r[2],
+                "bbox_y": r[3],
+                "bbox_w": r[4],
+                "bbox_h": r[5],
+                "confidence": r[6],
+            }
+            for r in rows
+        ]
+
+    def unassign_face(self, face_id: int) -> None:
+        """Remove the person assignment from a face."""
+        self._conn.execute("UPDATE faces SET person_id = NULL WHERE id = ?", (face_id,))
+        self._conn.commit()
+
+    def get_faces_for_person(self, person_id: int) -> list[dict]:
+        """Return all faces assigned to a person."""
+        rows = self._conn.execute(
+            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
+            "FROM faces WHERE person_id = ?",
+            (person_id,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "image_path": r[1],
+                "bbox_x": r[2],
+                "bbox_y": r[3],
+                "bbox_w": r[4],
+                "bbox_h": r[5],
+                "confidence": r[6],
+            }
+            for r in rows
+        ]
+
+    def get_assigned_faces(self) -> list[dict]:
+        """Return all faces that have a person assignment."""
+        rows = self._conn.execute(
+            "SELECT id, image_path FROM faces WHERE person_id IS NOT NULL"
+        ).fetchall()
+        return [{"id": r[0], "image_path": r[1]} for r in rows]
 
     def get_face_count(self) -> int:
         """Return total number of detected faces."""

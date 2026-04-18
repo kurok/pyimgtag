@@ -160,6 +160,8 @@ class PersonCluster:
     label: str = ""
     confirmed: bool = False
     face_ids: list[int] = field(default_factory=list)
+    source: str = "auto"
+    trusted: bool = False
 
 
 @dataclass

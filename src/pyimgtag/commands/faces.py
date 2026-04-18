@@ -13,7 +13,7 @@ from pyimgtag.scanner import scan_directory, scan_photos_library
 def cmd_faces(args: argparse.Namespace) -> int:
     """Dispatch faces sub-actions."""
     if args.faces_action is None:
-        print("Usage: pyimgtag faces {scan,cluster,review,apply}", file=sys.stderr)
+        print("Usage: pyimgtag faces {scan,cluster,review,apply,import-photos,ui}", file=sys.stderr)
         return 1
 
     if args.faces_action == "scan":
@@ -24,6 +24,10 @@ def cmd_faces(args: argparse.Namespace) -> int:
         return _handle_faces_review(args)
     if args.faces_action == "apply":
         return _handle_faces_apply(args)
+    if args.faces_action == "import-photos":
+        return _handle_faces_import_photos(args)
+    if args.faces_action == "ui":
+        return _handle_faces_ui(args)
 
     return 1
 
@@ -144,10 +148,10 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
 
         # Build image_path -> list of person keywords
         image_keywords: dict[str, list[str]] = {}
-        rows = db._conn.execute(
-            "SELECT id, image_path FROM faces WHERE person_id IS NOT NULL"
-        ).fetchall()
-        for face_id, image_path in rows:
+        rows = db.get_assigned_faces()
+        for row in rows:
+            face_id = row["id"]
+            image_path = row["image_path"]
             label = face_to_label.get(face_id, "")
             if label:
                 keyword = f"person:{label}"
@@ -186,6 +190,47 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
     else:
         print(f"\n{len(image_keywords)} image(s) have person keywords.", file=sys.stderr)
         print("Use --write-exif or --sidecar-only to write them to files.", file=sys.stderr)
+    return 0
+
+
+def _handle_faces_import_photos(args: argparse.Namespace) -> int:
+    """Import named persons from Apple Photos into the faces DB."""
+    try:
+        from pyimgtag.photos_faces_importer import import_photos_persons
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    with ProgressDB(db_path=args.db) as db:
+        try:
+            imported, skipped = import_photos_persons(db)
+        except RuntimeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+
+    print(f"Imported {imported} person(s) from Apple Photos.", file=sys.stderr)
+    if skipped:
+        print(
+            f"{skipped} multi-face photo(s) could not be auto-assigned — use 'faces ui' to review.",
+            file=sys.stderr,
+        )
+    return 0
+
+
+def _handle_faces_ui(args: argparse.Namespace) -> int:
+    """Start the face management web UI."""
+    try:
+        from pyimgtag.faces_review_server import run_server
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    with ProgressDB(db_path=args.db) as db:
+        try:
+            run_server(db, host=args.host, port=args.port)
+        except ImportError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
     return 0
 
 
