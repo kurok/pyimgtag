@@ -922,3 +922,45 @@ class TestTagsSubcommand:
         counts = dict(db.get_tag_counts())
         db.close()
         assert "cat" in counts
+
+
+class TestWriteBackMode:
+    def test_run_write_back_mode_default_overwrite(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
+        assert args.write_back_mode == "overwrite"
+
+    def test_run_write_back_mode_append(self):
+        args = build_parser().parse_args(
+            ["run", "--input-dir", "/tmp", "--write-back-mode", "append"]
+        )
+        assert args.write_back_mode == "append"
+
+    def test_run_write_back_mode_overwrite_explicit(self):
+        args = build_parser().parse_args(
+            ["run", "--input-dir", "/tmp", "--write-back-mode", "overwrite"]
+        )
+        assert args.write_back_mode == "overwrite"
+
+    def test_run_write_back_mode_invalid(self):
+        with pytest.raises(SystemExit):
+            build_parser().parse_args(
+                ["run", "--input-dir", "/tmp", "--write-back-mode", "invalid"]
+            )
+
+    def test_judge_write_back_mode_default_overwrite(self):
+        args = build_parser().parse_args(["judge", "--input-dir", "/tmp"])
+        assert args.write_back_mode == "overwrite"
+
+    def test_judge_write_back_mode_append(self):
+        args = build_parser().parse_args(
+            ["judge", "--input-dir", "/tmp", "--write-back-mode", "append"]
+        )
+        assert args.write_back_mode == "append"
+
+    def test_judge_write_back_flag(self):
+        args = build_parser().parse_args(["judge", "--input-dir", "/tmp", "--write-back"])
+        assert args.write_back is True
+
+    def test_judge_write_back_default_false(self):
+        args = build_parser().parse_args(["judge", "--input-dir", "/tmp"])
+        assert args.write_back is False

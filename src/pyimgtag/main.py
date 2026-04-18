@@ -76,6 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write tags/description back to Apple Photos (macOS + --photos-library only)",
     )
     run_p.add_argument(
+        "--write-back-mode",
+        choices=("overwrite", "append"),
+        default="overwrite",
+        help=(
+            "Write-back strategy: overwrite replaces all keywords; "
+            "append merges new tags with existing ones (default: overwrite)"
+        ),
+    )
+    run_p.add_argument(
         "--write-exif",
         action="store_true",
         help="Write description and keywords to image EXIF via exiftool",
@@ -282,6 +291,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose", action="store_true", help="Show detailed per-criterion breakdown"
     )
     judge_p.add_argument("--no-recursive", action="store_true", help="Do not scan subdirectories")
+    judge_p.add_argument(
+        "--write-back",
+        action="store_true",
+        help="Write score keyword back to Apple Photos (macOS + --photos-library only)",
+    )
+    judge_p.add_argument(
+        "--write-back-mode",
+        choices=("overwrite", "append"),
+        default="overwrite",
+        help=(
+            "Write-back strategy: overwrite replaces all keywords; "
+            "append merges score keyword with existing ones (default: overwrite)"
+        ),
+    )
+    judge_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     judge_p.add_argument(
         "--model",
         default="gemma4:e4b",
