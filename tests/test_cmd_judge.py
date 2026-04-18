@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pyimgtag.commands.judge import cmd_judge
-from pyimgtag.models import JudgeResult, JudgeScores
+from pyimgtag.models import JudgeScores
 
 
 def _make_args(**kwargs) -> argparse.Namespace:
