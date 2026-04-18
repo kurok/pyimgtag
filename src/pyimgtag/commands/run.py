@@ -187,7 +187,11 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                 from pyimgtag.applescript_writer import write_to_photos
 
                 err = write_to_photos(
-                    result.file_name, result.tags, rich_desc, title=result.scene_summary
+                    result.file_name,
+                    result.tags,
+                    rich_desc,
+                    title=result.scene_summary,
+                    mode=args.write_back_mode,
                 )
                 if err:
                     print(f"  Write-back failed: {err}", file=sys.stderr)

@@ -14,6 +14,8 @@ from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
 if TYPE_CHECKING:
     import numpy as np
 
+    from pyimgtag.models import JudgeResult
+
 
 class ProgressDB:
     """Track which images have been processed to enable incremental re-runs."""
@@ -56,6 +58,30 @@ class ProgressDB:
         (4, "ALTER TABLE processed_images ADD COLUMN nearest_city TEXT"),
         (4, "ALTER TABLE processed_images ADD COLUMN nearest_region TEXT"),
         (4, "ALTER TABLE processed_images ADD COLUMN nearest_country TEXT"),
+        (
+            5,
+            """CREATE TABLE IF NOT EXISTS judge_scores (
+                file_path          TEXT PRIMARY KEY,
+                scored_at          TEXT NOT NULL,
+                weighted_score     REAL NOT NULL,
+                core_score         REAL NOT NULL,
+                visible_score      REAL NOT NULL,
+                verdict            TEXT,
+                impact             REAL,
+                story_subject      REAL,
+                composition_center REAL,
+                lighting           REAL,
+                creativity_style   REAL,
+                color_mood         REAL,
+                presentation_crop  REAL,
+                technical_excellence REAL,
+                focus_sharpness    REAL,
+                exposure_tonal     REAL,
+                noise_cleanliness  REAL,
+                subject_separation REAL,
+                edit_integrity     REAL
+            )""",
+        ),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -684,6 +710,79 @@ class ProgressDB:
     def get_face_count(self) -> int:
         """Return total number of detected faces."""
         return self._conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0]
+
+    def save_judge_result(self, result: "JudgeResult") -> None:
+        """Persist a judge scoring result. Replaces any existing entry for the same file."""
+        s = result.scores
+        self._conn.execute(
+            """
+            INSERT OR REPLACE INTO judge_scores
+                (file_path, scored_at, weighted_score, core_score, visible_score, verdict,
+                 impact, story_subject, composition_center, lighting, creativity_style,
+                 color_mood, presentation_crop, technical_excellence, focus_sharpness,
+                 exposure_tonal, noise_cleanliness, subject_separation, edit_integrity)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result.file_path,
+                datetime.now(timezone.utc).isoformat(),
+                result.weighted_score,
+                result.core_score,
+                result.visible_score,
+                s.verdict,
+                s.impact,
+                s.story_subject,
+                s.composition_center,
+                s.lighting,
+                s.creativity_style,
+                s.color_mood,
+                s.presentation_crop,
+                s.technical_excellence,
+                s.focus_sharpness,
+                s.exposure_tonal,
+                s.noise_cleanliness,
+                s.subject_separation,
+                s.edit_integrity,
+            ),
+        )
+        self._conn.commit()
+
+    def get_judge_result(self, file_path: str) -> dict | None:
+        """Return judge scores for a file, or None if not found."""
+        row = self._conn.execute(
+            """SELECT weighted_score, core_score, visible_score, verdict,
+                      impact, story_subject, composition_center, lighting,
+                      creativity_style, color_mood, presentation_crop,
+                      technical_excellence, focus_sharpness, exposure_tonal,
+                      noise_cleanliness, subject_separation, edit_integrity, scored_at
+               FROM judge_scores WHERE file_path = ?""",
+            (file_path,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "file_path": file_path,
+            "weighted_score": row[0],
+            "core_score": row[1],
+            "visible_score": row[2],
+            "verdict": row[3],
+            "scored_at": row[17],
+            "scores": {
+                "impact": row[4],
+                "story_subject": row[5],
+                "composition_center": row[6],
+                "lighting": row[7],
+                "creativity_style": row[8],
+                "color_mood": row[9],
+                "presentation_crop": row[10],
+                "technical_excellence": row[11],
+                "focus_sharpness": row[12],
+                "exposure_tonal": row[13],
+                "noise_cleanliness": row[14],
+                "subject_separation": row[15],
+                "edit_integrity": row[16],
+            },
+        }
 
     def __enter__(self) -> "ProgressDB":
         return self

@@ -6,13 +6,17 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from pyimgtag.applescript_writer import write_to_photos
 from pyimgtag.judge_scorer import compute_scores, strongest, weakest
 from pyimgtag.models import JudgeResult, JudgeScores
 from pyimgtag.ollama_client import OllamaClient
 from pyimgtag.preflight import check_ollama
 from pyimgtag.scanner import scan_directory, scan_photos_library
+
+if TYPE_CHECKING:
+    pass
 
 
 def _score_label(score: float) -> str:
@@ -93,6 +97,9 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
         print("Error: one of --input-dir or --photos-library is required", file=sys.stderr)
         return 1
 
+    write_back = getattr(args, "write_back", False)
+    write_back_mode = getattr(args, "write_back_mode", "overwrite")
+
     if getattr(args, "photos_library", None):
         try:
             files = scan_photos_library(
@@ -150,6 +157,20 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
             continue
 
         results.append(result)
+
+        if _db is not None:
+            _db.save_judge_result(result)
+
+        if write_back and getattr(args, "photos_library", None):
+            score_tag = f"score:{weighted:.1f}"
+            err = write_to_photos(
+                result.file_name,
+                [score_tag],
+                None,
+                mode=write_back_mode,
+            )
+            if err:
+                print(f"  Write-back failed: {err}", file=sys.stderr)
 
         if args.verbose:
             _print_verbose(result, idx, total)

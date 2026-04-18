@@ -148,38 +148,118 @@ def _write_via_osascript(
     return None
 
 
+def _build_read_applescript(file_name: str) -> str:
+    """Build AppleScript to read keywords list from a photo, returning newline-separated."""
+    uuid = _escape_applescript_string(PurePosixPath(file_name).stem)
+    return (
+        'tell application "Photos"\n'
+        f'    set theItem to media item id "{uuid}"\n'
+        "    set kws to keywords of theItem\n"
+        "    set AppleScript's text item delimiters to (ASCII character 10)\n"
+        "    return kws as text\n"
+        "end tell"
+    )
+
+
+def _read_via_photoscript(file_name: str) -> list[str] | None:
+    """Read keywords from Photos using photoscript library."""
+    try:
+        photos_app = photoscript.PhotosLibrary()
+        uuid = PurePosixPath(file_name).stem
+        try:
+            photo = photos_app.photo(uuid=uuid)
+        except Exception:
+            return None  # photo not found — cannot safely append
+        return list(photo.keywords or [])
+    except Exception:
+        return None
+
+
+def _read_via_osascript(file_name: str) -> list[str] | None:
+    """Read keywords from Photos via raw osascript subprocess."""
+    if not is_applescript_available():
+        return None
+    script = _build_read_applescript(file_name)
+    try:
+        proc = subprocess.run(  # noqa: S603
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    raw = proc.stdout.strip()
+    if not raw:
+        return []
+    return [k.strip() for k in raw.split("\n") if k.strip()]
+
+
+def read_keywords_from_photos(file_path: str) -> list[str] | None:
+    """Read the current keyword list for a photo from Apple Photos.
+
+    **macOS only.** Returns ``None`` on non-macOS or on any error.
+    Returns ``[]`` when the photo exists but has no keywords.
+
+    Args:
+        file_path: Full path to the image (only the basename is used for lookup).
+
+    Returns:
+        List of keyword strings, ``[]`` if no keywords, or ``None`` on failure.
+    """
+    if not _IS_MACOS:
+        return None
+    file_name = PurePosixPath(file_path).name
+    if _HAS_PHOTOSCRIPT:
+        return _read_via_photoscript(file_name)
+    return _read_via_osascript(file_name)
+
+
 def write_to_photos(
     file_path: str,
     tags: list[str],
     summary: str | None,
     title: str | None = None,
+    mode: str = "overwrite",
 ) -> str | None:
     """Set keywords, description, and title on a photo in Apple Photos.
 
     **macOS only.** Returns an error on non-macOS systems.
-
-    Uses photoscript when installed (cleaner API, better error handling),
-    falls back to raw AppleScript subprocess.
 
     Args:
         file_path: Full path to the image (only the basename is used for lookup).
         tags: List of keyword strings to assign to the photo.
         summary: Optional description/caption text. Skipped when ``None``.
         title: Optional title text. Skipped when ``None``.
+        mode: ``"overwrite"`` (default) replaces all keywords; ``"append"`` reads
+            existing keywords, removes any ``score:*`` entry, then merges with *tags*.
 
     Returns:
         ``None`` on success, or an error message string on failure.
     """
-
-    # AppleScript write-back is only available on macOS
     if not _IS_MACOS:
         return "Apple Photos write-back is only available on macOS"
 
     file_name = PurePosixPath(file_path).name
 
+    final_tags = tags
+    if mode == "append":
+        existing = read_keywords_from_photos(file_path)
+        if existing is None:
+            return "append mode: failed to read existing keywords, write aborted"
+        cleaned_existing = [k for k in existing if not k.lower().startswith("score:")]
+        seen: set[str] = set(t.lower() for t in tags)
+        merged = list(tags)
+        for k in cleaned_existing:
+            if k.lower() not in seen:
+                seen.add(k.lower())
+                merged.append(k)
+        final_tags = merged
+
     if _HAS_PHOTOSCRIPT:
-        result = _write_via_photoscript(file_name, tags, summary, title=title)
+        result = _write_via_photoscript(file_name, final_tags, summary, title=title)
         if result is None:
             return None
-        # UUID lookup failed; try filename search via osascript
-    return _write_via_osascript(file_name, tags, summary, title=title)
+    return _write_via_osascript(file_name, final_tags, summary, title=title)

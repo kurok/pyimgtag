@@ -76,6 +76,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write tags/description back to Apple Photos (macOS + --photos-library only)",
     )
     run_p.add_argument(
+        "--write-back-mode",
+        choices=("overwrite", "append"),
+        default="overwrite",
+        help=(
+            "Write-back strategy: overwrite replaces all keywords; "
+            "append merges new tags with existing ones (default: overwrite)"
+        ),
+    )
+    run_p.add_argument(
         "--write-exif",
         action="store_true",
         help="Write description and keywords to image EXIF via exiftool",
@@ -283,6 +292,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     judge_p.add_argument("--no-recursive", action="store_true", help="Do not scan subdirectories")
     judge_p.add_argument(
+        "--write-back",
+        action="store_true",
+        help="Write score keyword back to Apple Photos (macOS + --photos-library only)",
+    )
+    judge_p.add_argument(
+        "--write-back-mode",
+        choices=("overwrite", "append"),
+        default="overwrite",
+        help=(
+            "Write-back strategy: overwrite replaces all keywords; "
+            "append merges score keyword with existing ones (default: overwrite)"
+        ),
+    )
+    judge_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    judge_p.add_argument(
         "--model",
         default="gemma4:e4b",
         help="Ollama model name (default: gemma4:e4b)",
@@ -357,6 +381,11 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.review_cmd import cmd_review
     from pyimgtag.commands.run import cmd_run
     from pyimgtag.commands.tags import cmd_tags
+    from pyimgtag.progress_db import ProgressDB
+
+    progress_db: ProgressDB | None = None
+    if args.subcommand == "judge" and getattr(args, "db", None) is not None:
+        progress_db = ProgressDB(db_path=args.db)
 
     dispatch: dict[str, Any] = {
         "run": lambda: cmd_run(args, parser),
@@ -367,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
         "review": lambda: cmd_review(args),
         "faces": lambda: cmd_faces(args),
         "query": lambda: cmd_query(args),
-        "judge": lambda: cmd_judge(args, None),
+        "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
     }
 
@@ -375,7 +404,12 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.print_help()
         return 1
-    return handler()
+    try:
+        exit_code = handler()
+    finally:
+        if progress_db is not None:
+            progress_db.close()
+    return exit_code
 
 
 if __name__ == "__main__":
