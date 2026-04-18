@@ -13,7 +13,7 @@ from pyimgtag.scanner import scan_directory, scan_photos_library
 def cmd_faces(args: argparse.Namespace) -> int:
     """Dispatch faces sub-actions."""
     if args.faces_action is None:
-        print("Usage: pyimgtag faces {scan,cluster,review,apply}", file=sys.stderr)
+        print("Usage: pyimgtag faces {scan,cluster,review,apply,import-photos}", file=sys.stderr)
         return 1
 
     if args.faces_action == "scan":

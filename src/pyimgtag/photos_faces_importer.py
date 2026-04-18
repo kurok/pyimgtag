@@ -43,8 +43,7 @@ def import_photos_persons(db: ProgressDB) -> tuple[int, int]:
     """
     if photoscript is None:
         raise RuntimeError(
-            "photoscript is not installed. Install the [photos] extra: "
-            "pip install pyimgtag[photos]"
+            "photoscript is not installed. Install the [photos] extra: pip install pyimgtag[photos]"
         )
 
     library = photoscript.PhotosLibrary()
@@ -56,18 +55,23 @@ def import_photos_persons(db: ProgressDB) -> tuple[int, int]:
         if not name.strip():
             continue
 
+        # Skip if already imported from Photos (idempotency)
+        existing = db._conn.execute(
+            "SELECT id FROM persons WHERE label = ? AND source = 'photos'",
+            (name,),
+        ).fetchone()
+        if existing is not None:
+            continue
+
         person_id = db.create_person(label=name, confirmed=True, source="photos", trusted=True)
         imported += 1
 
         for photo in person.photos():
             uuid = photo.uuid
-            faces = db._conn.execute(
-                "SELECT id FROM faces WHERE image_path LIKE ?",
-                (f"%{uuid}%",),
-            ).fetchall()
+            faces = db.get_faces_by_uuid(uuid)
 
             if len(faces) == 1:
-                db.set_person_id(faces[0][0], person_id)
+                db.set_person_id(faces[0]["id"], person_id)
             elif len(faces) > 1:
                 logger.warning(
                     "Photos person %r: photo %s has %d detected faces — skipping auto-assign",

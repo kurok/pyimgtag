@@ -1217,6 +1217,59 @@ class TestPersonSourceTrusted:
         assert faces[0]["image_path"] == "c.jpg"
 
 
+class TestGetFacesByUuid:
+    def test_matches_full_path(self, tmp_path):
+        from pyimgtag.models import FaceDetection
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            det = FaceDetection(
+                image_path="/photos/abc123.jpg",
+                bbox_x=0,
+                bbox_y=0,
+                bbox_w=30,
+                bbox_h=30,
+                confidence=0.9,
+            )
+            fid = db.insert_face("/photos/abc123.jpg", det)
+            faces = db.get_faces_by_uuid("abc123")
+            assert len(faces) == 1
+            assert faces[0]["id"] == fid
+
+    def test_matches_bare_filename(self, tmp_path):
+        from pyimgtag.models import FaceDetection
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            det = FaceDetection(
+                image_path="abc123.jpg",
+                bbox_x=0,
+                bbox_y=0,
+                bbox_w=30,
+                bbox_h=30,
+                confidence=0.9,
+            )
+            fid = db.insert_face("abc123.jpg", det)
+            faces = db.get_faces_by_uuid("abc123")
+            assert len(faces) == 1
+            assert faces[0]["id"] == fid
+
+    def test_no_false_positive_from_directory(self, tmp_path):
+        from pyimgtag.models import FaceDetection
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            det = FaceDetection(
+                image_path="/A/abc123.jpg",
+                bbox_x=0,
+                bbox_y=0,
+                bbox_w=30,
+                bbox_h=30,
+                confidence=0.9,
+            )
+            db.insert_face("/A/abc123.jpg", det)
+            # Looking for 'abc' should NOT match 'abc123'
+            faces = db.get_faces_by_uuid("abc")
+            assert len(faces) == 0
+
+
 class TestMergeTags:
     def _populate(self, db: ProgressDB, tmp_path) -> None:
         data = [

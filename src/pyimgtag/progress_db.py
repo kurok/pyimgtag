@@ -642,6 +642,30 @@ class ProgressDB:
         self._conn.commit()
         return cur.lastrowid  # type: ignore[return-value]
 
+    def get_faces_by_uuid(self, uuid: str) -> list[dict]:
+        """Return all face rows whose image path stem matches the given UUID.
+
+        Handles both full paths (``/library/abc123.jpg``) and bare filenames
+        (``abc123.jpg``) by using two LIKE patterns.
+        """
+        rows = self._conn.execute(
+            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
+            "FROM faces WHERE image_path LIKE ? OR image_path LIKE ?",
+            (f"%/{uuid}.%", f"{uuid}.%"),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "image_path": r[1],
+                "bbox_x": r[2],
+                "bbox_y": r[3],
+                "bbox_w": r[4],
+                "bbox_h": r[5],
+                "confidence": r[6],
+            }
+            for r in rows
+        ]
+
     def get_faces_for_image(self, image_path: str) -> list[dict]:
         """Return all face rows for an image path."""
         rows = self._conn.execute(
