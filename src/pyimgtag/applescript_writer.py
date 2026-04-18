@@ -78,9 +78,18 @@ def _build_applescript(
         safe_title = _escape_applescript_string(title)
         title_line = f'\n    set name of theItem to "{safe_title}"'
 
+    safe_file_name = _escape_applescript_string(file_name)
     script = (
         'tell application "Photos"\n'
-        f'    set theItem to media item id "{uuid}"\n'
+        "    try\n"
+        f'        set theItem to media item id "{uuid}"\n'
+        "    on error\n"
+        f'        set _results to (every media item whose filename = "{safe_file_name}")\n'
+        "        if (count of _results) is 0 then\n"
+        f'            error "Photo not found: {safe_file_name}"\n'
+        "        end if\n"
+        "        set theItem to item 1 of _results\n"
+        "    end try\n"
         f"    set keywords of theItem to {tag_list}"
         f"{description_line}"
         f"{title_line}\n"
