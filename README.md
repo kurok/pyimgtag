@@ -110,35 +110,145 @@ brew install exiftool
 | EXIF reading (GPS, dates) | ✅ | ✅ | ✅ |
 | Reverse geocoding (Nominatim) | ✅ | ✅ | ✅ |
 | EXIF writing via `exiftool` | ✅ | ✅ | ✅ |
+| HEIC conversion (sips / pillow-heif) | ✅ sips + pillow-heif | ✅ pillow-heif | ✅ pillow-heif |
+| RAW image support (rawpy) | ✅ | ✅ | ✅ |
 | Apple Photos library scanning | ✅ | ❌ | ❌ |
 | Apple Photos write-back | ✅ | ❌ | ❌ |
+| Face management (Apple Photos) | ✅ | ❌ | ❌ |
 
-**Note:** Most features work cross-platform. Apple Photos integration is macOS-only since it requires macOS-specific AppleScript functionality.
+**Note:** Most features work cross-platform. Apple Photos integration and face management are macOS-only — they require AppleScript via `osascript`.
 
-### Cross-Platform Examples
+### macOS Setup
 
-**Linux/Windows (export folders only):**
 ```bash
-# Tag exported images with EXIF writing
-pyimgtag run --input-dir /mnt/photos \
-  --output-json results.json \
-  --write-exif  # If exiftool is installed
+# Prerequisites
+brew install ollama exiftool
+ollama pull gemma4:e4b
 
-# Tags and descriptions stored in results.json and EXIF
+# Install
+pip install "pyimgtag[all]"   # includes pillow-heif, photoscript, rawpy
+# or from source
+git clone https://github.com/kurok/pyimgtag.git
+cd pyimgtag
+pip install -e ".[all,dev]"
 ```
 
-**macOS (both export folders and Photos library):**
-```bash
-# Tag Photos library with direct write-back to Photos app
-pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
-  --write-back  # Push tags/descriptions to Apple Photos
+Features available: everything including Apple Photos integration, HEIC via sips, face management.
 
-# Or export folder with both EXIF and JSON output
-pyimgtag run --input-dir ~/Downloads/exported \
-  --write-exif --output-json results.json
+Typical macOS workflow:
+```bash
+# Tag your Photos library directly
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary --write-back --limit 50
+
+# Score photo quality
+pyimgtag judge --photos-library ~/Pictures/Photos\ Library.photoslibrary --min-score 4.0
+
+# Import named faces from Apple Photos
+pyimgtag faces import --photos-library ~/Pictures/Photos\ Library.photoslibrary
 ```
 
-The tool gracefully handles missing features—if you use `--write-back` on Linux/Windows, it will warn you and proceed without it.
+**Note:** Apple Photos library access requires Full Disk Access permission for your terminal app — grant it in System Settings > Privacy & Security > Full Disk Access.
+
+### Linux Setup
+
+```bash
+# Ubuntu/Debian
+sudo apt-get install exiftool python3.11 python3-pip
+# or install exiftool from https://exiftool.org
+
+# Fedora/RHEL
+sudo dnf install perl-Image-ExifTool python3.11
+
+# Arch
+sudo pacman -S perl-image-exiftool python
+
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull gemma4:e4b
+
+# Install pyimgtag
+pip install "pyimgtag[heic]"   # includes pillow-heif for HEIC
+# or from source
+git clone https://github.com/kurok/pyimgtag.git
+cd pyimgtag
+pip install -e ".[heic,dev]"
+```
+
+Features available: image tagging, EXIF reading/writing, geocoding, judge, dedup, JSON/CSV export. No Apple Photos integration.
+
+Typical Linux workflow:
+```bash
+# Tag an exported photo directory
+pyimgtag run --input-dir ~/Pictures/exported --output-json results.json
+
+# With EXIF write-back (requires exiftool)
+pyimgtag run --input-dir ~/Pictures/exported --write-exif
+
+# Score photo quality
+pyimgtag judge --input-dir ~/Pictures/exported --min-score 3.5 --output-json ranking.json
+```
+
+**Note:** `--write-back` (Apple Photos) is silently skipped on Linux with a warning. Use `--write-exif` instead.
+
+### Windows Setup
+
+```powershell
+# Install Python 3.11+ from https://python.org
+# Install Ollama from https://ollama.com
+
+# Install exiftool — download from https://exiftool.org/
+# Or via Chocolatey:
+choco install exiftool
+
+# Or via winget:
+winget install OliverBetz.ExifTool
+
+ollama pull gemma4:e4b
+
+# Install pyimgtag
+pip install "pyimgtag[heic]"
+# or from source
+git clone https://github.com/kurok/pyimgtag.git
+cd pyimgtag
+pip install -e ".[heic,dev]"
+```
+
+Features available: same as Linux — tagging, EXIF, geocoding, judge, dedup, export. No Apple Photos integration.
+
+Typical Windows workflow (PowerShell):
+```powershell
+# Tag photos in a folder
+pyimgtag run --input-dir C:\Users\Me\Pictures\exported --output-json results.json
+
+# Score photo quality
+pyimgtag judge --input-dir C:\Users\Me\Pictures\exported --min-score 3.5
+
+# Check what was processed
+pyimgtag status
+```
+
+**Note:** On Windows, use `\` path separators or quote paths with spaces: `"C:\My Photos"`.
+
+### Platform Troubleshooting
+
+**macOS:**
+- "Operation not permitted" on Photos library → grant Full Disk Access to Terminal in System Settings > Privacy & Security > Full Disk Access
+- `exiftool` not found → `brew install exiftool`
+- HEIC files not loading → `pip install pillow-heif`
+- Ollama not running → `brew services start ollama` or run `ollama serve`
+
+**Linux:**
+- `exiftool` not found → install via package manager (see setup above)
+- HEIC files not loading → `pip install pillow-heif`
+- Ollama not running → `ollama serve` in a separate terminal
+- Permission denied on image folder → check directory permissions with `ls -la`
+
+**Windows:**
+- `exiftool` not found → add exiftool directory to PATH, or install via Chocolatey/winget
+- Python not found → ensure Python 3.11+ is installed and added to PATH during install
+- HEIC files not loading → `pip install pillow-heif`
+- Ollama not running → start Ollama from system tray or run `ollama serve`
+- Long paths issue → enable long path support: `Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1`
 
 ## Usage
 

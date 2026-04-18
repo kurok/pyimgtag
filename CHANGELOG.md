@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-18
+
+### Added
+- Faces management: import named persons from Apple Photos and face management UI
+- Write-back append mode for non-destructive keyword updates
+- Judge score storage in SQLite progress DB
+
+## [0.3.0] - 2026-04-17
+
+### Added
+- `judge` subcommand for AI-based photo quality scoring with 13-criterion rubric
+- Weighted score output (1–5 scale), per-criterion breakdown, `--min-score` filter
+- Judge results exportable to JSON with full per-criterion scores
+- `pyimgtag faces` subcommand for face recognition and management (macOS)
+
+### Fixed
+- `--dry-run` correctly skips write-back operations
+- Apple Photos applescript lookup uses media item ID for O(1) performance
+
 ## [0.2.1] - 2026-04-17
 
 ### Fixed
@@ -52,5 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PyPI publish workflow with Trusted Publishing
 - GitHub Release automation on `v*` tags
 
+[0.4.0]: https://github.com/kurok/pyimgtag/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/kurok/pyimgtag/compare/v0.2.1...v0.3.0
 [0.2.0]: https://github.com/kurok/pyimgtag/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kurok/pyimgtag/releases/tag/v0.1.0
