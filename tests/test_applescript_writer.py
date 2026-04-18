@@ -551,6 +551,7 @@ class TestReadKeywordsFromPhotos:
 # ---------------------------------------------------------------------------
 
 
+@patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False)
 class TestWriteToPhotosMode:
     def test_overwrite_mode_does_not_read_existing(self):
         """overwrite (default) calls write without reading existing keywords."""
