@@ -28,11 +28,11 @@ ruff format src/ tests/
 ruff check src/ tests/ --fix
 
 # Type check
-python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+python3 -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
 
 # Security
-python -m bandit -r src/pyimgtag/ -c pyproject.toml
-python -m pip_audit
+python3 -m bandit -r src/pyimgtag/ -c pyproject.toml
+python3 -m pip_audit
 
 # Pre-commit
 pre-commit run --all-files
@@ -165,21 +165,28 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 ## Workflow: Creating a Clean PR
 
 1. Sync: `git fetch origin main && git checkout main && git pull`
+   Always do this before creating a worktree or starting any work, even if you think main is current.
 2. Create: `git checkout -b feature/descriptive-name`
 3. Make changes in `src/pyimgtag/`, add tests in `tests/`
 4. Run all checks before committing:
    ```bash
    ruff format src/ tests/             # format first
    pre-commit run --all-files          # MUST run this — uses pinned ruff v0.9.10
-   python -m pytest tests/ -v
-   python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
-   python -m bandit -r src/pyimgtag/ -c pyproject.toml
+   python3 -m pytest tests/ -v
+   python3 -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+   python3 -m bandit -r src/pyimgtag/ -c pyproject.toml
    ```
 5. Commit with Conventional Commits: `feat: add x`, `fix: resolve y`
 6. Push: `git push -u origin feature/descriptive-name`
 7. Format before opening PR: `ruff format src/ tests/ && pre-commit run --all-files`
-8. Create PR using the repo template: `gh pr create --title "type: description"`
-9. Monitor CI: `gh run list --branch feature/descriptive-name`
+8. Verify your branch is rebased on the latest main before opening the PR:
+   ```bash
+   git fetch origin main
+   git merge-base --is-ancestor origin/main HEAD || echo "WARNING: branch is not based on current main — rebase first"
+   ```
+   If the warning prints, run: `git rebase origin/main`
+9. Create PR using the repo template: `gh pr create --title "type: description"`
+10. Monitor CI: `gh run list --branch feature/descriptive-name`
 
 > **Why `pre-commit run --all-files` must run last and is the source of truth:**
 > The pre-commit config pins `ruff` at **v0.9.10** (`rev: v0.9.10` in `.pre-commit-config.yaml`).
