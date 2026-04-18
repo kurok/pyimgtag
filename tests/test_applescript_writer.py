@@ -498,17 +498,17 @@ class TestReadKeywordsFromPhotos:
             patch("pyimgtag.applescript_writer.subprocess.run") as mock_run,
         ):
             mock_run.return_value = MagicMock(
-                returncode=0, stdout="sunset, beach, travel\n", stderr=""
+                returncode=0, stdout="sunset\nbeach\ntravel\n", stderr=""
             )
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
         assert result == ["sunset", "beach", "travel"]
 
-    def test_returns_empty_list_on_not_macos(self):
+    def test_returns_none_on_not_macos(self):
         with patch("pyimgtag.applescript_writer._IS_MACOS", False):
             result = read_keywords_from_photos("/any/path.jpg")
-        assert result == []
+        assert result is None
 
-    def test_returns_empty_list_on_osascript_error(self):
+    def test_returns_none_on_osascript_error(self):
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
             patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
@@ -517,7 +517,7 @@ class TestReadKeywordsFromPhotos:
         ):
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
-        assert result == []
+        assert result is None
 
     def test_returns_empty_list_when_no_keywords(self):
         with (
@@ -611,3 +611,21 @@ class TestWriteToPhotosMode:
         ):
             write_to_photos("/path/img.jpg", ["tag"], None)
         mock_read.assert_not_called()
+
+    def test_append_mode_aborts_when_read_returns_none(self):
+        """append mode must return an error and not write when read returns None."""
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch(
+                "pyimgtag.applescript_writer.read_keywords_from_photos",
+                return_value=None,
+            ),
+            patch(
+                "pyimgtag.applescript_writer._write_via_osascript", return_value=None
+            ) as mock_write,
+        ):
+            result = write_to_photos("/path/img.jpg", ["new_tag"], None, mode="append")
+        assert result is not None
+        assert "aborted" in result
+        mock_write.assert_not_called()

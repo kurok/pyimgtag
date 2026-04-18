@@ -404,7 +404,12 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.print_help()
         return 1
-    return handler()
+    try:
+        exit_code = handler()
+    finally:
+        if progress_db is not None:
+            progress_db.close()
+    return exit_code
 
 
 if __name__ == "__main__":

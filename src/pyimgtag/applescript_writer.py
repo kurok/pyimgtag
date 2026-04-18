@@ -149,19 +149,19 @@ def _write_via_osascript(
 
 
 def _build_read_applescript(file_name: str) -> str:
-    """Build AppleScript to read keywords list from a photo, returning comma-separated."""
+    """Build AppleScript to read keywords list from a photo, returning newline-separated."""
     uuid = _escape_applescript_string(PurePosixPath(file_name).stem)
     return (
         'tell application "Photos"\n'
         f'    set theItem to media item id "{uuid}"\n'
         "    set kws to keywords of theItem\n"
-        '    set AppleScript\'s text item delimiters to ", "\n'
+        "    set AppleScript's text item delimiters to (ASCII character 10)\n"
         "    return kws as text\n"
         "end tell"
     )
 
 
-def _read_via_photoscript(file_name: str) -> list[str]:
+def _read_via_photoscript(file_name: str) -> list[str] | None:
     """Read keywords from Photos using photoscript library."""
     try:
         photos_app = photoscript.PhotosLibrary()
@@ -169,16 +169,16 @@ def _read_via_photoscript(file_name: str) -> list[str]:
         try:
             photo = photos_app.photo(uuid=uuid)
         except Exception:
-            return []
+            return None  # photo not found — cannot safely append
         return list(photo.keywords or [])
     except Exception:
-        return []
+        return None
 
 
-def _read_via_osascript(file_name: str) -> list[str]:
+def _read_via_osascript(file_name: str) -> list[str] | None:
     """Read keywords from Photos via raw osascript subprocess."""
     if not is_applescript_available():
-        return []
+        return None
     script = _build_read_applescript(file_name)
     try:
         proc = subprocess.run(  # noqa: S603
@@ -188,28 +188,29 @@ def _read_via_osascript(file_name: str) -> list[str]:
             timeout=30,
         )
     except (subprocess.TimeoutExpired, OSError):
-        return []
+        return None
     if proc.returncode != 0:
-        return []
+        return None
     raw = proc.stdout.strip()
     if not raw:
         return []
-    return [k.strip() for k in raw.split(",") if k.strip()]
+    return [k.strip() for k in raw.split("\n") if k.strip()]
 
 
-def read_keywords_from_photos(file_path: str) -> list[str]:
+def read_keywords_from_photos(file_path: str) -> list[str] | None:
     """Read the current keyword list for a photo from Apple Photos.
 
-    **macOS only.** Returns an empty list on non-macOS or on any error.
+    **macOS only.** Returns ``None`` on non-macOS or on any error.
+    Returns ``[]`` when the photo exists but has no keywords.
 
     Args:
         file_path: Full path to the image (only the basename is used for lookup).
 
     Returns:
-        List of keyword strings currently on the photo, or ``[]`` on failure.
+        List of keyword strings, ``[]`` if no keywords, or ``None`` on failure.
     """
     if not _IS_MACOS:
-        return []
+        return None
     file_name = PurePosixPath(file_path).name
     if _HAS_PHOTOSCRIPT:
         return _read_via_photoscript(file_name)
@@ -246,6 +247,8 @@ def write_to_photos(
     final_tags = tags
     if mode == "append":
         existing = read_keywords_from_photos(file_path)
+        if existing is None:
+            return "append mode: failed to read existing keywords, write aborted"
         cleaned_existing = [k for k in existing if not k.lower().startswith("score:")]
         seen: set[str] = set(t.lower() for t in tags)
         merged = list(tags)
