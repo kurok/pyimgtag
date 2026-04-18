@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-04-18
+
+### Fixed
+- Fallback to filename search when media item ID lookup fails in Apple Photos
+
+## [0.4.1] - 2026-04-18
+
+### Added
+- Platform-specific setup guides for macOS, Linux, and Windows
+
 ## [0.4.0] - 2026-04-18
 
 ### Added
@@ -23,6 +33,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `--dry-run` correctly skips write-back operations
 - Apple Photos applescript lookup uses media item ID for O(1) performance
+
+## [0.2.3] - 2026-04-17
+
+### Fixed
+- Apple Photos: fall back to osascript when photoscript UUID lookup fails
+- Apple Photos: replace `search()` with `photo(uuid)` lookup for reliable retrieval
+- Show macOS dialog to open Full Disk Access settings on Photos Library permission error
+- Surface `PermissionError` when Photos library is TCC-blocked
+- Add comment to empty `except` clause to satisfy linter
+
+## [0.2.2] - 2026-04-17
+
+### Fixed
+- Ollama: switch to `format: json` with prompt-described fields for structured output
+- Resolved four real-world tagging failure cases (empty response, missing keys, malformed JSON, Unicode errors)
+
+### Changed
+- Increased code coverage from 78% to 84%
 
 ## [0.2.1] - 2026-04-17
 
@@ -71,7 +99,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PyPI publish workflow with Trusted Publishing
 - GitHub Release automation on `v*` tags
 
+[0.4.2]: https://github.com/kurok/pyimgtag/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/kurok/pyimgtag/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/kurok/pyimgtag/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/kurok/pyimgtag/compare/v0.2.1...v0.3.0
+[0.3.0]: https://github.com/kurok/pyimgtag/compare/v0.2.3...v0.3.0
+[0.2.3]: https://github.com/kurok/pyimgtag/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/kurok/pyimgtag/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/kurok/pyimgtag/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/kurok/pyimgtag/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kurok/pyimgtag/releases/tag/v0.1.0
