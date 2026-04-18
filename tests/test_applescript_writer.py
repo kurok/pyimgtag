@@ -545,6 +545,51 @@ class TestReadKeywordsFromPhotos:
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
         assert result == ["dog", "park"]
 
+    def test_returns_none_when_photoscript_photo_not_found(self):
+        mock_lib = MagicMock()
+        mock_lib.photo.side_effect = Exception("not found")
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True),
+            patch("pyimgtag.applescript_writer.photoscript") as mock_ps,
+        ):
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result is None
+
+    def test_returns_none_when_photoscript_library_raises(self):
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True),
+            patch("pyimgtag.applescript_writer.photoscript") as mock_ps,
+        ):
+            mock_ps.PhotosLibrary.side_effect = Exception("Photos not running")
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result is None
+
+    def test_returns_none_when_osascript_unavailable(self):
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=False),
+        ):
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result is None
+
+    def test_returns_none_on_osascript_timeout(self):
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=30),
+            ),
+        ):
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result is None
+
 
 # ---------------------------------------------------------------------------
 # write_to_photos mode parameter

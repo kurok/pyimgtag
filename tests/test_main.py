@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from unittest.mock import patch
 
 import pytest
 
@@ -964,3 +965,15 @@ class TestWriteBackMode:
     def test_judge_write_back_default_false(self):
         args = build_parser().parse_args(["judge", "--input-dir", "/tmp"])
         assert args.write_back is False
+
+    def test_judge_db_arg_passed_to_progress_db(self, tmp_path):
+        db_path = str(tmp_path / "judge.db")
+        with (
+            patch("pyimgtag.progress_db.ProgressDB") as MockDB,
+            patch("pyimgtag.commands.judge.cmd_judge", return_value=0) as mock_judge,
+        ):
+            result = main(["judge", "--db", db_path, "--input-dir", "/tmp"])
+        assert result == 0
+        MockDB.assert_called_once_with(db_path=db_path)
+        passed_db = mock_judge.call_args[0][1]
+        assert passed_db is MockDB.return_value
