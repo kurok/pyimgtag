@@ -191,7 +191,7 @@ class TestSchemaVersioning:
     def test_fresh_db_is_at_version_3(self, tmp_path):
         """A brand-new database must be fully migrated to the latest version."""
         with ProgressDB(db_path=tmp_path / "v3.db") as db:
-            assert self._user_version(db._conn) == 4
+            assert self._user_version(db._conn) == 5
 
     def test_fresh_db_has_all_new_columns(self, tmp_path):
         """All version-2 columns must be present in a fresh database."""
@@ -242,7 +242,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 4
+            assert self._user_version(db._conn) == 5
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db._conn))
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
@@ -267,12 +267,12 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 4
+            assert self._user_version(db._conn) == 5
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
 
     def test_user_version_is_set_correctly_after_migration(self, tmp_path):
-        """PRAGMA user_version must equal 4 after migration from version 1."""
+        """PRAGMA user_version must equal 5 after migration from version 1."""
         db_path = tmp_path / "check_version.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute(
@@ -298,7 +298,7 @@ class TestSchemaVersioning:
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute("PRAGMA user_version").fetchone()[0] == 4
+            assert raw.execute("PRAGMA user_version").fetchone()[0] == 5
         finally:
             raw.close()
 
@@ -309,7 +309,7 @@ class TestSchemaVersioning:
             pass
 
         with ProgressDB(db_path=db_path) as db2:
-            assert self._user_version(db2._conn) == 4
+            assert self._user_version(db2._conn) == 5
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db2._conn))
             assert self._table_exists(db2._conn, "faces")
             assert self._table_exists(db2._conn, "persons")
@@ -682,7 +682,7 @@ class TestMigrationV4:
     def test_fresh_db_is_at_version_4(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 4
+            assert ver == 5
 
     def test_fresh_db_has_location_columns(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
@@ -733,7 +733,7 @@ class TestMigrationV4:
 
         with ProgressDB(db_path=db_path) as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 4
+            assert ver == 5
             cols = {
                 row[1] for row in db._conn.execute("PRAGMA table_info(processed_images)").fetchall()
             }
@@ -1141,3 +1141,97 @@ class TestMergeTags:
             self._populate(db, tmp_path)
             count = db.merge_tags("unicorn", "animal")
             assert count == 0
+
+
+class TestJudgeScores:
+    def test_judge_scores_table_created(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            row = db._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='judge_scores'"
+            ).fetchone()
+            assert row is not None
+
+    def test_save_and_get_judge_result(self, tmp_path):
+        from pyimgtag.models import JudgeResult, JudgeScores
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            scores = JudgeScores(
+                impact=4.0,
+                story_subject=3.5,
+                composition_center=4.5,
+                lighting=3.0,
+                creativity_style=2.5,
+                color_mood=4.0,
+                presentation_crop=3.5,
+                technical_excellence=4.0,
+                focus_sharpness=4.5,
+                exposure_tonal=3.5,
+                noise_cleanliness=4.0,
+                subject_separation=3.0,
+                edit_integrity=3.5,
+                verdict="Strong composition, good light",
+            )
+            result = JudgeResult(
+                file_path="/photos/img.jpg",
+                file_name="img.jpg",
+                scores=scores,
+                weighted_score=3.73,
+                core_score=3.80,
+                visible_score=3.65,
+            )
+            db.save_judge_result(result)
+            got = db.get_judge_result("/photos/img.jpg")
+        assert got is not None
+        assert got["weighted_score"] == pytest.approx(3.73, abs=1e-4)
+        assert got["core_score"] == pytest.approx(3.80, abs=1e-4)
+        assert got["verdict"] == "Strong composition, good light"
+        assert got["scores"]["impact"] == pytest.approx(4.0)
+
+    def test_get_judge_result_missing_returns_none(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.get_judge_result("/not/found.jpg") is None
+
+    def test_save_judge_result_upserts(self, tmp_path):
+        from pyimgtag.models import JudgeResult, JudgeScores
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+
+            def _make_result(score):
+                return JudgeResult(
+                    file_path="/photos/img.jpg",
+                    file_name="img.jpg",
+                    scores=JudgeScores(impact=score),
+                    weighted_score=score,
+                    core_score=score,
+                    visible_score=score,
+                )
+
+            db.save_judge_result(_make_result(3.0))
+            db.save_judge_result(_make_result(4.5))
+            got = db.get_judge_result("/photos/img.jpg")
+        assert got["weighted_score"] == pytest.approx(4.5, abs=1e-4)
+
+    def test_migration_v5_applies_to_existing_db(self, tmp_path):
+        """Opening a v4 DB should apply v5 migration and create judge_scores."""
+        db_path = tmp_path / "old.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """CREATE TABLE processed_images (
+                file_path TEXT PRIMARY KEY, file_size INTEGER, file_mtime REAL,
+                tags TEXT, scene_summary TEXT, processed_at TEXT,
+                status TEXT, error_message TEXT,
+                scene_category TEXT, emotional_tone TEXT, cleanup_class TEXT,
+                has_text INTEGER DEFAULT 0, text_summary TEXT, event_hint TEXT,
+                significance TEXT, nearest_city TEXT, nearest_region TEXT,
+                nearest_country TEXT
+            )"""
+        )
+        conn.execute("PRAGMA user_version = 4")
+        conn.commit()
+        conn.close()
+
+        with ProgressDB(db_path=db_path) as db:
+            row = db._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='judge_scores'"
+            ).fetchone()
+            assert row is not None
