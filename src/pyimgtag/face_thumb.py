@@ -6,6 +6,8 @@ import base64
 import io
 import math
 
+from PIL import Image
+
 
 def face_thumbnail_b64(
     image_path: str,
@@ -34,11 +36,6 @@ def face_thumbnail_b64(
         return None
 
     try:
-        from PIL import Image
-    except ImportError:
-        return None
-
-    try:
         img = Image.open(image_path).convert("RGB")
     except Exception:
         return None
@@ -56,7 +53,7 @@ def face_thumbnail_b64(
         return None
 
     cropped = img.crop((left, top, right, bottom))
-    thumb = cropped.resize((size, size), Image.LANCZOS)
+    thumb = cropped.resize((size, size), Image.Resampling.LANCZOS)
 
     buf = io.BytesIO()
     thumb.save(buf, format="JPEG", quality=80)
