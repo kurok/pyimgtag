@@ -56,11 +56,7 @@ def import_photos_persons(db: ProgressDB) -> tuple[int, int]:
             continue
 
         # Skip if already imported from Photos (idempotency)
-        existing = db._conn.execute(
-            "SELECT id FROM persons WHERE label = ? AND source = 'photos'",
-            (name,),
-        ).fetchone()
-        if existing is not None:
+        if db.has_photos_person(name):
             continue
 
         person_id = db.create_person(label=name, confirmed=True, source="photos", trusted=True)

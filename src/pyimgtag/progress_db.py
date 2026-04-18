@@ -666,6 +666,16 @@ class ProgressDB:
             for r in rows
         ]
 
+    def has_photos_person(self, label: str) -> bool:
+        """Return True if a person with this label was already imported from Photos."""
+        return (
+            self._conn.execute(
+                "SELECT 1 FROM persons WHERE label = ? AND source = 'photos'",
+                (label,),
+            ).fetchone()
+            is not None
+        )
+
     def get_faces_for_image(self, image_path: str) -> list[dict]:
         """Return all face rows for an image path."""
         rows = self._conn.execute(

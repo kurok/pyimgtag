@@ -1217,6 +1217,22 @@ class TestPersonSourceTrusted:
         assert faces[0]["image_path"] == "c.jpg"
 
 
+class TestHasPhotosPerson:
+    def test_returns_true_when_exists(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db.create_person(label="Alice", source="photos")
+            assert db.has_photos_person("Alice") is True
+
+    def test_returns_false_when_missing(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.has_photos_person("Unknown") is False
+
+    def test_does_not_match_auto_source(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db.create_person(label="Bob", source="auto")
+            assert db.has_photos_person("Bob") is False
+
+
 class TestGetFacesByUuid:
     def test_matches_full_path(self, tmp_path):
         from pyimgtag.models import FaceDetection
