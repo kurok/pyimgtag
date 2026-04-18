@@ -7,15 +7,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pyimgtag.progress_db import ProgressDB
 
-try:
-    from pydantic import BaseModel as _BaseModel
-
-    class _LabelBody(_BaseModel):
-        label: str
-
-except ImportError:
-    _LabelBody = None  # type: ignore[assignment,misc]
-
 _HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -144,12 +135,23 @@ def build_app(db: ProgressDB) -> Any:
         ImportError: If fastapi is not installed.
     """
     try:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import Body, FastAPI, HTTPException
         from fastapi.responses import HTMLResponse
+        from pydantic import BaseModel
     except ImportError:
         raise ImportError(
             "fastapi is not installed. Install the [dev] extra: pip install pyimgtag[dev]"
         ) from None
+
+    class _LabelBody(BaseModel):
+        label: str
+
+    # PEP 563 (`from __future__ import annotations`) turns all annotations into
+    # forward-ref strings.  FastAPI resolves them via `get_type_hints(func,
+    # globalns=func.__globals__)`.  Since `_LabelBody` is local to `build_app`
+    # it won't be found in module globals, so we publish it there before any
+    # route is registered.
+    globals()["_LabelBody"] = _LabelBody
 
     from pyimgtag.face_thumb import face_thumbnail_b64
 
@@ -193,7 +195,7 @@ def build_app(db: ProgressDB) -> Any:
         return result
 
     @app.post("/api/persons/{person_id}/label")
-    async def update_label(person_id: int, body: _LabelBody) -> dict:
+    async def update_label(person_id: int, body: _LabelBody = Body(...)) -> dict:
         db.update_person_label(person_id, body.label)
         return {"ok": True}
 
