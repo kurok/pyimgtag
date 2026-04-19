@@ -37,8 +37,13 @@ class TestImportPhotosPersons:
             mock_library = MagicMock()
             mock_library.persons.return_value = [mock_person]
 
-            with patch("pyimgtag.photos_faces_importer.photoscript") as mock_ps:
-                mock_ps.PhotosLibrary.return_value = mock_library
+            mock_ps = MagicMock()
+            mock_ps.PhotosLibrary.return_value = mock_library
+
+            with (
+                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
+                patch.dict("sys.modules", {"photoscript": mock_ps}),
+            ):
                 imported, skipped = import_photos_persons(db)
 
             assert imported == 1
@@ -80,8 +85,13 @@ class TestImportPhotosPersons:
             mock_library = MagicMock()
             mock_library.persons.return_value = [mock_person]
 
-            with patch("pyimgtag.photos_faces_importer.photoscript") as mock_ps:
-                mock_ps.PhotosLibrary.return_value = mock_library
+            mock_ps = MagicMock()
+            mock_ps.PhotosLibrary.return_value = mock_library
+
+            with (
+                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
+                patch.dict("sys.modules", {"photoscript": mock_ps}),
+            ):
                 imported, skipped = import_photos_persons(db)
 
             assert imported == 1
@@ -100,8 +110,13 @@ class TestImportPhotosPersons:
             mock_library = MagicMock()
             mock_library.persons.return_value = [mock_person]
 
-            with patch("pyimgtag.photos_faces_importer.photoscript") as mock_ps:
-                mock_ps.PhotosLibrary.return_value = mock_library
+            mock_ps = MagicMock()
+            mock_ps.PhotosLibrary.return_value = mock_library
+
+            with (
+                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
+                patch.dict("sys.modules", {"photoscript": mock_ps}),
+            ):
                 imported, skipped = import_photos_persons(db)
 
             assert imported == 0
@@ -119,8 +134,13 @@ class TestImportPhotosPersons:
             mock_library = MagicMock()
             mock_library.persons.return_value = [mock_person]
 
-            with patch("pyimgtag.photos_faces_importer.photoscript") as mock_ps:
-                mock_ps.PhotosLibrary.return_value = mock_library
+            mock_ps = MagicMock()
+            mock_ps.PhotosLibrary.return_value = mock_library
+
+            with (
+                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
+                patch.dict("sys.modules", {"photoscript": mock_ps}),
+            ):
                 imported, skipped = import_photos_persons(db)
 
             # Person is created but no face assigned
@@ -150,8 +170,13 @@ class TestImportPhotosPersons:
             mock_library = MagicMock()
             mock_library.persons.return_value = [mock_person]
 
-            with patch("pyimgtag.photos_faces_importer.photoscript") as mock_ps:
-                mock_ps.PhotosLibrary.return_value = mock_library
+            mock_ps = MagicMock()
+            mock_ps.PhotosLibrary.return_value = mock_library
+
+            with (
+                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
+                patch.dict("sys.modules", {"photoscript": mock_ps}),
+            ):
                 # First import
                 imported1, _ = import_photos_persons(db)
                 # Second import — should skip the already-existing person
@@ -164,6 +189,26 @@ class TestImportPhotosPersons:
 
     def test_photoscript_unavailable_raises(self, tmp_path):
         with self._make_db(tmp_path) as db:
-            with patch("pyimgtag.photos_faces_importer.photoscript", None):
+            with patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: False):
                 with pytest.raises(RuntimeError, match="photoscript"):
                     import_photos_persons(db)
+
+
+class TestLazyPhotoscriptImport:
+    def test_importing_module_does_not_import_photoscript(self):
+        import importlib
+        import sys
+
+        mod_name = "pyimgtag.photos_faces_importer"
+        saved = sys.modules.pop(mod_name, None)
+        ps_saved = sys.modules.pop("photoscript", None)
+        try:
+            importlib.import_module(mod_name)
+            assert "photoscript" not in sys.modules, (
+                "photoscript was imported at module level in photos_faces_importer"
+            )
+        finally:
+            if saved is not None:
+                sys.modules[mod_name] = saved
+            if ps_saved is not None:
+                sys.modules["photoscript"] = ps_saved

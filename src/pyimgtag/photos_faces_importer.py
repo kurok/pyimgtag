@@ -7,17 +7,25 @@ Only available on macOS with Apple Photos access.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import TYPE_CHECKING
-
-try:
-    import photoscript
-except ImportError:
-    photoscript = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from pyimgtag.progress_db import ProgressDB
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=None)
+def _has_photoscript() -> bool:
+    """Return True if photoscript is installed (checked via find_spec, cached).
+
+    Uses importlib.util.find_spec() to avoid triggering module execution,
+    which can crash the process on some macOS configurations.
+    """
+    import importlib.util
+
+    return importlib.util.find_spec("photoscript") is not None
 
 
 def import_photos_persons(db: ProgressDB) -> tuple[int, int]:
@@ -41,10 +49,12 @@ def import_photos_persons(db: ProgressDB) -> tuple[int, int]:
     Raises:
         RuntimeError: If photoscript is not installed.
     """
-    if photoscript is None:
+    if not _has_photoscript():
         raise RuntimeError(
             "photoscript is not installed. Install the [photos] extra: pip install pyimgtag[photos]"
         )
+
+    import photoscript  # local import; only runs when photoscript is actually available
 
     library = photoscript.PhotosLibrary()
     imported = 0
