@@ -7,12 +7,45 @@ from unittest.mock import MagicMock, patch
 
 from pyimgtag.applescript_writer import (
     _build_applescript,
+    _build_read_applescript,
     _escape_applescript_string,
+    _looks_like_uuid,
     _write_via_photoscript,
     is_applescript_available,
     read_keywords_from_photos,
     write_to_photos,
 )
+
+# ---------------------------------------------------------------------------
+# _looks_like_uuid
+# ---------------------------------------------------------------------------
+
+
+class TestLooksLikeUuid:
+    def test_standard_uuid_lowercase(self):
+        assert _looks_like_uuid("a1b2c3d4-e5f6-7890-abcd-ef1234567890") is True
+
+    def test_standard_uuid_uppercase(self):
+        assert _looks_like_uuid("A1B2C3D4-E5F6-7890-ABCD-EF1234567890") is True
+
+    def test_standard_uuid_mixed_case(self):
+        assert _looks_like_uuid("A1b2C3d4-E5f6-7890-aBcD-eF1234567890") is True
+
+    def test_plain_word_is_not_uuid(self):
+        assert _looks_like_uuid("photo") is False
+
+    def test_img_filename_stem_is_not_uuid(self):
+        assert _looks_like_uuid("IMG_1234") is False
+
+    def test_partial_uuid_is_not_uuid(self):
+        assert _looks_like_uuid("AABB-1234") is False
+
+    def test_empty_string_is_not_uuid(self):
+        assert _looks_like_uuid("") is False
+
+    def test_uuid_with_spaces_is_not_uuid(self):
+        assert _looks_like_uuid("A1B2C3D4 E5F6 7890 ABCD EF1234567890") is False
+
 
 # ---------------------------------------------------------------------------
 # _escape_applescript_string
@@ -57,14 +90,47 @@ class TestEscapeApplescriptString:
 # ---------------------------------------------------------------------------
 
 
-class TestBuildApplescript:
-    def test_uses_media_item_id_lookup(self):
-        script = _build_applescript("photo.jpg", ["sunset"], None)
-        assert 'media item id "photo"' in script
+_UUID_STEM = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+_UUID_FILE = f"{_UUID_STEM}.jpg"
 
-    def test_uuid_is_filename_stem(self):
-        script = _build_applescript("AABB-1234.heic", ["tag"], None)
-        assert 'media item id "AABB-1234"' in script
+
+class TestBuildApplescript:
+    # --- UUID-format stems: O(1) lookup first, filename fallback on error ---
+
+    def test_uuid_stem_uses_media_item_id(self):
+        script = _build_applescript(_UUID_FILE, ["sunset"], None)
+        assert f'media item id "{_UUID_STEM}"' in script
+
+    def test_uuid_stem_has_try_on_error_fallback(self):
+        script = _build_applescript(_UUID_FILE, ["tag"], None)
+        assert "on error" in script
+        assert f'filename = "{_UUID_FILE}"' in script
+
+    def test_uuid_stem_fallback_has_not_found_error(self):
+        script = _build_applescript(_UUID_FILE, ["tag"], None)
+        assert f"Photo not found: {_UUID_FILE}" in script
+
+    # --- Non-UUID stems: skip media item id, go straight to filename scan ---
+
+    def test_non_uuid_stem_skips_media_item_id(self):
+        script = _build_applescript("IMG_1234.jpg", ["tag"], None)
+        assert "media item id" not in script
+
+    def test_non_uuid_stem_uses_filename_scan(self):
+        script = _build_applescript("IMG_1234.jpg", ["tag"], None)
+        assert 'filename = "IMG_1234.jpg"' in script
+
+    def test_non_uuid_stem_has_not_found_error(self):
+        script = _build_applescript("IMG_1234.jpg", ["tag"], None)
+        assert "Photo not found: IMG_1234.jpg" in script
+
+    def test_non_uuid_stem_no_try_block(self):
+        # Non-UUID path goes straight to filename scan — no try/on error wrapping the lookup
+        script = _build_applescript("vacation.jpg", ["tag"], None)
+        # "on error" may not be present since no UUID attempt to guard
+        assert "media item id" not in script
+
+    # --- Common behaviour regardless of UUID ---
 
     def test_contains_tags_list(self):
         script = _build_applescript("photo.jpg", ["beach", "sunset"], None)
@@ -111,14 +177,37 @@ class TestBuildApplescript:
         script = _build_applescript("img.jpg", ["tag"], None, title='A "great" shot')
         assert '\\"great\\"' in script
 
-    def test_fallback_filename_search_present(self):
-        script = _build_applescript("AABB-1234.heic", ["tag"], None)
-        assert "on error" in script
-        assert 'filename = "AABB-1234.heic"' in script
 
-    def test_fallback_not_found_error_message(self):
-        script = _build_applescript("AABB-1234.heic", ["tag"], None)
-        assert "Photo not found: AABB-1234.heic" in script
+# ---------------------------------------------------------------------------
+# _build_read_applescript
+# ---------------------------------------------------------------------------
+
+
+class TestBuildReadApplescript:
+    def test_uuid_stem_uses_media_item_id(self):
+        script = _build_read_applescript(_UUID_FILE)
+        assert f'media item id "{_UUID_STEM}"' in script
+
+    def test_uuid_stem_has_fallback(self):
+        script = _build_read_applescript(_UUID_FILE)
+        assert "on error" in script
+        assert f'filename = "{_UUID_FILE}"' in script
+
+    def test_non_uuid_stem_skips_media_item_id(self):
+        script = _build_read_applescript("IMG_1234.jpg")
+        assert "media item id" not in script
+
+    def test_non_uuid_stem_uses_filename_scan(self):
+        script = _build_read_applescript("IMG_1234.jpg")
+        assert 'filename = "IMG_1234.jpg"' in script
+
+    def test_reads_keywords(self):
+        script = _build_read_applescript("IMG_1234.jpg")
+        assert "set kws to keywords of theItem" in script
+
+    def test_returns_newline_delimited(self):
+        script = _build_read_applescript("IMG_1234.jpg")
+        assert "ASCII character 10" in script
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +331,6 @@ class TestWriteToPhotos:
         captured: list[str] = []
 
         def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
-            # cmd = ["/usr/bin/osascript", "-e", <script>]
             captured.append(cmd[2])
             return _make_completed_process(0)
 
@@ -252,7 +340,9 @@ class TestWriteToPhotos:
 
         assert captured, "subprocess.run was not called"
         script = captured[0]
-        assert 'media item id "vacation"' in script
+        # "vacation" is not UUID-format — lookup goes via filename scan, not media item id
+        assert "media item id" not in script
+        assert 'filename = "vacation.jpg"' in script
         assert "/some/deep/path/" not in script
 
     def test_tags_formatted_as_applescript_list(self):
@@ -344,7 +434,9 @@ class TestWriteToPhotos:
                 write_to_photos("/path/my vacation photo.jpg", ["beach"], None)
 
         script = captured[0]
-        assert 'media item id "my vacation photo"' in script
+        # stem "my vacation photo" is not UUID-format → filename scan, not media item id
+        assert "media item id" not in script
+        assert 'filename = "my vacation photo.jpg"' in script
 
     def test_filename_with_quotes(self):
         """Filenames with double quotes must be escaped."""
@@ -391,7 +483,7 @@ class TestWriteViaPhotoscript:
 
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
             mock_ps.PhotosLibrary.return_value = mock_lib
-            result = _write_via_photoscript("photo.jpg", ["sunset", "beach"], "Nice photo")
+            result = _write_via_photoscript(_UUID_FILE, ["sunset", "beach"], "Nice photo")
 
         assert result is None
         assert mock_photo.keywords == ["sunset", "beach"]
@@ -404,7 +496,7 @@ class TestWriteViaPhotoscript:
 
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
             mock_ps.PhotosLibrary.return_value = mock_lib
-            result = _write_via_photoscript("photo.jpg", ["tag"], None, title="My Title")
+            result = _write_via_photoscript(_UUID_FILE, ["tag"], None, title="My Title")
 
         assert result is None
         assert mock_photo.title == "My Title"
@@ -427,10 +519,22 @@ class TestWriteViaPhotoscript:
 
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
             mock_ps.PhotosLibrary.return_value = mock_lib
-            result = _write_via_photoscript("AABBCCDD-1234.heic", ["tag"], None)
+            result = _write_via_photoscript(_UUID_FILE, ["tag"], None)
 
         assert result is None
-        mock_lib.photo.assert_called_once_with(uuid="AABBCCDD-1234")
+        mock_lib.photo.assert_called_once_with(uuid=_UUID_STEM)
+
+    def test_non_uuid_stem_skips_photos_lookup(self):
+        """Non-UUID filenames must not attempt photoscript UUID lookup."""
+        mock_lib = MagicMock()
+
+        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
+            mock_ps.PhotosLibrary.return_value = mock_lib
+            result = _write_via_photoscript("IMG_1234.heic", ["tag"], None)
+
+        mock_lib.photo.assert_not_called()
+        # returns error so write_to_photos falls through to osascript filename scan
+        assert result is not None
 
     def test_exception_returns_error(self):
         with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
@@ -551,7 +655,7 @@ class TestReadKeywordsFromPhotos:
             patch("pyimgtag.applescript_writer.photoscript") as mock_ps,
         ):
             mock_ps.PhotosLibrary.return_value = mock_lib
-            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+            result = read_keywords_from_photos(f"/Library/Photos/{_UUID_FILE}")
         assert result == ["dog", "park"]
 
     def test_returns_none_when_photoscript_photo_not_found(self):

@@ -6,6 +6,7 @@ falls back to raw osascript subprocess. Only available on macOS.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,19 @@ except ImportError:
 
 _HAS_PHOTOSCRIPT = photoscript is not None
 _IS_MACOS = sys.platform == "darwin"
+
+# Standard UUID pattern: 8-4-4-4-12 hex digits.
+# Photos uses the filename stem as media item id only when it matches this format.
+# Non-matching stems go straight to the O(n) filename scan, avoiding a slow
+# AppleScript timeout that occurs when media item id is called with an unknown id.
+_UUID_RE = re.compile(
+    r"^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
+)
+
+
+def _looks_like_uuid(stem: str) -> bool:
+    """Return True if *stem* matches the 8-4-4-4-12 hex UUID format used by Photos."""
+    return bool(_UUID_RE.match(stem))
 
 
 def is_applescript_available() -> bool:
@@ -44,6 +58,18 @@ def _escape_applescript_string(value: str) -> str:
     return value
 
 
+def _filename_scan_block(safe_file_name: str, indent: str = "    ") -> str:
+    """Return an AppleScript fragment that locates a photo by filename."""
+    i = indent
+    return (
+        f'{i}set _results to (every media item whose filename = "{safe_file_name}")\n'
+        f"{i}if (count of _results) is 0 then\n"
+        f'{i}    error "Photo not found: {safe_file_name}"\n'
+        f"{i}end if\n"
+        f"{i}set theItem to item 1 of _results\n"
+    )
+
+
 def _build_applescript(
     file_name: str,
     tags: list[str],
@@ -61,10 +87,9 @@ def _build_applescript(
     Returns:
         AppleScript source string ready to pass to ``osascript -e``.
     """
-    # UUID is the filename stem — Photos uses it as the media item id for O(1) lookup.
-    uuid = _escape_applescript_string(PurePosixPath(file_name).stem)
+    stem = PurePosixPath(file_name).stem
+    safe_file_name = _escape_applescript_string(file_name)
 
-    # Build AppleScript list literal: {"tag1", "tag2", ...}
     escaped_tags = [f'"{_escape_applescript_string(t)}"' for t in tags]
     tag_list = "{" + ", ".join(escaped_tags) + "}"
 
@@ -78,24 +103,29 @@ def _build_applescript(
         safe_title = _escape_applescript_string(title)
         title_line = f'\n    set name of theItem to "{safe_title}"'
 
-    safe_file_name = _escape_applescript_string(file_name)
-    script = (
+    if _looks_like_uuid(stem):
+        # UUID-format stem: try O(1) media item id first, fall back to filename scan.
+        # Non-UUID stems skip the media item id call entirely — Photos takes several
+        # seconds to confirm an unknown id, making each lookup slow.
+        uuid = _escape_applescript_string(stem)
+        lookup = (
+            "    try\n"
+            f'        set theItem to media item id "{uuid}"\n'
+            "    on error\n"
+            + _filename_scan_block(safe_file_name, indent="        ")
+            + "    end try\n"
+        )
+    else:
+        lookup = _filename_scan_block(safe_file_name)
+
+    return (
         'tell application "Photos"\n'
-        "    try\n"
-        f'        set theItem to media item id "{uuid}"\n'
-        "    on error\n"
-        f'        set _results to (every media item whose filename = "{safe_file_name}")\n'
-        "        if (count of _results) is 0 then\n"
-        f'            error "Photo not found: {safe_file_name}"\n'
-        "        end if\n"
-        "        set theItem to item 1 of _results\n"
-        "    end try\n"
-        f"    set keywords of theItem to {tag_list}"
-        f"{description_line}"
-        f"{title_line}\n"
-        "end tell"
+        + lookup
+        + f"    set keywords of theItem to {tag_list}"
+        + description_line
+        + title_line
+        + "\nend tell"
     )
-    return script
 
 
 def _write_via_photoscript(
@@ -107,9 +137,13 @@ def _write_via_photoscript(
     """Write to Photos using photoscript library."""
     try:
         photos_app = photoscript.PhotosLibrary()
-        uuid = PurePosixPath(file_name).stem
+        stem = PurePosixPath(file_name).stem
+        if not _looks_like_uuid(stem):
+            # Non-UUID filename: skip photoscript UUID lookup to avoid a slow timeout.
+            # The caller will fall through to osascript filename scan.
+            return f"No Photos item found with filename: {file_name}"
         try:
-            photo = photos_app.photo(uuid=uuid)
+            photo = photos_app.photo(uuid=stem)
         except Exception:
             return f"No Photos item found with filename: {file_name}"
         photo.keywords = tags
@@ -159,14 +193,28 @@ def _write_via_osascript(
 
 def _build_read_applescript(file_name: str) -> str:
     """Build AppleScript to read keywords list from a photo, returning newline-separated."""
-    uuid = _escape_applescript_string(PurePosixPath(file_name).stem)
+    stem = PurePosixPath(file_name).stem
+    safe_file_name = _escape_applescript_string(file_name)
+
+    if _looks_like_uuid(stem):
+        uuid = _escape_applescript_string(stem)
+        lookup = (
+            "    try\n"
+            f'        set theItem to media item id "{uuid}"\n'
+            "    on error\n"
+            + _filename_scan_block(safe_file_name, indent="        ")
+            + "    end try\n"
+        )
+    else:
+        lookup = _filename_scan_block(safe_file_name)
+
     return (
         'tell application "Photos"\n'
-        f'    set theItem to media item id "{uuid}"\n'
-        "    set kws to keywords of theItem\n"
-        "    set AppleScript's text item delimiters to (ASCII character 10)\n"
-        "    return kws as text\n"
-        "end tell"
+        + lookup
+        + "    set kws to keywords of theItem\n"
+        + "    set AppleScript's text item delimiters to (ASCII character 10)\n"
+        + "    return kws as text\n"
+        + "end tell"
     )
 
 
@@ -174,9 +222,11 @@ def _read_via_photoscript(file_name: str) -> list[str] | None:
     """Read keywords from Photos using photoscript library."""
     try:
         photos_app = photoscript.PhotosLibrary()
-        uuid = PurePosixPath(file_name).stem
+        stem = PurePosixPath(file_name).stem
+        if not _looks_like_uuid(stem):
+            return None
         try:
-            photo = photos_app.photo(uuid=uuid)
+            photo = photos_app.photo(uuid=stem)
         except Exception:
             return None  # photo not found — cannot safely append
         return list(photo.keywords or [])
