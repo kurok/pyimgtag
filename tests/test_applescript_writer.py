@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib
 import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
 from pyimgtag.applescript_writer import (
@@ -249,7 +251,7 @@ def _make_completed_process(returncode: int = 0, stdout: str = "", stderr: str =
 
 
 @patch("pyimgtag.applescript_writer._IS_MACOS", True)
-@patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False)
+@patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False)
 class TestWriteToPhotos:
     # Tests for the osascript fallback path (photoscript disabled).
     # Patch both is_applescript_available (True) and subprocess.run for all tests
@@ -475,14 +477,20 @@ class TestWriteToPhotos:
 # ---------------------------------------------------------------------------
 
 
+def _mock_photoscript(lib: MagicMock) -> MagicMock:
+    """Return a fake photoscript module whose PhotosLibrary() returns *lib*."""
+    mock_ps = MagicMock()
+    mock_ps.PhotosLibrary.return_value = lib
+    return mock_ps
+
+
 class TestWriteViaPhotoscript:
     def test_success_sets_keywords_and_description(self):
         mock_photo = MagicMock()
         mock_lib = MagicMock()
         mock_lib.photo.return_value = mock_photo
 
-        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
-            mock_ps.PhotosLibrary.return_value = mock_lib
+        with patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}):
             result = _write_via_photoscript(_UUID_FILE, ["sunset", "beach"], "Nice photo")
 
         assert result is None
@@ -494,8 +502,7 @@ class TestWriteViaPhotoscript:
         mock_lib = MagicMock()
         mock_lib.photo.return_value = mock_photo
 
-        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
-            mock_ps.PhotosLibrary.return_value = mock_lib
+        with patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}):
             result = _write_via_photoscript(_UUID_FILE, ["tag"], None, title="My Title")
 
         assert result is None
@@ -505,8 +512,7 @@ class TestWriteViaPhotoscript:
         mock_lib = MagicMock()
         mock_lib.photo.side_effect = Exception("photo not found")
 
-        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
-            mock_ps.PhotosLibrary.return_value = mock_lib
+        with patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}):
             result = _write_via_photoscript("missing.jpg", ["tag"], None)
 
         assert result is not None
@@ -517,8 +523,7 @@ class TestWriteViaPhotoscript:
         mock_lib = MagicMock()
         mock_lib.photo.return_value = mock_photo
 
-        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
-            mock_ps.PhotosLibrary.return_value = mock_lib
+        with patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}):
             result = _write_via_photoscript(_UUID_FILE, ["tag"], None)
 
         assert result is None
@@ -528,8 +533,7 @@ class TestWriteViaPhotoscript:
         """Non-UUID filenames must not attempt photoscript UUID lookup."""
         mock_lib = MagicMock()
 
-        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
-            mock_ps.PhotosLibrary.return_value = mock_lib
+        with patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}):
             result = _write_via_photoscript("IMG_1234.heic", ["tag"], None)
 
         mock_lib.photo.assert_not_called()
@@ -537,8 +541,9 @@ class TestWriteViaPhotoscript:
         assert result is not None
 
     def test_exception_returns_error(self):
-        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
-            mock_ps.PhotosLibrary.side_effect = Exception("Photos not running")
+        mock_ps = MagicMock()
+        mock_ps.PhotosLibrary.side_effect = Exception("Photos not running")
+        with patch.dict("sys.modules", {"photoscript": mock_ps}):
             result = _write_via_photoscript("photo.jpg", ["tag"], None)
 
         assert result is not None
@@ -550,8 +555,7 @@ class TestWriteViaPhotoscript:
         mock_lib = MagicMock()
         mock_lib.photo.return_value = mock_photo
 
-        with patch("pyimgtag.applescript_writer.photoscript") as mock_ps:
-            mock_ps.PhotosLibrary.return_value = mock_lib
+        with patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}):
             _write_via_photoscript("photo.jpg", ["tag"], None)
 
         # description should not have been reassigned
@@ -561,7 +565,7 @@ class TestWriteViaPhotoscript:
 @patch("pyimgtag.applescript_writer._IS_MACOS", True)
 class TestWriteToPhotosBackendSelection:
     def test_uses_photoscript_when_available(self):
-        with patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True):
+        with patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True):
             with patch(
                 "pyimgtag.applescript_writer._write_via_photoscript", return_value=None
             ) as mock_ps:
@@ -570,7 +574,7 @@ class TestWriteToPhotosBackendSelection:
                 mock_ps.assert_called_once_with("photo.jpg", ["tag"], "desc", title=None)
 
     def test_falls_back_to_osascript_when_no_photoscript(self):
-        with patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False):
+        with patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False):
             with patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True):
                 with patch(
                     "pyimgtag.applescript_writer.subprocess.run",
@@ -580,7 +584,7 @@ class TestWriteToPhotosBackendSelection:
                     assert result is None
 
     def test_falls_back_to_osascript_when_photoscript_uuid_fails(self):
-        with patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True):
+        with patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True):
             with patch(
                 "pyimgtag.applescript_writer._write_via_photoscript",
                 return_value="No Photos item found with filename: photo.jpg",
@@ -606,7 +610,7 @@ class TestReadKeywordsFromPhotos:
     def test_returns_list_from_osascript(self):
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
             patch("pyimgtag.applescript_writer.subprocess.run") as mock_run,
         ):
@@ -624,7 +628,7 @@ class TestReadKeywordsFromPhotos:
     def test_returns_none_on_osascript_error(self):
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
             patch("pyimgtag.applescript_writer.subprocess.run") as mock_run,
         ):
@@ -635,7 +639,7 @@ class TestReadKeywordsFromPhotos:
     def test_returns_empty_list_when_no_keywords(self):
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
             patch("pyimgtag.applescript_writer.subprocess.run") as mock_run,
         ):
@@ -651,10 +655,9 @@ class TestReadKeywordsFromPhotos:
 
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True),
-            patch("pyimgtag.applescript_writer.photoscript") as mock_ps,
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}),
         ):
-            mock_ps.PhotosLibrary.return_value = mock_lib
             result = read_keywords_from_photos(f"/Library/Photos/{_UUID_FILE}")
         assert result == ["dog", "park"]
 
@@ -664,27 +667,27 @@ class TestReadKeywordsFromPhotos:
 
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True),
-            patch("pyimgtag.applescript_writer.photoscript") as mock_ps,
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}),
         ):
-            mock_ps.PhotosLibrary.return_value = mock_lib
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
         assert result is None
 
     def test_returns_none_when_photoscript_library_raises(self):
+        mock_ps = MagicMock()
+        mock_ps.PhotosLibrary.side_effect = Exception("Photos not running")
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", True),
-            patch("pyimgtag.applescript_writer.photoscript") as mock_ps,
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch.dict("sys.modules", {"photoscript": mock_ps}),
         ):
-            mock_ps.PhotosLibrary.side_effect = Exception("Photos not running")
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
         assert result is None
 
     def test_returns_none_when_osascript_unavailable(self):
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch("pyimgtag.applescript_writer.is_applescript_available", return_value=False),
         ):
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
@@ -693,7 +696,7 @@ class TestReadKeywordsFromPhotos:
     def test_returns_none_on_osascript_timeout(self):
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
             patch(
                 "pyimgtag.applescript_writer.subprocess.run",
@@ -709,13 +712,13 @@ class TestReadKeywordsFromPhotos:
 # ---------------------------------------------------------------------------
 
 
-@patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False)
+@patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False)
 class TestWriteToPhotosMode:
     def test_overwrite_mode_does_not_read_existing(self):
         """overwrite (default) calls write without reading existing keywords."""
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch("pyimgtag.applescript_writer.read_keywords_from_photos") as mock_read,
             patch("pyimgtag.applescript_writer._write_via_osascript", return_value=None),
         ):
@@ -726,7 +729,7 @@ class TestWriteToPhotosMode:
         """append mode reads existing keywords and merges new ones in."""
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch(
                 "pyimgtag.applescript_writer.read_keywords_from_photos",
                 return_value=["existing", "score:3.5"],
@@ -746,7 +749,7 @@ class TestWriteToPhotosMode:
         """append mode does not produce duplicate tags."""
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch(
                 "pyimgtag.applescript_writer.read_keywords_from_photos",
                 return_value=["sunset", "beach"],
@@ -763,7 +766,7 @@ class TestWriteToPhotosMode:
         """write_to_photos without mode= behaves as overwrite."""
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch("pyimgtag.applescript_writer.read_keywords_from_photos") as mock_read,
             patch("pyimgtag.applescript_writer._write_via_osascript", return_value=None),
         ):
@@ -774,7 +777,7 @@ class TestWriteToPhotosMode:
         """append mode must return an error and not write when read returns None."""
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._HAS_PHOTOSCRIPT", False),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
             patch(
                 "pyimgtag.applescript_writer.read_keywords_from_photos",
                 return_value=None,
@@ -787,3 +790,29 @@ class TestWriteToPhotosMode:
         assert result is not None
         assert "aborted" in result
         mock_write.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Lazy import verification
+# ---------------------------------------------------------------------------
+
+
+class TestLazyPhotoscriptImport:
+    def test_photoscript_not_imported_at_module_level(self):
+        """Importing applescript_writer must not import photoscript."""
+        # Remove cached module so we get a fresh import.
+        mod_name = "pyimgtag.applescript_writer"
+        saved = sys.modules.pop(mod_name, None)
+        # Also drop photoscript from sys.modules if present so we can detect a fresh import.
+        ps_saved = sys.modules.pop("photoscript", None)
+        try:
+            importlib.import_module(mod_name)
+            assert "photoscript" not in sys.modules, (
+                "photoscript was imported at module level in applescript_writer"
+            )
+        finally:
+            # Restore previous state so other tests are not affected.
+            if saved is not None:
+                sys.modules[mod_name] = saved
+            if ps_saved is not None:
+                sys.modules["photoscript"] = ps_saved
