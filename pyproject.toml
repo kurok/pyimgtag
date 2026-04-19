@@ -33,7 +33,17 @@ photos = ["photoscript>=0.5.3"]
 face = ["face-recognition>=1.3", "scikit-learn>=1.3"]
 review = ["fastapi>=0.100", "uvicorn>=0.20", "pydantic>=2.0", "httpx>=0.24"]
 raw = ["rawpy>=0.18"]
-all = ["pillow-heif>=0.10.0", "photoscript>=0.5.3", "rawpy>=0.18"]
+all = [
+    "pillow-heif>=0.10.0",
+    "photoscript>=0.5.3",
+    "face-recognition>=1.3",
+    "scikit-learn>=1.3",
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+    "pydantic>=2.0",
+    "httpx>=0.24",
+    "rawpy>=0.18",
+]
 dev = ["pytest>=9.0", "pytest-xdist>=3.0", "pytest-cov>=4.0"]
 lint = ["mypy>=1.0", "ruff>=0.1.0"]
 security = ["bandit>=1.7", "pip-audit>=2.6"]
