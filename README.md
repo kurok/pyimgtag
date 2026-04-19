@@ -565,6 +565,37 @@ python -m bandit -r src/pyimgtag/ -c pyproject.toml
 pre-commit install && pre-commit run --all-files
 ```
 
+## Resume and Enrichment
+
+Rerunning `pyimgtag run` on an already-processed library normally skips unchanged files.
+With `--resume-from-db`, those files are re-hydrated from the database instead of being
+silently skipped, so their results still appear in output files and the `--write-back` path
+runs again.
+
+Only **local enrichment** is repeated (EXIF, reverse geocoding). The AI model is not called again.
+
+```bash
+# Normal run — first pass, all files sent to Ollama
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+             --db ~/my-progress.db --write-back
+
+# Resume after interruption — unchanged files load from DB, only new files hit Ollama
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+             --db ~/my-progress.db --write-back --resume-from-db
+
+# Threaded resume — cached-item enrichment runs in a background thread
+# while the main thread continues sending new files to Ollama
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+             --db ~/my-progress.db --write-back --resume-from-db --resume-threaded
+```
+
+A file is eligible for DB resume if:
+- Its size and modification time have not changed since the last run.
+- The cached entry has at least one tag.
+
+Use `pyimgtag reprocess --db ~/my-progress.db` to force a full re-run for all files,
+or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only failed files.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
