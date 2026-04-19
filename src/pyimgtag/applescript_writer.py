@@ -18,13 +18,15 @@ _IS_MACOS = sys.platform == "darwin"
 
 @lru_cache(maxsize=None)
 def _has_photoscript() -> bool:
-    """Return True if photoscript is importable (checked lazily, cached)."""
-    try:
-        import photoscript  # noqa: F401
+    """Return True if photoscript is installed (checked via find_spec, cached).
 
-        return True
-    except ImportError:
-        return False
+    Uses importlib.util.find_spec() to avoid triggering module execution.
+    On some macOS configurations importing photoscript can crash the process;
+    find_spec only inspects the package metadata, making it safe to call anywhere.
+    """
+    import importlib.util
+
+    return importlib.util.find_spec("photoscript") is not None
 
 
 # Standard UUID pattern: 8-4-4-4-12 hex digits.

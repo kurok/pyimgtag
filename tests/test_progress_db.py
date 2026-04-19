@@ -77,7 +77,8 @@ class TestProgressDB:
             stats = db.get_stats()
             assert stats == {"total": 2, "ok": 1, "error": 1}
 
-    def test_mark_done_error_result(self, tmp_path):
+    def test_error_row_is_not_considered_processed(self, tmp_path):
+        """Error rows must be eligible for retry — is_processed() returns False."""
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             img = tmp_path / "bad.jpg"
             img.write_bytes(b"\x00" * 10)
@@ -88,9 +89,35 @@ class TestProgressDB:
                 error_message="Ollama timeout",
             )
             db.mark_done(img, result)
-            assert db.is_processed(img) is True
+            assert db.is_processed(img) is False
             stats = db.get_stats()
             assert stats["error"] == 1
+
+    def test_failure_then_retry(self, tmp_path):
+        """A row stored with status='error' is retried — is_processed() returns False."""
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            img = tmp_path / "photo.jpg"
+            img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 50)
+
+            # First run failed
+            err = ImageResult(
+                file_path=str(img),
+                file_name="photo.jpg",
+                processing_status="error",
+                error_message="Ollama timeout",
+            )
+            db.mark_done(img, err)
+            assert db.is_processed(img) is False, "error rows must be retried, not skipped"
+
+            # Retry succeeds — mark_done overwrites the row with status='ok'
+            ok = ImageResult(
+                file_path=str(img),
+                file_name="photo.jpg",
+                tags=["sunset"],
+                processing_status="ok",
+            )
+            db.mark_done(img, ok)
+            assert db.is_processed(img) is True
 
     def test_reset_all_empty_db(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
