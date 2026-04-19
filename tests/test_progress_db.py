@@ -1495,48 +1495,35 @@ class TestResumeDBAPIs:
     def test_is_fresh_returns_true_for_matching_file(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             db.mark_done(img, self._make_result(img))
             assert db.is_fresh(img) is True
-        finally:
-            db.close()
 
     def test_is_fresh_returns_false_when_file_not_in_db(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             assert db.is_fresh(img) is False
-        finally:
-            db.close()
 
     def test_is_fresh_returns_false_when_file_changed(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             db.mark_done(img, self._make_result(img))
             # Overwrite with different content (changes size)
             img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00extra_bytes")
             assert db.is_fresh(img) is False
-        finally:
-            db.close()
 
     def test_get_cached_result_returns_none_for_missing(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             assert db.get_cached_result(img) is None
-        finally:
-            db.close()
 
     def test_get_cached_result_hydrates_tags_and_model_fields(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             stored = self._make_result(img)
             db.mark_done(img, stored)
             result = db.get_cached_result(img)
@@ -1547,14 +1534,11 @@ class TestResumeDBAPIs:
             assert result.emotional_tone == "positive"
             assert result.processing_status == "ok"
             assert result.file_name == img.name
-        finally:
-            db.close()
 
     def test_get_cached_result_handles_null_tags_gracefully(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             db._conn.execute(
                 "INSERT INTO processed_images (file_path, file_size, file_mtime, tags, status) "
                 "VALUES (?, 10, 1.0, NULL, 'ok')",
@@ -1564,46 +1548,33 @@ class TestResumeDBAPIs:
             result = db.get_cached_result(img)
             assert result is not None
             assert result.tags == []
-        finally:
-            db.close()
 
     def test_has_usable_model_result_true_when_fresh_with_tags(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             db.mark_done(img, self._make_result(img))
             assert db.has_usable_model_result(img) is True
-        finally:
-            db.close()
 
     def test_has_usable_model_result_false_when_stale(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             db.mark_done(img, self._make_result(img))
             img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00extra_bytes")
             assert db.has_usable_model_result(img) is False
-        finally:
-            db.close()
 
     def test_has_usable_model_result_false_when_tags_empty(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             db.mark_done(img, self._make_result(img, tags=[]))
             assert db.has_usable_model_result(img) is False
-        finally:
-            db.close()
 
     def test_update_missing_fields_fills_nulls(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
-            # Insert a row with scene_category=None
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             minimal = ImageResult(
                 file_path=str(img),
                 file_name=img.name,
@@ -1613,7 +1584,6 @@ class TestResumeDBAPIs:
             )
             db.mark_done(img, minimal)
 
-            # Now enrich with a result that has scene_category set
             enriched = ImageResult(
                 file_path=str(img),
                 file_name=img.name,
@@ -1628,14 +1598,11 @@ class TestResumeDBAPIs:
             assert result is not None
             assert result.scene_category == "outdoor"
             assert result.emotional_tone == "peaceful"
-        finally:
-            db.close()
 
     def test_update_missing_fields_does_not_overwrite_existing(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
-        db = ProgressDB(db_path=tmp_path / "test.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
             original = ImageResult(
                 file_path=str(img),
                 file_name=img.name,
@@ -1645,7 +1612,6 @@ class TestResumeDBAPIs:
             )
             db.mark_done(img, original)
 
-            # Try to overwrite with a different value
             attempt = ImageResult(
                 file_path=str(img),
                 file_name=img.name,
@@ -1658,5 +1624,3 @@ class TestResumeDBAPIs:
             result = db.get_cached_result(img)
             assert result is not None
             assert result.scene_category == "outdoor"  # unchanged
-        finally:
-            db.close()
