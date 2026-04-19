@@ -1024,8 +1024,7 @@ class TestResumeFromDB:
         img = tmp_path / "photo.jpg"
         img.write_bytes(_JPEG_HEADER)
 
-        db = ProgressDB(db_path=tmp_path / "progress.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "progress.db") as db:
             stored = ImageResult(
                 file_path=str(img),
                 file_name=img.name,
@@ -1056,15 +1055,12 @@ class TestResumeFromDB:
             assert result.tags == ["beach", "sunset"]
             assert stats["resumed_from_db"] == 1
             mock_ollama.tag_image.assert_not_called()
-        finally:
-            db.close()
 
     def test_process_one_calls_ollama_when_resume_flag_not_set(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(_JPEG_HEADER)
 
-        db = ProgressDB(db_path=tmp_path / "progress.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "progress.db") as db:
             stored = ImageResult(
                 file_path=str(img),
                 file_name=img.name,
@@ -1106,15 +1102,12 @@ class TestResumeFromDB:
             assert result is None
             assert stats["skipped_cached"] == 1
             mock_ollama.tag_image.assert_not_called()
-        finally:
-            db.close()
 
     def test_process_one_skips_file_with_no_db_entry(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(_JPEG_HEADER)
 
-        db = ProgressDB(db_path=tmp_path / "progress.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "progress.db") as db:
             mock_ollama = MagicMock()
             mock_ollama.tag_image.return_value = MagicMock(
                 tags=["sky"],
@@ -1148,15 +1141,12 @@ class TestResumeFromDB:
             assert result is not None
             mock_ollama.tag_image.assert_called_once()
             assert stats["resumed_from_db"] == 0
-        finally:
-            db.close()
 
     def test_process_one_skips_stale_file_even_with_resume(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(_JPEG_HEADER)
 
-        db = ProgressDB(db_path=tmp_path / "progress.db")
-        try:
+        with ProgressDB(db_path=tmp_path / "progress.db") as db:
             stored = ImageResult(
                 file_path=str(img),
                 file_name=img.name,
@@ -1201,5 +1191,3 @@ class TestResumeFromDB:
             assert result is not None
             mock_ollama.tag_image.assert_called_once()
             assert stats["resumed_from_db"] == 0
-        finally:
-            db.close()
