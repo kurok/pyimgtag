@@ -57,19 +57,19 @@ pyimgtag run --write-back
 **Score photos with judge:**
 
 ```bash
-pyimgtag judge ~/Pictures --min-score 3.5
+pyimgtag judge --input-dir ~/Pictures --min-score 3.5
 ```
 
 **Import faces from Apple Photos:**
 
 ```bash
-pyimgtag faces --import
+pyimgtag faces import-photos --photos-library ~/Pictures/Photos\ Library.photoslibrary
 ```
 
 **Process exported HEIC photos:**
 
 ```bash
-pyimgtag run ~/Desktop/export --output results.json
+pyimgtag run --input-dir ~/Desktop/export --output-json results.json
 ```
 
 ### Permissions
@@ -161,25 +161,25 @@ pip install "pyimgtag[heic,raw]"
 **Tag an exported folder:**
 
 ```bash
-pyimgtag run ~/Pictures/export --output results.json
+pyimgtag run --input-dir ~/Pictures/export --output-json results.json
 ```
 
 **Score photos:**
 
 ```bash
-pyimgtag judge ~/Pictures/export --min-score 4.0
+pyimgtag judge --input-dir ~/Pictures/export --min-score 4.0
 ```
 
 **Write EXIF tags back to files:**
 
 ```bash
-pyimgtag run ~/Pictures/export --write-back
+pyimgtag run --input-dir ~/Pictures/export --write-exif
 ```
 
 **Export results to JSON:**
 
 ```bash
-pyimgtag run ~/Pictures/export --output results.json --format json
+pyimgtag run --input-dir ~/Pictures/export --output-json results.json
 ```
 
 ### Troubleshooting
@@ -251,19 +251,19 @@ pip install "pyimgtag[heic,raw]"
 **Tag photos in a Windows path (use quotes for paths with spaces):**
 
 ```powershell
-pyimgtag run "C:\Users\YourName\Pictures\Vacation" --output results.json
+pyimgtag run --input-dir "C:\Users\YourName\Pictures\Vacation" --output-json results.json
 ```
 
 **Score photos:**
 
 ```powershell
-pyimgtag judge "C:\Users\YourName\Pictures" --min-score 3.5
+pyimgtag judge --input-dir "C:\Users\YourName\Pictures" --min-score 3.5
 ```
 
 **Output JSON for import into other tools:**
 
 ```powershell
-pyimgtag run "C:\Users\YourName\Pictures" --output results.json --format json
+pyimgtag run --input-dir "C:\Users\YourName\Pictures" --output-json results.json
 ```
 
 ### Troubleshooting

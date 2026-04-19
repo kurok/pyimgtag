@@ -133,7 +133,7 @@ cd pyimgtag
 pip install -e ".[all,dev]"
 ```
 
-Features available: everything including Apple Photos integration, HEIC via sips, face management.
+Features available: everything including Apple Photos integration, HEIC via sips. For face management, also install `[face]`; for photo review workflows, install `[review]`.
 
 Typical macOS workflow:
 ```bash
@@ -144,7 +144,7 @@ pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary --write-b
 pyimgtag judge --photos-library ~/Pictures/Photos\ Library.photoslibrary --min-score 4.0
 
 # Import named faces from Apple Photos
-pyimgtag faces import --photos-library ~/Pictures/Photos\ Library.photoslibrary
+pyimgtag faces import-photos --photos-library ~/Pictures/Photos\ Library.photoslibrary
 ```
 
 **Note:** Apple Photos library access requires Full Disk Access permission for your terminal app — grant it in System Settings > Privacy & Security > Full Disk Access.
