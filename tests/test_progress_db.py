@@ -451,3 +451,181 @@ class TestGetCleanupCandidates:
             assert "nearest_country" in item
         finally:
             db.close()
+
+
+class TestResumeDBAPIs:
+    """Tests for is_fresh, get_cached_result, has_usable_model_result, update_missing_fields."""
+
+    def _make_result(self, file_path, tags=None) -> ImageResult:
+        return ImageResult(
+            file_path=str(file_path),
+            file_name=file_path.name,
+            tags=tags if tags is not None else ["nature", "outdoor"],
+            scene_summary="A sunny day",
+            scene_category="outdoor",
+            emotional_tone="positive",
+            cleanup_class=None,
+            has_text=False,
+            processing_status="ok",
+        )
+
+    def test_is_fresh_returns_true_for_matching_file(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            db.mark_done(img, self._make_result(img))
+            assert db.is_fresh(img) is True
+        finally:
+            db.close()
+
+    def test_is_fresh_returns_false_when_file_not_in_db(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            assert db.is_fresh(img) is False
+        finally:
+            db.close()
+
+    def test_is_fresh_returns_false_when_file_changed(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            db.mark_done(img, self._make_result(img))
+            # Overwrite with different content (changes size)
+            img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00extra_bytes")
+            assert db.is_fresh(img) is False
+        finally:
+            db.close()
+
+    def test_get_cached_result_returns_none_for_missing(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            assert db.get_cached_result(img) is None
+        finally:
+            db.close()
+
+    def test_get_cached_result_hydrates_tags_and_model_fields(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            stored = self._make_result(img)
+            db.mark_done(img, stored)
+            result = db.get_cached_result(img)
+            assert result is not None
+            assert result.tags == ["nature", "outdoor"]
+            assert result.scene_summary == "A sunny day"
+            assert result.scene_category == "outdoor"
+            assert result.emotional_tone == "positive"
+            assert result.processing_status == "ok"
+            assert result.file_name == img.name
+        finally:
+            db.close()
+
+    def test_get_cached_result_handles_null_tags_gracefully(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            db._conn.execute(
+                "INSERT INTO processed_images (file_path, file_size, file_mtime, tags, status) "
+                "VALUES (?, 10, 1.0, NULL, 'ok')",
+                (str(img),),
+            )
+            db._conn.commit()
+            result = db.get_cached_result(img)
+            assert result is not None
+            assert result.tags == []
+        finally:
+            db.close()
+
+    def test_has_usable_model_result_true_when_fresh_with_tags(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            db.mark_done(img, self._make_result(img))
+            assert db.has_usable_model_result(img) is True
+        finally:
+            db.close()
+
+    def test_has_usable_model_result_false_when_stale(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            db.mark_done(img, self._make_result(img))
+            img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00extra_bytes")
+            assert db.has_usable_model_result(img) is False
+        finally:
+            db.close()
+
+    def test_has_usable_model_result_false_when_tags_empty(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            db.mark_done(img, self._make_result(img, tags=[]))
+            assert db.has_usable_model_result(img) is False
+        finally:
+            db.close()
+
+    def test_update_missing_fields_fills_nulls(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            # Insert a row with scene_category=None
+            minimal = ImageResult(
+                file_path=str(img), file_name=img.name,
+                tags=["sunset"], processing_status="ok",
+                scene_category=None,
+            )
+            db.mark_done(img, minimal)
+
+            # Now enrich with a result that has scene_category set
+            enriched = ImageResult(
+                file_path=str(img), file_name=img.name,
+                tags=["sunset"], processing_status="ok",
+                scene_category="outdoor",
+                emotional_tone="peaceful",
+            )
+            db.update_missing_fields(img, enriched)
+
+            result = db.get_cached_result(img)
+            assert result is not None
+            assert result.scene_category == "outdoor"
+            assert result.emotional_tone == "peaceful"
+        finally:
+            db.close()
+
+    def test_update_missing_fields_does_not_overwrite_existing(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        db = ProgressDB(db_path=tmp_path / "test.db")
+        try:
+            original = ImageResult(
+                file_path=str(img), file_name=img.name,
+                tags=["beach"], processing_status="ok",
+                scene_category="outdoor",
+            )
+            db.mark_done(img, original)
+
+            # Try to overwrite with a different value
+            attempt = ImageResult(
+                file_path=str(img), file_name=img.name,
+                tags=["beach"], processing_status="ok",
+                scene_category="indoor",
+            )
+            db.update_missing_fields(img, attempt)
+
+            result = db.get_cached_result(img)
+            assert result is not None
+            assert result.scene_category == "outdoor"  # unchanged
+        finally:
+            db.close()

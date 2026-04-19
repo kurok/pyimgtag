@@ -71,6 +71,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-cache", action="store_true", help="Skip progress database, reprocess all images"
     )
     run_p.add_argument(
+        "--resume-from-db",
+        action="store_true",
+        help=(
+            "Reuse cached model results for unchanged files; only re-runs local enrichment "
+            "(EXIF, geocoding). Ignored when --no-cache is set."
+        ),
+    )
+    run_p.add_argument(
+        "--resume-threaded",
+        action="store_true",
+        help=(
+            "With --resume-from-db: enrich cached items in a background thread while "
+            "the main thread keeps sending uncached files to Ollama."
+        ),
+    )
+    run_p.add_argument(
         "--write-back",
         action="store_true",
         help="Write tags and description back to Apple Photos (only with --photos-library)",
@@ -211,49 +227,123 @@ def _handle_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> in
     results: list[ImageResult] = []
     stats = _new_stats(len(files))
 
-    try:
-        for file_path in files:
-            if args.limit and stats["processed"] >= args.limit:
-                break
+    use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
+    use_threaded = use_resume and getattr(args, "resume_threaded", False)
 
-            if str(file_path) in skipped_dedup:
-                stats["skipped_dedup"] += 1
-                continue
+    if use_threaded and progress_db is not None:
+        import queue as _queue
+        import threading as _threading
 
-            result = _process_one(
-                file_path, source_type, args, ollama, geocoder, stats, progress_db
-            )
-            if result is None:
-                continue
+        # Pre-classify: cached (DB-reusable) vs fresh (need Ollama)
+        cached_files = [
+            f
+            for f in files
+            if str(f) not in skipped_dedup and progress_db.has_usable_model_result(f)
+        ]
+        cached_set = {str(f) for f in cached_files}
+        fresh_files = [
+            f for f in files if str(f) not in skipped_dedup and str(f) not in cached_set
+        ]
 
+        result_q: _queue.Queue = _queue.Queue()
+        thread_stats: dict = {k: 0 for k in stats if k != "scanned"}
+        stop_event = _threading.Event()
+
+        def _cache_worker() -> None:
+            thread_db = ProgressDB(db_path=args.db)
+            thread_geo = ReverseGeocoder(cache_dir=args.cache_dir)
+            try:
+                for fp in cached_files:
+                    if stop_event.is_set():
+                        break
+                    r = _hydrate_from_db(fp, source_type, args, thread_geo, thread_stats, thread_db)
+                    if r is not None:
+                        result_q.put(r)
+            finally:
+                thread_db.close()
+                thread_geo.close()
+                result_q.put(None)  # sentinel
+
+        worker_thread = _threading.Thread(target=_cache_worker, daemon=True)
+        worker_thread.start()
+
+        def _drain(sentinel_seen: bool) -> bool:
+            while True:
+                try:
+                    item = result_q.get_nowait()
+                except _queue.Empty:
+                    break
+                if item is None:
+                    sentinel_seen = True
+                else:
+                    _finalize_result(
+                        item, Path(item.file_path), args, progress_db, phash_map, results, stats
+                    )
+            return sentinel_seen
+
+        sentinel_seen = False
+        try:
+            for file_path in fresh_files:
+                if args.limit and stats["processed"] >= args.limit:
+                    break
+                result = _process_one(
+                    file_path, source_type, args, ollama, geocoder, stats, progress_db
+                )
+                if result is not None:
+                    _finalize_result(
+                        result, file_path, args, progress_db, phash_map, results, stats
+                    )
+                sentinel_seen = _drain(sentinel_seen)
+        except KeyboardInterrupt:
+            stop_event.set()
+            print("\nInterrupted.", file=sys.stderr)
+        finally:
+            stop_event.set()
+            worker_thread.join(timeout=10)
+            while not sentinel_seen or not result_q.empty():
+                try:
+                    item = result_q.get_nowait()
+                except _queue.Empty:
+                    break
+                if item is None:
+                    sentinel_seen = True
+                else:
+                    _finalize_result(
+                        item, Path(item.file_path), args, progress_db, phash_map, results, stats
+                    )
+            for k, v in thread_stats.items():
+                if k in stats:
+                    stats[k] += v
+            ollama.close()
+            geocoder.close()
             if progress_db is not None:
-                progress_db.mark_done(file_path, result)
+                progress_db.close()
+    else:
+        # Normal (non-threaded) processing loop
+        try:
+            for file_path in files:
+                if args.limit and stats["processed"] >= args.limit:
+                    break
 
-            if args.write_back and result.source_type == "photos_library" and result.tags:
-                from pyimgtag.applescript_writer import write_to_photos
+                if str(file_path) in skipped_dedup:
+                    stats["skipped_dedup"] += 1
+                    continue
 
-                err = write_to_photos(result.file_name, result.tags, result.scene_summary)
-                if err:
-                    print(f"  Write-back failed: {err}", file=sys.stderr)
+                result = _process_one(
+                    file_path, source_type, args, ollama, geocoder, stats, progress_db
+                )
+                if result is None:
+                    continue
 
-            result.phash = phash_map.get(str(file_path))
-            results.append(result)
-            stats["processed"] += 1
+                _finalize_result(result, file_path, args, progress_db, phash_map, results, stats)
 
-            if args.jsonl_stdout:
-                print(result_to_jsonl(result))
-            elif args.verbose or args.dry_run:
-                _print_verbose(result, stats["processed"], args.limit or stats["scanned"])
-            else:
-                _print_brief(result, stats["processed"], args.limit or stats["scanned"])
-
-    except KeyboardInterrupt:
-        print("\nInterrupted.", file=sys.stderr)
-    finally:
-        ollama.close()
-        geocoder.close()
-        if progress_db is not None:
-            progress_db.close()
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+        finally:
+            ollama.close()
+            geocoder.close()
+            if progress_db is not None:
+                progress_db.close()
 
     if args.output_json:
         write_json(results, args.output_json)
@@ -375,8 +465,14 @@ def _process_one(
         return None
 
     if progress_db is not None and progress_db.is_processed(file_path):
-        stats["skipped_cached"] += 1
-        return None
+        if not getattr(args, "resume_from_db", False):
+            stats["skipped_cached"] += 1
+            return None
+        # --resume-from-db: fall through to the resume check below
+
+    resume = getattr(args, "resume_from_db", False) and not getattr(args, "no_cache", False)
+    if resume and progress_db is not None and progress_db.has_usable_model_result(file_path):
+        return _hydrate_from_db(file_path, source_type, args, geocoder, stats, progress_db)
 
     result = ImageResult(
         file_path=str(file_path), file_name=file_path.name, source_type=source_type
@@ -445,6 +541,87 @@ def _process_one(
     return result
 
 
+def _hydrate_from_db(
+    file_path: Path,
+    source_type: str,
+    args: argparse.Namespace,
+    geocoder: ReverseGeocoder,
+    stats: dict,
+    progress_db: ProgressDB,
+) -> ImageResult | None:
+    """Load a cached ImageResult from DB and enrich it with fresh EXIF/geocode data."""
+    result = progress_db.get_cached_result(file_path)
+    if result is None:
+        return None
+
+    result.source_type = source_type
+    result.is_local = True
+    result.file_path = str(file_path)
+    result.file_name = file_path.name
+
+    try:
+        exif = read_exif(file_path)
+    except Exception:
+        exif = ExifData()
+    result.image_date = exif.date_original
+    result.gps_lat = exif.gps_lat
+    result.gps_lon = exif.gps_lon
+
+    if not passes_date_filter(exif, file_path, args.date, args.date_from, args.date_to):
+        stats["skipped_date"] += 1
+        return None
+
+    if args.skip_no_gps and not exif.has_gps:
+        stats["skipped_no_gps"] += 1
+        return None
+
+    if exif.has_gps:
+        geo = geocoder.resolve(exif.gps_lat, exif.gps_lon)
+        if not geo.error:
+            result.nearest_place = geo.nearest_place
+            result.nearest_city = geo.nearest_city
+            result.nearest_region = geo.nearest_region
+            result.nearest_country = geo.nearest_country
+        else:
+            stats["geocode_failures"] += 1
+
+    progress_db.update_missing_fields(file_path, result)
+    stats["resumed_from_db"] += 1
+    return result
+
+
+def _finalize_result(
+    result: ImageResult,
+    file_path: Path,
+    args: argparse.Namespace,
+    progress_db: ProgressDB | None,
+    phash_map: dict,
+    results: list,
+    stats: dict,
+) -> None:
+    """Mark done in DB, handle write-back, append to results list, print progress."""
+    if progress_db is not None:
+        progress_db.mark_done(file_path, result)
+
+    if args.write_back and result.source_type == "photos_library" and result.tags:
+        from pyimgtag.applescript_writer import write_to_photos
+
+        err = write_to_photos(result.file_name, result.tags, result.scene_summary)
+        if err:
+            print(f"  Write-back failed: {err}", file=sys.stderr)
+
+    result.phash = phash_map.get(str(file_path))
+    results.append(result)
+    stats["processed"] += 1
+
+    if args.jsonl_stdout:
+        print(result_to_jsonl(result))
+    elif args.verbose or args.dry_run:
+        _print_verbose(result, stats["processed"], args.limit or stats["scanned"])
+    else:
+        _print_brief(result, stats["processed"], args.limit or stats["scanned"])
+
+
 def _new_stats(scanned: int) -> dict:
     return {
         "scanned": scanned,
@@ -454,6 +631,7 @@ def _new_stats(scanned: int) -> dict:
         "skipped_no_local": 0,
         "skipped_cached": 0,
         "skipped_dedup": 0,
+        "resumed_from_db": 0,
         "model_failures": 0,
         "geocode_failures": 0,
     }
@@ -521,6 +699,7 @@ def _print_summary(stats: dict) -> None:
     print("\n--- Summary ---", file=sys.stderr)
     print(f"  Scanned:          {stats['scanned']}", file=sys.stderr)
     print(f"  Processed:        {stats['processed']}", file=sys.stderr)
+    print(f"  Resumed (DB):     {stats['resumed_from_db']}", file=sys.stderr)
     print(f"  Skipped (date):   {stats['skipped_date']}", file=sys.stderr)
     print(f"  Skipped (no GPS): {stats['skipped_no_gps']}", file=sys.stderr)
     print(f"  Skipped (no file):{stats['skipped_no_local']}", file=sys.stderr)

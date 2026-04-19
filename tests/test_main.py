@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import pytest
 
-from pyimgtag.main import build_parser, main
+from pyimgtag.main import _process_one, build_parser, main
+from pyimgtag.models import ImageResult
+from pyimgtag.progress_db import ProgressDB
 
 
 class TestBuildParser:
@@ -390,3 +396,179 @@ class TestCleanupSubcommand:
         assert "[delete]" in out
         assert "[review]" in out
         assert "delete + review" in out
+
+
+# ---------------------------------------------------------------------------
+# Minimal JPEG bytes for creating real temp files in tests
+# ---------------------------------------------------------------------------
+_JPEG_HEADER = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00"
+
+
+def _make_args(**overrides) -> argparse.Namespace:
+    """Return a minimal Namespace suitable for passing to _process_one."""
+    defaults = dict(
+        resume_from_db=False,
+        no_cache=False,
+        date=None,
+        date_from=None,
+        date_to=None,
+        skip_no_gps=False,
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+class TestResumeFromDB:
+    def test_resume_from_db_flag_in_parser(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--resume-from-db"])
+        assert args.resume_from_db is True
+
+    def test_resume_threaded_flag_in_parser(self):
+        args = build_parser().parse_args(
+            ["run", "--input-dir", "/tmp", "--resume-from-db", "--resume-threaded"]
+        )
+        assert args.resume_threaded is True
+
+    def test_resume_flags_absent_by_default(self):
+        args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
+        assert args.resume_from_db is False
+        assert args.resume_threaded is False
+
+    def test_process_one_uses_db_when_resume_flag_set(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(_JPEG_HEADER)
+
+        db = ProgressDB(db_path=tmp_path / "progress.db")
+        try:
+            stored = ImageResult(
+                file_path=str(img),
+                file_name=img.name,
+                tags=["beach", "sunset"],
+                scene_summary="Golden hour",
+                processing_status="ok",
+            )
+            db.mark_done(img, stored)
+
+            mock_ollama = MagicMock()
+            mock_geocoder = MagicMock()
+            mock_geocoder.resolve.return_value = MagicMock(error=True)
+            stats = {
+                "skipped_cached": 0, "skipped_no_local": 0, "skipped_date": 0,
+                "skipped_no_gps": 0, "model_failures": 0, "geocode_failures": 0,
+                "resumed_from_db": 0, "processed": 0,
+            }
+
+            args = _make_args(resume_from_db=True)
+            result = _process_one(img, "directory", args, mock_ollama, mock_geocoder, stats, db)
+
+            assert result is not None
+            assert result.tags == ["beach", "sunset"]
+            assert stats["resumed_from_db"] == 1
+            mock_ollama.tag_image.assert_not_called()
+        finally:
+            db.close()
+
+    def test_process_one_calls_ollama_when_resume_flag_not_set(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(_JPEG_HEADER)
+
+        db = ProgressDB(db_path=tmp_path / "progress.db")
+        try:
+            stored = ImageResult(
+                file_path=str(img), file_name=img.name,
+                tags=["beach"], processing_status="ok",
+            )
+            db.mark_done(img, stored)
+
+            mock_ollama = MagicMock()
+            mock_ollama.tag_image.return_value = MagicMock(
+                tags=["mountain"], summary="New result", error=None,
+                scene_category=None, emotional_tone=None, cleanup_class=None,
+                has_text=False, text_summary=None, event_hint=None, significance=None,
+            )
+            mock_geocoder = MagicMock()
+            mock_geocoder.resolve.return_value = MagicMock(error=True)
+            stats = {
+                "skipped_cached": 0, "skipped_no_local": 0, "skipped_date": 0,
+                "skipped_no_gps": 0, "model_failures": 0, "geocode_failures": 0,
+                "resumed_from_db": 0, "processed": 0,
+            }
+
+            # Without resume flag — file is already in DB so is_processed=True → skip
+            args = _make_args(resume_from_db=False)
+            result = _process_one(img, "directory", args, mock_ollama, mock_geocoder, stats, db)
+
+            assert result is None
+            assert stats["skipped_cached"] == 1
+            mock_ollama.tag_image.assert_not_called()
+        finally:
+            db.close()
+
+    def test_process_one_skips_file_with_no_db_entry(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(_JPEG_HEADER)
+
+        db = ProgressDB(db_path=tmp_path / "progress.db")
+        try:
+            mock_ollama = MagicMock()
+            mock_ollama.tag_image.return_value = MagicMock(
+                tags=["sky"], summary="Blue sky", error=None,
+                scene_category=None, emotional_tone=None, cleanup_class=None,
+                has_text=False, text_summary=None, event_hint=None, significance=None,
+            )
+            mock_geocoder = MagicMock()
+            mock_geocoder.resolve.return_value = MagicMock(error=True)
+            stats = {
+                "skipped_cached": 0, "skipped_no_local": 0, "skipped_date": 0,
+                "skipped_no_gps": 0, "model_failures": 0, "geocode_failures": 0,
+                "resumed_from_db": 0, "processed": 0,
+            }
+
+            args = _make_args(resume_from_db=True)
+            result = _process_one(img, "directory", args, mock_ollama, mock_geocoder, stats, db)
+
+            # File not in DB → goes through Ollama
+            assert result is not None
+            mock_ollama.tag_image.assert_called_once()
+            assert stats["resumed_from_db"] == 0
+        finally:
+            db.close()
+
+    def test_process_one_skips_stale_file_even_with_resume(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(_JPEG_HEADER)
+
+        db = ProgressDB(db_path=tmp_path / "progress.db")
+        try:
+            stored = ImageResult(
+                file_path=str(img), file_name=img.name,
+                tags=["forest"], processing_status="ok",
+            )
+            db.mark_done(img, stored)
+
+            # Modify the file so it's no longer fresh
+            img.write_bytes(_JPEG_HEADER + b"extra")
+
+            mock_ollama = MagicMock()
+            mock_ollama.tag_image.return_value = MagicMock(
+                tags=["forest"], summary="Updated", error=None,
+                scene_category=None, emotional_tone=None, cleanup_class=None,
+                has_text=False, text_summary=None, event_hint=None, significance=None,
+            )
+            mock_geocoder = MagicMock()
+            mock_geocoder.resolve.return_value = MagicMock(error=True)
+            stats = {
+                "skipped_cached": 0, "skipped_no_local": 0, "skipped_date": 0,
+                "skipped_no_gps": 0, "model_failures": 0, "geocode_failures": 0,
+                "resumed_from_db": 0, "processed": 0,
+            }
+
+            args = _make_args(resume_from_db=True)
+            result = _process_one(img, "directory", args, mock_ollama, mock_geocoder, stats, db)
+
+            # Stale file → Ollama called, not resumed from DB
+            assert result is not None
+            mock_ollama.tag_image.assert_called_once()
+            assert stats["resumed_from_db"] == 0
+        finally:
+            db.close()
