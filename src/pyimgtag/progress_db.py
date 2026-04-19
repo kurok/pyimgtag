@@ -897,6 +897,113 @@ class ProgressDB:
             },
         }
 
+    def is_fresh(self, file_path: Path) -> bool:
+        """Return True if DB has a row for this file and size/mtime still match."""
+        row = self._conn.execute(
+            "SELECT file_size, file_mtime FROM processed_images WHERE file_path = ?",
+            (str(file_path),),
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            stat = file_path.stat()
+        except OSError:
+            return False
+        return row[0] == stat.st_size and row[1] == stat.st_mtime
+
+    def get_cached_result(self, file_path: Path) -> ImageResult | None:
+        """Return an ImageResult built from the stored DB row, or None if not found."""
+        row = self._conn.execute(
+            """
+            SELECT tags, scene_summary, status, error_message,
+                   scene_category, emotional_tone, cleanup_class,
+                   has_text, text_summary, event_hint, significance
+            FROM processed_images
+            WHERE file_path = ?
+            """,
+            (str(file_path),),
+        ).fetchone()
+        if row is None:
+            return None
+        (
+            tags_raw,
+            scene_summary,
+            status,
+            error_message,
+            scene_category,
+            emotional_tone,
+            cleanup_class,
+            has_text_int,
+            text_summary,
+            event_hint,
+            significance,
+        ) = row
+        try:
+            tags: list[str] = json.loads(tags_raw) if tags_raw else []
+        except (json.JSONDecodeError, TypeError):
+            tags = []
+        return ImageResult(
+            file_path=str(file_path),
+            file_name=file_path.name,
+            tags=tags,
+            scene_summary=scene_summary,
+            processing_status=status if status is not None else "ok",
+            error_message=error_message,
+            scene_category=scene_category,
+            emotional_tone=emotional_tone,
+            cleanup_class=cleanup_class,
+            has_text=bool(has_text_int),
+            text_summary=text_summary,
+            event_hint=event_hint,
+            significance=significance,
+        )
+
+    def has_usable_model_result(self, file_path: Path) -> bool:
+        """Return True if the DB has a fresh row with non-empty tags."""
+        if not self.is_fresh(file_path):
+            return False
+        row = self._conn.execute(
+            "SELECT tags FROM processed_images WHERE file_path = ?",
+            (str(file_path),),
+        ).fetchone()
+        if row is None:
+            return False
+        try:
+            tags: list[str] = json.loads(row[0]) if row[0] else []
+        except (json.JSONDecodeError, TypeError):
+            tags = []
+        return len(tags) > 0
+
+    def update_missing_fields(self, file_path: Path, result: ImageResult) -> None:
+        """Update only NULL columns from result; never overwrite existing non-null values."""
+        self._conn.execute(
+            """
+            UPDATE processed_images SET
+                scene_summary  = COALESCE(scene_summary,  ?),
+                scene_category = COALESCE(scene_category, ?),
+                emotional_tone = COALESCE(emotional_tone, ?),
+                cleanup_class  = COALESCE(cleanup_class,  ?),
+                has_text       = CASE WHEN has_text = 0 OR has_text IS NULL
+                                      THEN ? ELSE has_text END,
+                text_summary   = COALESCE(text_summary,   ?),
+                event_hint     = COALESCE(event_hint,     ?),
+                significance   = COALESCE(significance,   ?)
+            WHERE file_path = ?
+            """,
+            (
+                result.scene_summary,
+                result.scene_category,
+                result.emotional_tone,
+                result.cleanup_class,
+                1 if result.has_text else 0,
+                result.text_summary,
+                result.event_hint,
+                result.significance,
+                str(file_path),
+            ),
+        )
+        self._conn.commit()
+
     def __enter__(self) -> "ProgressDB":
         return self
 

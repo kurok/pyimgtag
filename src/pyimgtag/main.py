@@ -79,6 +79,22 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_p.add_argument(
+        "--resume-from-db",
+        action="store_true",
+        help=(
+            "Reuse cached model results for unchanged files; only re-runs local enrichment "
+            "(EXIF, geocoding). Ignored when --no-cache is set."
+        ),
+    )
+    run_p.add_argument(
+        "--resume-threaded",
+        action="store_true",
+        help=(
+            "With --resume-from-db: enrich cached items in a background thread while "
+            "the main thread keeps sending uncached files to Ollama."
+        ),
+    )
+    run_p.add_argument(
         "--write-back",
         action="store_true",
         help="Write tags/description back to Apple Photos (macOS + --photos-library only)",
