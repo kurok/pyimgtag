@@ -126,14 +126,14 @@ brew install ollama exiftool
 ollama pull gemma4:e4b
 
 # Install
-pip install "pyimgtag[all]"   # includes pillow-heif, photoscript, rawpy
+pip install "pyimgtag[all]"   # includes pillow-heif, photoscript, rawpy, face-recognition, fastapi, uvicorn
 # or from source
 git clone https://github.com/kurok/pyimgtag.git
 cd pyimgtag
 pip install -e ".[all,dev]"
 ```
 
-Features available: everything including Apple Photos integration, HEIC via sips. For face management, also install `[face]`; for photo review workflows, install `[review]`.
+Features available: everything including Apple Photos integration, HEIC, face management, and photo review workflows.
 
 Typical macOS workflow:
 ```bash
