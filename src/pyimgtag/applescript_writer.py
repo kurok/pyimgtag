@@ -10,15 +10,22 @@ import re
 import shutil
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import PurePosixPath
 
-try:
-    import photoscript
-except ImportError:
-    photoscript = None  # type: ignore[assignment]
-
-_HAS_PHOTOSCRIPT = photoscript is not None
 _IS_MACOS = sys.platform == "darwin"
+
+
+@lru_cache(maxsize=None)
+def _has_photoscript() -> bool:
+    """Return True if photoscript is importable (checked lazily, cached)."""
+    try:
+        import photoscript  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
 
 # Standard UUID pattern: 8-4-4-4-12 hex digits.
 # Photos uses the filename stem as media item id only when it matches this format.
@@ -135,8 +142,10 @@ def _write_via_photoscript(
     title: str | None = None,
 ) -> str | None:
     """Write to Photos using photoscript library."""
+    import photoscript as _ps
+
     try:
-        photos_app = photoscript.PhotosLibrary()
+        photos_app = _ps.PhotosLibrary()
         stem = PurePosixPath(file_name).stem
         if not _looks_like_uuid(stem):
             # Non-UUID filename: skip photoscript UUID lookup to avoid a slow timeout.
@@ -220,8 +229,10 @@ def _build_read_applescript(file_name: str) -> str:
 
 def _read_via_photoscript(file_name: str) -> list[str] | None:
     """Read keywords from Photos using photoscript library."""
+    import photoscript as _ps
+
     try:
-        photos_app = photoscript.PhotosLibrary()
+        photos_app = _ps.PhotosLibrary()
         stem = PurePosixPath(file_name).stem
         if not _looks_like_uuid(stem):
             return None
@@ -271,7 +282,7 @@ def read_keywords_from_photos(file_path: str) -> list[str] | None:
     if not _IS_MACOS:
         return None
     file_name = PurePosixPath(file_path).name
-    if _HAS_PHOTOSCRIPT:
+    if _has_photoscript():
         return _read_via_photoscript(file_name)
     return _read_via_osascript(file_name)
 
@@ -317,7 +328,7 @@ def write_to_photos(
                 merged.append(k)
         final_tags = merged
 
-    if _HAS_PHOTOSCRIPT:
+    if _has_photoscript():
         result = _write_via_photoscript(file_name, final_tags, summary, title=title)
         if result is None:
             return None
