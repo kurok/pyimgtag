@@ -1,12 +1,16 @@
 """Smoke tests for examples/mock_ollama.py so the demo mock stays compatible
-with pyimgtag's preflight health checks."""
+with pyimgtag's preflight health checks.
+
+The handler class is loaded directly from the script (via importlib) and run
+in a background thread to avoid flaky subprocess-startup timing on CI runners.
+"""
 
 from __future__ import annotations
 
+import http.server
+import importlib.util
 import socket
-import subprocess
-import sys
-import time
+import threading
 from pathlib import Path
 
 import pytest
@@ -14,6 +18,14 @@ import requests
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MOCK_PATH = REPO_ROOT / "examples" / "mock_ollama.py"
+
+
+def _load_mock_module():
+    spec = importlib.util.spec_from_file_location("mock_ollama_under_test", MOCK_PATH)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _free_port() -> int:
@@ -24,33 +36,17 @@ def _free_port() -> int:
 
 @pytest.fixture
 def mock_server():
+    mod = _load_mock_module()
     port = _free_port()
-    proc = subprocess.Popen(  # noqa: S603
-        [sys.executable, str(MOCK_PATH), str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    base = f"http://127.0.0.1:{port}"
-    deadline = time.time() + 5
-    while time.time() < deadline:
-        try:
-            requests.get(f"{base}/api/tags", timeout=0.5)
-            break
-        except requests.RequestException:
-            time.sleep(0.05)
-    else:
-        proc.kill()
-        proc.wait(timeout=2)
-        raise RuntimeError("mock_ollama did not start in time")
+    server = http.server.HTTPServer(("127.0.0.1", port), mod.MockOllamaHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
     try:
-        yield base
+        yield f"http://127.0.0.1:{port}"
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait(timeout=2)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 class TestMockOllamaTagsEndpoint:
