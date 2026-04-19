@@ -816,3 +816,21 @@ class TestLazyPhotoscriptImport:
                 sys.modules[mod_name] = saved
             if ps_saved is not None:
                 sys.modules["photoscript"] = ps_saved
+
+    def test_has_photoscript_does_not_import_photoscript(self):
+        """_has_photoscript() must only probe availability, never import photoscript."""
+        # Clear the lru_cache so we actually exercise the probe
+        from pyimgtag.applescript_writer import _has_photoscript
+
+        _has_photoscript.cache_clear()
+        # Drop photoscript from sys.modules to detect fresh import
+        ps_saved = sys.modules.pop("photoscript", None)
+        try:
+            _has_photoscript()
+            assert "photoscript" not in sys.modules, (
+                "_has_photoscript() imported photoscript; it must use find_spec instead"
+            )
+        finally:
+            if ps_saved is not None:
+                sys.modules["photoscript"] = ps_saved
+            _has_photoscript.cache_clear()
