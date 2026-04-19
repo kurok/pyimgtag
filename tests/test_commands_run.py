@@ -311,6 +311,30 @@ class TestWriteBackDryRun:
 
         mock_write.assert_not_called()
 
+    def test_write_back_mode_forwarded(self, tmp_path: Path) -> None:
+        """write_to_photos must receive the write_back_mode from args."""
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "AABBCCDD.jpg"
+        img.write_bytes(b"x")
+        args = self._make_args(tmp_path, dry_run=False)
+        args.write_back_mode = "append"
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.applescript_writer.write_to_photos", return_value=None) as mock_write,
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["tag"], summary="desc")
+            mock_client_cls.return_value = mock_client
+            cmd_run(args, MagicMock())
+
+        _, kwargs = mock_write.call_args
+        assert kwargs.get("mode") == "append"
+
     def test_write_back_runs_without_dry_run(self, tmp_path: Path) -> None:
         """write_to_photos must be called when --write-back is set and --dry-run is not."""
         from pyimgtag.commands.run import cmd_run
@@ -332,3 +356,127 @@ class TestWriteBackDryRun:
             cmd_run(args, MagicMock())
 
         mock_write.assert_called_once()
+
+
+class TestSkipIfTagged:
+    """--skip-if-tagged skips Ollama processing for photos already tagged in Photos."""
+
+    def _make_args(self, tmp_path: Path) -> MagicMock:
+        args = MagicMock()
+        args.input_dir = None
+        args.photos_library = str(tmp_path)
+        args.extensions = "jpg"
+        args.newest_first = False
+        args.no_cache = True
+        args.dedup = False
+        args.limit = None
+        args.date = None
+        args.date_from = None
+        args.date_to = None
+        args.skip_no_gps = False
+        args.skip_if_tagged = True
+        args.write_back = False
+        args.write_exif = False
+        args.sidecar_only = False
+        args.dry_run = False
+        args.verbose = False
+        args.jsonl_stdout = False
+        args.output_json = None
+        args.output_csv = None
+        args.ollama_url = "http://localhost:11434"
+        args.model = "test"
+        args.max_dim = 512
+        args.timeout = 5
+        args.cache_dir = None
+        args.no_recursive = False
+        return args
+
+    def test_skips_ollama_when_photo_already_has_keywords(self, tmp_path: Path) -> None:
+        """Photo with existing keywords in Photos must not reach Ollama."""
+        from pyimgtag.commands.run import cmd_run
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        args = self._make_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch(
+                "pyimgtag.commands.run.read_keywords_from_photos",
+                return_value=["sunset", "beach"],
+            ),
+        ):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            cmd_run(args, MagicMock())
+
+        mock_client.tag_image.assert_not_called()
+
+    def test_processes_photo_with_no_keywords(self, tmp_path: Path) -> None:
+        """Photo with empty keyword list must still be processed by Ollama."""
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        args = self._make_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.commands.run.read_keywords_from_photos", return_value=[]),
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["nature"], summary="")
+            mock_client_cls.return_value = mock_client
+            cmd_run(args, MagicMock())
+
+        mock_client.tag_image.assert_called_once()
+
+    def test_processes_photo_when_read_returns_none(self, tmp_path: Path) -> None:
+        """If keyword read fails (None), photo must be processed rather than silently skipped."""
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        args = self._make_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.commands.run.read_keywords_from_photos", return_value=None),
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["nature"], summary="")
+            mock_client_cls.return_value = mock_client
+            cmd_run(args, MagicMock())
+
+        mock_client.tag_image.assert_called_once()
+
+    def test_skip_if_tagged_false_does_not_read_keywords(self, tmp_path: Path) -> None:
+        """When --skip-if-tagged is off, read_keywords_from_photos must not be called."""
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        args = self._make_args(tmp_path)
+        args.skip_if_tagged = False
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.commands.run.read_keywords_from_photos") as mock_read,
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["nature"], summary="")
+            mock_client_cls.return_value = mock_client
+            cmd_run(args, MagicMock())
+
+        mock_read.assert_not_called()

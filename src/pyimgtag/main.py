@@ -71,6 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-cache", action="store_true", help="Skip progress database, reprocess all images"
     )
     run_p.add_argument(
+        "--skip-if-tagged",
+        action="store_true",
+        help=(
+            "Skip Ollama processing for photos that already have keywords in Apple Photos "
+            "(--photos-library only; reads existing keywords before tagging)"
+        ),
+    )
+    run_p.add_argument(
         "--write-back",
         action="store_true",
         help="Write tags/description back to Apple Photos (macOS + --photos-library only)",

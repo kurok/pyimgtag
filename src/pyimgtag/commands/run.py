@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from platform import system as get_platform_name
 
+from pyimgtag.applescript_writer import read_keywords_from_photos
 from pyimgtag.exif_reader import read_exif
 from pyimgtag.filters import passes_date_filter
 from pyimgtag.geocoder import ReverseGeocoder
@@ -91,6 +92,9 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
     if args.write_back and args.input_dir:
         print("Warning: --write-back has no effect with --input-dir", file=sys.stderr)
+
+    if args.skip_if_tagged and args.input_dir:
+        print("Warning: --skip-if-tagged has no effect with --input-dir", file=sys.stderr)
 
     if args.write_back and get_platform_name() != "Darwin":
         print(
@@ -259,6 +263,12 @@ def _process_one(
         stats["skipped_cached"] += 1
         return None
 
+    if args.skip_if_tagged and source_type == "photos_library":
+        existing = read_keywords_from_photos(str(file_path))
+        if existing:
+            stats["skipped_tagged"] += 1
+            return None
+
     result = ImageResult(
         file_path=str(file_path), file_name=file_path.name, source_type=source_type
     )
@@ -375,6 +385,7 @@ def _new_stats(scanned: int) -> dict[str, int]:
         "skipped_no_local": 0,
         "skipped_cached": 0,
         "skipped_dedup": 0,
+        "skipped_tagged": 0,
         "model_failures": 0,
         "geocode_failures": 0,
     }
@@ -447,5 +458,6 @@ def _print_summary(stats: dict) -> None:
     print(f"  Skipped (no file):{stats['skipped_no_local']}", file=sys.stderr)
     print(f"  Skipped (cached): {stats['skipped_cached']}", file=sys.stderr)
     print(f"  Skipped (dedup):  {stats['skipped_dedup']}", file=sys.stderr)
+    print(f"  Skipped (tagged): {stats['skipped_tagged']}", file=sys.stderr)
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
     print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
