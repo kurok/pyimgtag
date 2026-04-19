@@ -141,12 +141,18 @@ class ProgressDB:
         self._conn.commit()
 
     def is_processed(self, file_path: Path) -> bool:
-        """Return True if the file was already processed and hasn't changed."""
+        """Return True if the file was already successfully processed and hasn't changed.
+
+        Rows with status != 'ok' (e.g. transient Ollama failures) are treated as
+        not processed so they will be retried on the next run.
+        """
         row = self._conn.execute(
-            "SELECT file_size, file_mtime FROM processed_images WHERE file_path = ?",
+            "SELECT file_size, file_mtime, status FROM processed_images WHERE file_path = ?",
             (str(file_path),),
         ).fetchone()
         if row is None:
+            return False
+        if row[2] != "ok":
             return False
         try:
             stat = file_path.stat()
