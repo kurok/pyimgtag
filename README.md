@@ -602,6 +602,10 @@ or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only faile
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Security
+
+Found a vulnerability? Please follow the disclosure flow in [SECURITY.md](SECURITY.md) -- do not file a public issue.
+
 ## License
 
 MIT -- see [LICENSE](LICENSE).
