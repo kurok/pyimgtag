@@ -57,6 +57,26 @@ class TestHandleFacesScan:
             rc = _handle_faces_scan(args)
         assert rc == 1
 
+    def test_missing_face_recognition_extra_returns_1(self, tmp_path, capsys):
+        """Regression test for issue #89: friendly error when face_recognition is missing."""
+        # Create a test image file so scan_directory finds something
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff")
+
+        args = _make_args(input_dir=str(tmp_path), db=str(tmp_path / "test.db"))
+        with patch("pyimgtag.face_detection._check_face_recognition") as mock_check:
+            mock_check.side_effect = ImportError(
+                "face_recognition is not installed. "
+                "Install the [face] extra: pip install pyimgtag[face]"
+            )
+            rc = _handle_faces_scan(args)
+        assert rc == 1
+        captured = capsys.readouterr()
+        assert "face_recognition is not installed" in captured.err
+        assert "pip install pyimgtag[face]" in captured.err
+        # Database should not have been created
+        assert not (tmp_path / "test.db").exists()
+
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_file_not_found_returns_1(self, mock_scan, tmp_path):
         mock_scan.side_effect = FileNotFoundError("not found")
@@ -64,16 +84,18 @@ class TestHandleFacesScan:
         rc = _handle_faces_scan(args)
         assert rc == 1
 
+    @patch("pyimgtag.face_detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_directory")
-    def test_no_files_returns_0(self, mock_scan, tmp_path):
+    def test_no_files_returns_0(self, mock_scan, mock_check, tmp_path):
         mock_scan.return_value = []
         args = _make_args(input_dir=str(tmp_path), db=str(tmp_path / "test.db"))
         rc = _handle_faces_scan(args)
         assert rc == 0
 
+    @patch("pyimgtag.face_detection._check_face_recognition")
     @patch("pyimgtag.face_embedding.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
-    def test_scan_processes_files_with_db(self, mock_scan_dir, mock_store, tmp_path):
+    def test_scan_processes_files_with_db(self, mock_scan_dir, mock_store, mock_check, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff")
         mock_scan_dir.return_value = [img]
@@ -83,9 +105,10 @@ class TestHandleFacesScan:
         assert rc == 0
         mock_store.assert_called_once()
 
+    @patch("pyimgtag.face_detection._check_face_recognition")
     @patch("pyimgtag.face_embedding.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
-    def test_scan_with_limit(self, mock_scan_dir, mock_store, tmp_path):
+    def test_scan_with_limit(self, mock_scan_dir, mock_store, mock_check, tmp_path):
         imgs = [tmp_path / f"p{i}.jpg" for i in range(3)]
         for f in imgs:
             f.write_bytes(b"\xff\xd8\xff")
