@@ -57,17 +57,46 @@ async function load() {
   for (const p of persons) {
     const card = document.createElement('div');
     card.className = 'card';
-    const badge = p.trusted
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'name';
+    nameDiv.textContent = p.label || ('(unlabelled #' + p.id + ')');
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'meta';
+    const badgeSpan = document.createElement('span');
+    // badge is a constant trusted HTML literal — no user input involved
+    badgeSpan.innerHTML = p.trusted
       ? '<span class="badge trusted">&#9733; trusted</span>'
       : '<span class="badge auto">auto</span>';
-    card.innerHTML = `
-      <div class="name">${esc(p.label || '(unlabelled #' + p.id + ')')}</div>
-      <div class="meta">${badge}${p.face_count} face(s) &bull; source: ${esc(p.source)}</div>
-      <div class="faces" id="faces-${p.id}"></div>
-      <div class="actions">
-        <button onclick="rename(${p.id}, '${esc(p.label)}')">Rename</button>
-        <button class="danger" onclick="deletePerson(${p.id})">Delete</button>
-      </div>`;
+    metaDiv.appendChild(badgeSpan);
+    metaDiv.appendChild(document.createTextNode(p.face_count + ' face(s) \u2022 source: '));
+    metaDiv.appendChild(document.createTextNode(p.source));
+
+    const facesDiv = document.createElement('div');
+    facesDiv.className = 'faces';
+    facesDiv.id = 'faces-' + p.id;
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'actions';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.textContent = 'Rename';
+    renameBtn.addEventListener('click', () => rename(p.id, p.label));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'danger';
+    deleteBtn.textContent = 'Delete';
+    deleteBtn.addEventListener('click', () => deletePerson(p.id));
+
+    actionsDiv.appendChild(renameBtn);
+    actionsDiv.appendChild(deleteBtn);
+
+    card.appendChild(nameDiv);
+    card.appendChild(metaDiv);
+    card.appendChild(facesDiv);
+    card.appendChild(actionsDiv);
+
     el.appendChild(card);
     loadFaces(p.id);
   }
@@ -113,8 +142,6 @@ async function unassign(fid) {
   await fetch('/api/faces/' + fid + '/unassign', {method: 'POST'});
   load();
 }
-
-function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 load();
 </script>
