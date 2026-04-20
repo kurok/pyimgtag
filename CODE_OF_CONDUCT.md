@@ -34,7 +34,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project maintainers via [GitHub Issues](https://github.com/kurok/pyimgtag/issues) or by contacting the maintainers directly.
+Instances of abusive, harassing, or otherwise unacceptable behavior should be reported **privately** to the project maintainers via GitHub's [private reporting form](https://github.com/kurok/pyimgtag/security/advisories/new). Despite the "security advisory" heading, the form is the repo's private-message channel to maintainers and is the appropriate place for Code of Conduct reports. Do **not** open a public GitHub Issue — it exposes the reporter's identity.
 
 All complaints will be reviewed and investigated promptly and fairly. All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
