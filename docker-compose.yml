@@ -15,7 +15,8 @@ services:
       # Mount your image directory read-only at /images
       - ${IMAGES_DIR:?Set IMAGES_DIR to your photos path}:/images:ro
       # Persist geocoder cache and progress DB across runs
-      - pyimgtag-cache:/root/.cache/pyimgtag
+      # (image runs as the unprivileged `pyimgtag` user — uid 10001)
+      - pyimgtag-cache:/home/pyimgtag/.cache/pyimgtag
     environment:
       # Ollama URL — defaults to host machine via host.docker.internal
       # Works on Docker Desktop (Mac/Windows) and Linux Docker Engine 20.10+
