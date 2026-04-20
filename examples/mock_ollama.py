@@ -20,7 +20,7 @@ import sys
 import threading
 from typing import Any
 
-PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 11435
+DEFAULT_PORT = 11435
 
 _RESPONSES: list[dict[str, Any]] = [
     {
@@ -141,8 +141,14 @@ class MockOllamaHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-if __name__ == "__main__":
-    server = http.server.HTTPServer(("127.0.0.1", PORT), MockOllamaHandler)
-    print(f"mock-ollama listening on http://127.0.0.1:{PORT}", flush=True)
+def main(port: int | None = None) -> None:
+    if port is None:
+        port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
+    server = http.server.HTTPServer(("127.0.0.1", port), MockOllamaHandler)
+    print(f"mock-ollama listening on http://127.0.0.1:{port}", flush=True)
     with contextlib.suppress(KeyboardInterrupt):
         server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
