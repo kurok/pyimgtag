@@ -63,8 +63,10 @@ pyimgtag judge --input-dir ~/Pictures --min-score 3.5
 **Import faces from Apple Photos:**
 
 ```bash
-pyimgtag faces import-photos --photos-library ~/Pictures/Photos\ Library.photoslibrary
+pyimgtag faces import-photos
 ```
+
+Reads the system default Photos library automatically.
 
 **Process exported HEIC photos:**
 

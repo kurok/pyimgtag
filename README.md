@@ -144,7 +144,7 @@ pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary --write-b
 pyimgtag judge --photos-library ~/Pictures/Photos\ Library.photoslibrary --min-score 4.0
 
 # Import named faces from Apple Photos
-pyimgtag faces import-photos --photos-library ~/Pictures/Photos\ Library.photoslibrary
+pyimgtag faces import-photos  # reads system default Photos library
 ```
 
 **Note:** Apple Photos library access requires Full Disk Access permission for your terminal app — grant it in System Settings > Privacy & Security > Full Disk Access.
