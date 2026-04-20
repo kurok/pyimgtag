@@ -192,6 +192,71 @@ class TestReviewServerRoutes:
         assert data["items"] == []
 
 
+class TestThumbnailContainment:
+    """Regression tests for issue #98.A — /thumbnail must only serve DB-indexed paths."""
+
+    def _make_db_with_real_image(self, tmp_path):
+        """Return (db_path, img_path) with one real JPEG inserted into the DB."""
+        from PIL import Image
+
+        img_path = tmp_path / "real.jpg"
+        img = Image.new("RGB", (40, 40), color="green")
+        img.save(str(img_path), "JPEG")
+
+        db_path = tmp_path / "test.db"
+        db = ProgressDB(db_path=db_path)
+        db.mark_done(
+            img_path,
+            ImageResult(
+                file_path=str(img_path),
+                file_name="real.jpg",
+                tags=["test"],
+                scene_summary="Test image.",
+                cleanup_class=None,
+            ),
+        )
+        db.close()
+        return db_path, img_path
+
+    def test_arbitrary_path_returns_404(self, tmp_path, monkeypatch):
+        """A valid JPEG not in the DB must return 404 (the DB is the allow-list)."""
+        from PIL import Image
+
+        thumb_dir = tmp_path / "thumbs"
+        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        db_path, _ = self._make_db_with_real_image(tmp_path)
+
+        # Create a real JPEG that is NOT indexed in the DB.
+        secret = tmp_path / "secret.jpg"
+        Image.new("RGB", (10, 10), color="red").save(str(secret), "JPEG")
+
+        app = create_app(db_path=db_path)
+        client = TestClient(app)
+        r = client.get(f"/thumbnail?path={secret}")
+        assert r.status_code == 404
+
+    def test_indexed_path_returns_jpeg(self, tmp_path, monkeypatch):
+        """A path recorded in the DB must return 200 with JPEG content."""
+        thumb_dir = tmp_path / "thumbs"
+        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        db_path, img_path = self._make_db_with_real_image(tmp_path)
+        app = create_app(db_path=db_path)
+        client = TestClient(app)
+        r = client.get(f"/thumbnail?path={img_path}")
+        assert r.status_code == 200
+        assert r.content[:3] == b"\xff\xd8\xff"
+
+
+class TestReviewDocsDisabled:
+    """Regression tests for issue #98 — review UI must not expose API schema."""
+
+    def test_openapi_json_returns_404(self, tmp_path):
+        app = create_app(db_path=_make_db(tmp_path))
+        client = TestClient(app)
+        r = client.get("/openapi.json")
+        assert r.status_code == 404
+
+
 class TestMakeThumbnailExtra:
     def test_creates_cache_dir_if_missing(self, tmp_path, monkeypatch):
         thumb_dir = tmp_path / "new_thumbs"

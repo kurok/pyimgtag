@@ -149,7 +149,7 @@ def build_app(db: ProgressDB) -> Any:
 
     from pyimgtag.face_thumb import face_thumbnail_b64
 
-    app = FastAPI(title="pyimgtag Faces")
+    app = FastAPI(title="pyimgtag Faces", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
