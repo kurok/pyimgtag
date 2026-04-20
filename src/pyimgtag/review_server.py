@@ -360,7 +360,7 @@ def create_app(db_path: str | Path | None = None) -> Any:
     from pyimgtag.progress_db import ProgressDB
 
     db = ProgressDB(db_path=db_path)
-    app = FastAPI(title="pyimgtag Review", docs_url=None, redoc_url=None)
+    app = FastAPI(title="pyimgtag Review", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -386,6 +386,8 @@ def create_app(db_path: str | Path | None = None) -> Any:
         path: str = Query(..., description="Absolute path to the image file"),
         size: int = Query(default=200, ge=50, le=800),
     ) -> Response:
+        if db.get_image(path) is None:
+            return Response(status_code=404)
         data = _make_thumbnail(path, size)
         if data is None:
             return Response(status_code=404)

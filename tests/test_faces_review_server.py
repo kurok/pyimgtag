@@ -136,6 +136,22 @@ class TestFacesReviewServerHTML:
         assert b"faces" in resp.content.lower()
 
 
+class TestFacesDocsDisabled:
+    """Regression tests for issue #98.B — faces UI must not expose API docs."""
+
+    def test_docs_returns_404(self, client):
+        resp = client.get("/docs")
+        assert resp.status_code == 404
+
+    def test_redoc_returns_404(self, client):
+        resp = client.get("/redoc")
+        assert resp.status_code == 404
+
+    def test_openapi_json_returns_404(self, client):
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 404
+
+
 class TestFacesReviewServerMissingDeps:
     """Regression tests for issue #97: error messages should point at [review]."""
 
