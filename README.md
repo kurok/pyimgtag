@@ -12,9 +12,11 @@ Tag images using a local Gemma model for searchable tags, with optional Apple Ph
 ## Overview
 
 pyimgtag uses a locally-running Gemma model (via [Ollama](https://ollama.ai)) to
-analyse images and generate 1-5 descriptive tags per photo.  It reads EXIF GPS
-coordinates and resolves them to the nearest city/place using OpenStreetMap
-Nominatim.  Everything runs on-device -- no cloud, no data leaves your computer.
+analyse images and generate 1-5 descriptive tags per photo. Image analysis and
+tagging run entirely on-device -- your photos themselves are never uploaded.
+If EXIF GPS is present, only the latitude/longitude is sent to [OpenStreetMap
+Nominatim](https://nominatim.openstreetmap.org/) for reverse geocoding to a
+city/place; results are cached locally so repeat lookups stay offline.
 
 Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is macOS-only.
 
@@ -23,7 +25,7 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - One local model call per image, compact prompt, low token usage
 - Rich AI metadata: scene category, emotional tone, cleanup classification, text detection, event hints
 - EXIF GPS as source of truth for location (never guessed from image content)
-- Open reverse geocoding via Nominatim with local disk cache
+- Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
 - Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `preflight`, `query`, `tags`
