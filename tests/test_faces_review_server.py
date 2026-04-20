@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import unittest.mock
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -9,7 +12,7 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from pyimgtag.faces_review_server import build_app
+from pyimgtag.faces_review_server import build_app, run_server
 from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
 
@@ -136,30 +139,43 @@ class TestFacesReviewServerHTML:
 class TestFacesReviewServerMissingDeps:
     """Regression tests for issue #97: error messages should point at [review]."""
 
-    def test_import_error_messages_point_to_review(self):
+    def test_build_app_missing_fastapi(self, db):
         """
-        Regression test for issue #97:
-        Verify that ImportError messages in faces_review_server.py
-        point users to [review] extra, not [dev].
+        Dynamically test that build_app raises ImportError pointing at [review]
+        when fastapi is not available.
         """
-        from pathlib import Path
+        # Mock sys.modules so import fastapi raises ImportError
+        with unittest.mock.patch.dict(
+            sys.modules,
+            {"fastapi": None, "fastapi.responses": None, "pydantic": None},
+        ):
+            with pytest.raises(ImportError) as exc_info:
+                build_app(db)
 
-        # Read the source file directly (avoids bytecode caching issues)
-        source_file = Path(__file__).parent.parent / "src" / "pyimgtag" / ("faces_review_server.py")
-        source = source_file.read_text()
+            msg = str(exc_info.value)
+            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
+            assert "[dev]" not in msg, (
+                f"Error message should not mention [dev] (issue #97), got: {msg}"
+            )
+            assert "fastapi is required" in msg, f"Error message should mention fastapi, got: {msg}"
 
-        # Check that error messages mention [review] and not [dev]
-        assert "pyimgtag[review]" in source, (
-            "faces_review_server should mention 'pyimgtag[review]' in error message"
-        )
-        assert "pyimgtag[dev]" not in source, (
-            "faces_review_server should not mention 'pyimgtag[dev]' (issue #97)"
-        )
+    def test_run_server_missing_uvicorn(self, db):
+        """
+        Dynamically test that run_server raises ImportError pointing at [review]
+        when uvicorn is not available.
 
-        # Ensure both fastapi and uvicorn error messages are fixed
-        assert "fastapi is required for the faces review UI" in source, (
-            "fastapi ImportError message should mention 'faces review UI'"
-        )
-        assert "uvicorn is required for the faces review UI" in source, (
-            "uvicorn ImportError message should mention 'faces review UI'"
-        )
+        Note: uvicorn branch is structurally identical to fastapi and would
+        require a harness to avoid starting the real server, so we only test
+        the import failure path here.
+        """
+        # Mock sys.modules so import uvicorn raises ImportError
+        with unittest.mock.patch.dict(sys.modules, {"uvicorn": None}):
+            with pytest.raises(ImportError) as exc_info:
+                run_server(db, host="127.0.0.1", port=0)
+
+            msg = str(exc_info.value)
+            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
+            assert "[dev]" not in msg, (
+                f"Error message should not mention [dev] (issue #97), got: {msg}"
+            )
+            assert "uvicorn is required" in msg, f"Error message should mention uvicorn, got: {msg}"
