@@ -6,7 +6,9 @@ Usage:
     python3 mock_ollama.py [PORT]
     # defaults to port 11435 to avoid conflict with a real Ollama instance
 
-Responds to POST /api/chat with canned TagResult JSON.
+Responds to POST /api/chat with canned TagResult JSON and to
+GET /api/tags with a minimal model listing so pyimgtag preflight
+and check_ollama_model succeed against the mock.
 """
 
 from __future__ import annotations
@@ -92,8 +94,34 @@ _RESPONSES: list[dict[str, Any]] = [
 _counter: list[int] = [0]
 _lock = threading.Lock()
 
+# Mirrors the shape returned by a real Ollama server at GET /api/tags so that
+# pyimgtag's check_ollama() and check_ollama_model() succeed against the mock.
+_TAGS_RESPONSE: dict[str, Any] = {
+    "models": [
+        {
+            "name": "gemma4:e4b",
+            "model": "gemma4:e4b",
+            "size": 0,
+            "digest": "mock",
+            "details": {"family": "gemma", "parameter_size": "4B"},
+        }
+    ]
+}
+
 
 class MockOllamaHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path.rstrip("/") == "/api/tags":
+            body = json.dumps(_TAGS_RESPONSE).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", 0))
         self.rfile.read(length)
