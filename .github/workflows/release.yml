@@ -46,11 +46,14 @@ jobs:
         else
           RANGE="HEAD"
         fi
+        # Use an unpredictable heredoc delimiter so a commit subject line cannot
+        # terminate the block and inject additional $GITHUB_OUTPUT variables.
+        DELIM="CHANGELOG_$(uuidgen)"
         {
-          echo "changelog<<EOF"
+          echo "changelog<<$DELIM"
           git log "$RANGE" --pretty=format:"- %s (%h)" --no-merges
           echo ""
-          echo "EOF"
+          echo "$DELIM"
         } >> "$GITHUB_OUTPUT"
 
     - name: Create GitHub Release
