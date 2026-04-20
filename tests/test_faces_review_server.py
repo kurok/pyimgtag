@@ -131,3 +131,35 @@ class TestFacesReviewServerHTML:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert b"faces" in resp.content.lower()
+
+
+class TestFacesReviewServerMissingDeps:
+    """Regression tests for issue #97: error messages should point at [review]."""
+
+    def test_import_error_messages_point_to_review(self):
+        """
+        Regression test for issue #97:
+        Verify that ImportError messages in faces_review_server.py
+        point users to [review] extra, not [dev].
+        """
+        from pathlib import Path
+
+        # Read the source file directly (avoids bytecode caching issues)
+        source_file = Path(__file__).parent.parent / "src" / "pyimgtag" / ("faces_review_server.py")
+        source = source_file.read_text()
+
+        # Check that error messages mention [review] and not [dev]
+        assert "pyimgtag[review]" in source, (
+            "faces_review_server should mention 'pyimgtag[review]' in error message"
+        )
+        assert "pyimgtag[dev]" not in source, (
+            "faces_review_server should not mention 'pyimgtag[dev]' (issue #97)"
+        )
+
+        # Ensure both fastapi and uvicorn error messages are fixed
+        assert "fastapi is required for the faces review UI" in source, (
+            "fastapi ImportError message should mention 'faces review UI'"
+        )
+        assert "uvicorn is required for the faces review UI" in source, (
+            "uvicorn ImportError message should mention 'faces review UI'"
+        )

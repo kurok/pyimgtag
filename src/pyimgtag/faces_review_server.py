@@ -140,7 +140,8 @@ def build_app(db: ProgressDB) -> Any:
         from pydantic import BaseModel
     except ImportError:
         raise ImportError(
-            "fastapi is not installed. Install the [dev] extra: pip install pyimgtag[dev]"
+            "fastapi is required for the faces review UI. "
+            "Install with: pip install 'pyimgtag[review]'"
         ) from None
 
     class _LabelBody(BaseModel):
@@ -229,7 +230,8 @@ def run_server(db: ProgressDB, host: str = "127.0.0.1", port: int = 8766) -> Non
         import uvicorn
     except ImportError:
         raise ImportError(
-            "uvicorn is not installed. Install the [dev] extra: pip install pyimgtag[dev]"
+            "uvicorn is required for the faces review UI. "
+            "Install with: pip install 'pyimgtag[review]'"
         ) from None
 
     app = build_app(db)
