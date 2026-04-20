@@ -1,0 +1,39 @@
+# Normalize line endings across platforms. Windows contributors often have
+# core.autocrlf=true by default, which would rewrite LF→CRLF on checkout and
+# trip the pre-commit end-of-file-fixer hook. Forcing LF everywhere keeps the
+# working tree consistent with the repo and with CI.
+* text=auto eol=lf
+
+# Text files (explicit — future-proofs against attrs inheritance edge cases)
+*.py text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+*.txt text eol=lf
+Dockerfile text eol=lf
+
+# Windows-native scripts should keep CRLF if any are ever added.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files — prevent text-normalization corruption.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.heic binary
+*.heif binary
+*.webp binary
+*.gif binary
+*.tiff binary
+*.tif binary
+*.ico binary
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+*.whl binary
