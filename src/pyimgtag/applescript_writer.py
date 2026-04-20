@@ -1,11 +1,15 @@
 """Write tags and description back to Apple Photos.
 
-Uses photoscript (Python wrapper around Photos AppleScript) when available,
-falls back to raw osascript subprocess. Only available on macOS.
+Uses the osascript subprocess path by default. The in-process photoscript
+path is faster but imports photoscript in the main process, which can
+trigger a macOS hiservices crash on some systems — opt in via the
+``PYIMGTAG_USE_PHOTOSCRIPT`` env var when you know the host is stable.
+Only available on macOS.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -27,6 +31,24 @@ def _has_photoscript() -> bool:
     import importlib.util
 
     return importlib.util.find_spec("photoscript") is not None
+
+
+def _use_photoscript() -> bool:
+    """Return True if the in-process photoscript path should be used.
+
+    Default is False — the safer osascript subprocess path is used. Set
+    ``PYIMGTAG_USE_PHOTOSCRIPT=1`` to opt in on hosts where importing
+    photoscript is known to be stable. The env var is read on every call
+    so tests and users can flip it without restarting the process.
+    """
+    if not _has_photoscript():
+        return False
+    return os.environ.get("PYIMGTAG_USE_PHOTOSCRIPT", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 # Standard UUID pattern: 8-4-4-4-12 hex digits.
@@ -284,7 +306,7 @@ def read_keywords_from_photos(file_path: str) -> list[str] | None:
     if not _IS_MACOS:
         return None
     file_name = PurePosixPath(file_path).name
-    if _has_photoscript():
+    if _use_photoscript():
         return _read_via_photoscript(file_name)
     return _read_via_osascript(file_name)
 
@@ -330,7 +352,7 @@ def write_to_photos(
                 merged.append(k)
         final_tags = merged
 
-    if _has_photoscript():
+    if _use_photoscript():
         result = _write_via_photoscript(file_name, final_tags, summary, title=title)
         if result is None:
             return None

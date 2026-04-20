@@ -296,7 +296,7 @@ pyimgtag run --input-dir /path/to/photos --output-json results.json
 | `--output-json FILE` | Write results to JSON |
 | `--output-csv FILE` | Write results to CSV |
 | `--jsonl-stdout` | JSONL output to stdout |
-| `--write-back` | Write tags/description back to Apple Photos *(macOS only)* |
+| `--write-back` | Write tags/description back to Apple Photos *(macOS only; uses osascript by default — set `PYIMGTAG_USE_PHOTOSCRIPT=1` to opt into the faster in-process photoscript path on stable hosts)* |
 | `--write-exif` | Write description and keywords to image EXIF |
 | `--dedup` | Skip duplicates via perceptual hash |
 | `--dedup-threshold N` | Hamming distance threshold (default: 5) |

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import importlib
+import os
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from pyimgtag.applescript_writer import (
     _build_applescript,
@@ -565,7 +568,7 @@ class TestWriteViaPhotoscript:
 @patch("pyimgtag.applescript_writer._IS_MACOS", True)
 class TestWriteToPhotosBackendSelection:
     def test_uses_photoscript_when_available(self):
-        with patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True):
+        with patch("pyimgtag.applescript_writer._use_photoscript", new=lambda: True):
             with patch(
                 "pyimgtag.applescript_writer._write_via_photoscript", return_value=None
             ) as mock_ps:
@@ -584,7 +587,7 @@ class TestWriteToPhotosBackendSelection:
                     assert result is None
 
     def test_falls_back_to_osascript_when_photoscript_uuid_fails(self):
-        with patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True):
+        with patch("pyimgtag.applescript_writer._use_photoscript", new=lambda: True):
             with patch(
                 "pyimgtag.applescript_writer._write_via_photoscript",
                 return_value="No Photos item found with filename: photo.jpg",
@@ -655,7 +658,7 @@ class TestReadKeywordsFromPhotos:
 
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch("pyimgtag.applescript_writer._use_photoscript", new=lambda: True),
             patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}),
         ):
             result = read_keywords_from_photos(f"/Library/Photos/{_UUID_FILE}")
@@ -667,7 +670,7 @@ class TestReadKeywordsFromPhotos:
 
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch("pyimgtag.applescript_writer._use_photoscript", new=lambda: True),
             patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}),
         ):
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
@@ -678,7 +681,7 @@ class TestReadKeywordsFromPhotos:
         mock_ps.PhotosLibrary.side_effect = Exception("Photos not running")
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
-            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch("pyimgtag.applescript_writer._use_photoscript", new=lambda: True),
             patch.dict("sys.modules", {"photoscript": mock_ps}),
         ):
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
@@ -834,3 +837,80 @@ class TestLazyPhotoscriptImport:
             if ps_saved is not None:
                 sys.modules["photoscript"] = ps_saved
             _has_photoscript.cache_clear()
+
+
+class TestUsePhotoscriptEnvVar:
+    """_use_photoscript() must default to False and only opt in via env var."""
+
+    def test_default_is_false_even_when_installed(self):
+        from pyimgtag.applescript_writer import _use_photoscript
+
+        with (
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            os.environ.pop("PYIMGTAG_USE_PHOTOSCRIPT", None)
+            assert _use_photoscript() is False
+
+    def test_false_when_photoscript_not_installed(self):
+        from pyimgtag.applescript_writer import _use_photoscript
+
+        with (
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),
+            patch.dict("os.environ", {"PYIMGTAG_USE_PHOTOSCRIPT": "1"}),
+        ):
+            assert _use_photoscript() is False
+
+    @pytest.mark.parametrize("val", ["1", "true", "True", "YES", "on"])
+    def test_true_when_env_var_is_truthy_and_installed(self, val):
+        from pyimgtag.applescript_writer import _use_photoscript
+
+        with (
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch.dict("os.environ", {"PYIMGTAG_USE_PHOTOSCRIPT": val}),
+        ):
+            assert _use_photoscript() is True
+
+    @pytest.mark.parametrize("val", ["0", "false", "no", "off", "", " "])
+    def test_false_when_env_var_is_falsy(self, val):
+        from pyimgtag.applescript_writer import _use_photoscript
+
+        with (
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch.dict("os.environ", {"PYIMGTAG_USE_PHOTOSCRIPT": val}),
+        ):
+            assert _use_photoscript() is False
+
+    def test_read_keywords_uses_osascript_by_default(self, tmp_path):
+        """With photoscript installed but env var unset, reads must go through osascript."""
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch.dict("os.environ", {}, clear=False),
+            patch("pyimgtag.applescript_writer._read_via_photoscript") as mock_ps,
+            patch("pyimgtag.applescript_writer._read_via_osascript", return_value=[]) as mock_osa,
+        ):
+            os.environ.pop("PYIMGTAG_USE_PHOTOSCRIPT", None)
+            read_keywords_from_photos("/Library/Photos/img.jpg")
+            mock_ps.assert_not_called()
+            mock_osa.assert_called_once()
+
+    def test_write_to_photos_uses_osascript_by_default(self):
+        """With photoscript installed but env var unset, writes must go through osascript."""
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: True),
+            patch.dict("os.environ", {}, clear=False),
+            patch("pyimgtag.applescript_writer._write_via_photoscript") as mock_ps,
+            patch(
+                "pyimgtag.applescript_writer.is_applescript_available",
+                return_value=True,
+            ),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(0),
+            ),
+        ):
+            os.environ.pop("PYIMGTAG_USE_PHOTOSCRIPT", None)
+            write_to_photos("/path/photo.jpg", ["tag"], "desc")
+            mock_ps.assert_not_called()
