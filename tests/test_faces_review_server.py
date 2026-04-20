@@ -152,6 +152,37 @@ class TestFacesDocsDisabled:
         assert resp.status_code == 404
 
 
+class TestFacesUiXss:
+    """Regression test for issue #104: stored XSS in faces review UI action buttons."""
+
+    def test_malicious_label_not_inlined_into_html(self, db, tmp_path):
+        """A label containing JS injection payload must not appear in the served HTML.
+
+        The exploit required the label to be serialised into an onclick="rename(...)"
+        attribute.  The fix builds card DOM via createElement/textContent/addEventListener
+        so no user data is ever placed in an HTML attribute at render time.
+        """
+        payload = "x',alert(document.cookie),'y"
+        pid = db.create_person(label="placeholder", source="test")
+        db.update_person_label(pid, payload)
+
+        app = build_app(db)
+        client = TestClient(app)
+        resp = client.get("/")
+        assert resp.status_code == 200
+        body = resp.text
+
+        # The inline onclick pattern must be gone entirely
+        assert 'onclick="rename(' not in body, (
+            'onclick="rename(" found in HTML — label is still inlined into an event handler'
+        )
+
+        # The raw payload string must not appear anywhere in the HTML
+        assert "alert(document.cookie)" not in body, (
+            "alert(document.cookie) found in HTML — attacker payload is inlined into the page"
+        )
+
+
 class TestFacesReviewServerMissingDeps:
     """Regression tests for issue #97: error messages should point at [review]."""
 
