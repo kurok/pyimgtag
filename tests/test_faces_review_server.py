@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+import unittest.mock
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -9,7 +12,7 @@ pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient
 
-from pyimgtag.faces_review_server import build_app
+from pyimgtag.faces_review_server import build_app, run_server
 from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
 
@@ -131,3 +134,48 @@ class TestFacesReviewServerHTML:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert b"faces" in resp.content.lower()
+
+
+class TestFacesReviewServerMissingDeps:
+    """Regression tests for issue #97: error messages should point at [review]."""
+
+    def test_build_app_missing_fastapi(self, db):
+        """
+        Dynamically test that build_app raises ImportError pointing at [review]
+        when fastapi is not available.
+        """
+        # Mock sys.modules so import fastapi raises ImportError
+        with unittest.mock.patch.dict(
+            sys.modules,
+            {"fastapi": None, "fastapi.responses": None, "pydantic": None},
+        ):
+            with pytest.raises(ImportError) as exc_info:
+                build_app(db)
+
+            msg = str(exc_info.value)
+            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
+            assert "[dev]" not in msg, (
+                f"Error message should not mention [dev] (issue #97), got: {msg}"
+            )
+            assert "fastapi is required" in msg, f"Error message should mention fastapi, got: {msg}"
+
+    def test_run_server_missing_uvicorn(self, db):
+        """
+        Dynamically test that run_server raises ImportError pointing at [review]
+        when uvicorn is not available.
+
+        Note: uvicorn branch is structurally identical to fastapi and would
+        require a harness to avoid starting the real server, so we only test
+        the import failure path here.
+        """
+        # Mock sys.modules so import uvicorn raises ImportError
+        with unittest.mock.patch.dict(sys.modules, {"uvicorn": None}):
+            with pytest.raises(ImportError) as exc_info:
+                run_server(db, host="127.0.0.1", port=0)
+
+            msg = str(exc_info.value)
+            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
+            assert "[dev]" not in msg, (
+                f"Error message should not mention [dev] (issue #97), got: {msg}"
+            )
+            assert "uvicorn is required" in msg, f"Error message should mention uvicorn, got: {msg}"
