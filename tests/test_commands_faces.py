@@ -103,6 +103,7 @@ class TestHandleFacesScan:
         args = _make_args(input_dir=str(tmp_path), db=str(tmp_path / "progress.db"))
         rc = _handle_faces_scan(args)
         assert rc == 0
+        mock_check.assert_called_once()
         mock_store.assert_called_once()
 
     @patch("pyimgtag.face_detection._check_face_recognition")
