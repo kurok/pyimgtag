@@ -480,3 +480,57 @@ class TestSkipIfTagged:
             cmd_run(args, MagicMock())
 
         mock_read.assert_not_called()
+
+
+class TestDryRunNoDbWrites:
+    """Regression: --dry-run must not create or write to the progress DB."""
+
+    def test_dry_run_does_not_create_db(self, tmp_path: Path) -> None:
+        """cmd_run with --dry-run must leave the DB file absent after the run."""
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        db_path = tmp_path / "progress.db"
+
+        args = MagicMock()
+        args.input_dir = str(tmp_path)
+        args.photos_library = None
+        args.extensions = "jpg"
+        args.newest_first = False
+        args.no_cache = False  # DB would normally be opened
+        args.dry_run = True
+        args.dedup = False
+        args.limit = None
+        args.date = None
+        args.date_from = None
+        args.date_to = None
+        args.skip_no_gps = False
+        args.write_back = False
+        args.write_exif = False
+        args.sidecar_only = False
+        args.verbose = False
+        args.jsonl_stdout = False
+        args.output_json = None
+        args.output_csv = None
+        args.ollama_url = "http://localhost:11434"
+        args.model = "test"
+        args.max_dim = 512
+        args.timeout = 5
+        args.cache_dir = None
+        args.db = str(db_path)
+
+        assert not db_path.exists(), "precondition: DB must not exist before the run"
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["test"], summary="test")
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        assert not db_path.exists(), "DB must not be created by --dry-run"
