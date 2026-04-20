@@ -40,6 +40,14 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
+    try:
+        from pyimgtag.face_detection import _check_face_recognition
+
+        _check_face_recognition()
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
     extensions = {e.strip().lower() for e in args.extensions.split(",")}
 
     try:
