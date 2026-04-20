@@ -156,7 +156,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     )
     geocoder = ReverseGeocoder(cache_dir=args.cache_dir)
     progress_db: ProgressDB | None = None
-    if not args.no_cache:
+    if not args.no_cache and not args.dry_run:
         progress_db = ProgressDB(db_path=args.db)
 
     results: list[ImageResult] = []
