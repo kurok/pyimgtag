@@ -266,6 +266,7 @@ Every push and PR triggers 5 parallel CI jobs:
 - Optional dependencies go in `[project.optional-dependencies]`
 - Guard optional imports with `try/except ImportError`
 - New dependencies need justification in the PR description
+- The committed `uv.lock` pins the transitive dependency set for reproducibility. Re-run `uv lock` whenever you change anything in `[project.dependencies]` or `[project.optional-dependencies]` and commit the updated lock file alongside your change.
 
 ## Release Process
 
