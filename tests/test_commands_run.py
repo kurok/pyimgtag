@@ -482,6 +482,134 @@ class TestSkipIfTagged:
         mock_read.assert_not_called()
 
 
+class TestRunSessionWiring:
+    def test_no_web_does_not_register_session(self, tmp_path):
+        """--no-web leaves the RunRegistry empty."""
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+
+        run_registry.set_current(None)
+
+        img = tmp_path / "a.jpg"
+        img.write_bytes(b"x")
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "run",
+                "--input-dir",
+                str(tmp_path),
+                "--extensions",
+                "jpg",
+                "--no-web",
+                "--no-cache",
+                "--dry-run",
+            ]
+        )
+
+        # Avoid real Ollama / geocoder / exif work by monkeypatching at runtime.
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif"),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.return_value = MagicMock(
+                error=None,
+                tags=["x"],
+                summary=None,
+                scene_category=None,
+                emotional_tone=None,
+                cleanup_class=None,
+                has_text=False,
+                text_summary=None,
+                event_hint=None,
+                significance=None,
+            )
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+            rc = cmd_run(args, parser)
+
+        assert rc == 0
+        assert run_registry.get_current() is None
+
+    def test_web_enabled_registers_and_clears_session(self, tmp_path):
+        """With the default (web on), the registry is populated during the run
+        and cleared after it returns."""
+        import pytest
+
+        pytest.importorskip("fastapi")
+        pytest.importorskip("uvicorn")
+
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+
+        run_registry.set_current(None)
+
+        img = tmp_path / "a.jpg"
+        img.write_bytes(b"x")
+
+        parser = build_parser()
+        # Use port 0 trick is tricky with uvicorn.Config; pick a fixed, likely-free port.
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            free_port = s.getsockname()[1]
+
+        args = parser.parse_args(
+            [
+                "run",
+                "--input-dir",
+                str(tmp_path),
+                "--extensions",
+                "jpg",
+                "--web",
+                "--web-port",
+                str(free_port),
+                "--no-browser",
+                "--no-cache",
+                "--dry-run",
+            ]
+        )
+
+        seen: list[bool] = []
+
+        def fake_tag_image(*a, **kw):
+            seen.append(run_registry.get_current() is not None)
+            return MagicMock(
+                error=None,
+                tags=["x"],
+                summary=None,
+                scene_category=None,
+                emotional_tone=None,
+                cleanup_class=None,
+                has_text=False,
+                text_summary=None,
+                event_hint=None,
+                significance=None,
+            )
+
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif"),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.side_effect = fake_tag_image
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+            rc = cmd_run(args, parser)
+
+        assert rc == 0
+        assert seen == [True]  # session registered during processing
+        assert run_registry.get_current() is None  # cleared after teardown
+
+
 class TestDryRunNoDbWrites:
     """Regression: --dry-run must not create or write to the progress DB."""
 
@@ -534,3 +662,231 @@ class TestDryRunNoDbWrites:
 
         assert rc == 0
         assert not db_path.exists(), "DB must not be created by --dry-run"
+
+
+class TestSequentialPauseGate:
+    def test_pause_blocks_before_next_file_and_resume_continues(self, tmp_path):
+        """Pause must stop processing before the next file; resume must continue."""
+        import threading
+        import time
+
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+
+        run_registry.set_current(None)
+
+        for i in range(3):
+            (tmp_path / f"{i}.jpg").write_bytes(b"x")
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "run",
+                "--input-dir",
+                str(tmp_path),
+                "--extensions",
+                "jpg",
+                "--no-web",
+                "--no-cache",
+                "--dry-run",
+            ]
+        )
+
+        # Build a session and attach it manually via registry so --no-web
+        # still exercises the pause check inline.
+        from pyimgtag.run_session import RunSession
+
+        session = RunSession(command="run")
+        run_registry.set_current(session)
+
+        processed_paths: list[str] = []
+        pause_after_first = threading.Event()
+        pause_requested = threading.Event()
+
+        def fake_tag(path, *a, **kw):
+            processed_paths.append(path)
+            if len(processed_paths) == 1:
+                pause_after_first.set()
+                # Block the first call until the test has issued request_pause(),
+                # so the loop can't race past the next wait_if_paused() check.
+                pause_requested.wait(timeout=5.0)
+            return MagicMock(
+                error=None,
+                tags=[],
+                summary=None,
+                scene_category=None,
+                emotional_tone=None,
+                cleanup_class=None,
+                has_text=False,
+                text_summary=None,
+                event_hint=None,
+                significance=None,
+            )
+
+        result_holder: dict = {}
+
+        def run_cmd():
+            result_holder["rc"] = cmd_run(args, parser)
+
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif"),
+            patch("pyimgtag.commands.run._maybe_start_dashboard", return_value=(session, None)),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.side_effect = fake_tag
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+
+            worker = threading.Thread(target=run_cmd, daemon=True)
+            worker.start()
+
+            assert pause_after_first.wait(timeout=2.0)
+            session.request_pause()
+            pause_requested.set()  # release the first fake_tag call
+
+            # Give the loop up to 1s to reach PAUSED.
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                if session.snapshot()["state"] == "paused":
+                    break
+                time.sleep(0.02)
+            assert session.snapshot()["state"] == "paused"
+            assert len(processed_paths) == 1
+
+            session.resume()
+            worker.join(timeout=3.0)
+
+        assert result_holder["rc"] == 0
+        assert len(processed_paths) == 3
+        run_registry.set_current(None)
+
+
+class TestThreadedPauseGate:
+    def test_threaded_branch_hits_pause_gate_and_records_items(self, tmp_path):
+        """--resume-from-db --resume-threaded exercises the threaded loop; the pause
+        gate must block between fresh files just like the sequential branch."""
+        import threading
+        import time
+
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+        from pyimgtag.run_session import RunSession
+
+        run_registry.set_current(None)
+
+        db_path = tmp_path / "progress.db"
+        cached_img = tmp_path / "cached.jpg"
+        cached_img.write_bytes(b"x")
+        fresh0 = tmp_path / "fresh0.jpg"
+        fresh0.write_bytes(b"x")
+        fresh1 = tmp_path / "fresh1.jpg"
+        fresh1.write_bytes(b"x")
+
+        # Seed the DB with a cached model result so the threaded cache-worker
+        # has something to hydrate.
+        db = ProgressDB(db_path=db_path)
+        db.mark_done(
+            cached_img,
+            ImageResult(
+                file_path=str(cached_img),
+                file_name=cached_img.name,
+                tags=["seed"],
+                scene_summary="seeded",
+            ),
+        )
+        db.close()
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "run",
+                "--input-dir",
+                str(tmp_path),
+                "--extensions",
+                "jpg",
+                "--no-web",
+                "--resume-from-db",
+                "--resume-threaded",
+                "--db",
+                str(db_path),
+            ]
+        )
+
+        session = RunSession(command="run")
+        run_registry.set_current(session)
+
+        processed_paths: list[str] = []
+        pause_after_first_fresh = threading.Event()
+        pause_requested = threading.Event()
+
+        def fake_tag(path, *a, **kw):
+            processed_paths.append(path)
+            if len(processed_paths) == 1:
+                pause_after_first_fresh.set()
+                pause_requested.wait(timeout=5.0)
+            return MagicMock(
+                error=None,
+                tags=[],
+                summary=None,
+                scene_category=None,
+                emotional_tone=None,
+                cleanup_class=None,
+                has_text=False,
+                text_summary=None,
+                event_hint=None,
+                significance=None,
+            )
+
+        result_holder: dict = {}
+
+        def run_cmd():
+            result_holder["rc"] = cmd_run(args, parser)
+
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif"),
+            patch("pyimgtag.commands.run._maybe_start_dashboard", return_value=(session, None)),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.side_effect = fake_tag
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+
+            worker = threading.Thread(target=run_cmd, daemon=True)
+            worker.start()
+
+            assert pause_after_first_fresh.wait(timeout=3.0), (
+                f"first fresh file never reached fake_tag; processed={processed_paths}"
+            )
+            session.request_pause()
+            pause_requested.set()
+
+            deadline = time.monotonic() + 1.5
+            while time.monotonic() < deadline:
+                if session.snapshot()["state"] == "paused":
+                    break
+                time.sleep(0.02)
+            assert session.snapshot()["state"] == "paused"
+            # Only one fresh file was processed before the gate blocked.
+            assert len(processed_paths) == 1
+
+            session.resume()
+            worker.join(timeout=5.0)
+
+        assert result_holder["rc"] == 0
+        # Both fresh files eventually processed.
+        assert len(processed_paths) == 2
+        # Recent-events buffer saw the fresh file hook; counters populated.
+        snap = session.snapshot()
+        assert snap["recent"], "expected at least one recorded fresh-file event"
+        assert "processed" in snap["counters"]
+        run_registry.set_current(None)

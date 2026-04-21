@@ -598,6 +598,29 @@ A file is eligible for DB resume if:
 Use `pyimgtag reprocess --db ~/my-progress.db` to force a full re-run for all files,
 or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only failed files.
 
+## Live dashboard
+
+`pyimgtag run` starts a local dashboard at http://127.0.0.1:8770 by default.
+It shows live state, counters, the current file, recent errors, and a
+Pause/Unpause control that stops dispatching new files without interrupting
+in-flight Ollama requests.
+
+Flags:
+
+- `--no-web` — terminal-only mode, no server started.
+- `--web` — force-enable (overrides `PYIMGTAG_NO_WEB=1`).
+- `--web-host HOST` — bind host (default `127.0.0.1`).
+- `--web-port PORT` — bind port (default `8770`).
+- `--no-browser` — do not auto-open the browser.
+
+Environment variable:
+
+- `PYIMGTAG_NO_WEB=1` — disable the dashboard by default (same as `--no-web`).
+
+Pause semantics are cooperative: the gate is checked before each file, so the
+UI may show `pausing…` until the current request returns. Pause never
+interrupts metadata write-back mid-write.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
