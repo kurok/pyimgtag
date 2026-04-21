@@ -8,7 +8,6 @@ import sys
 from typing import Any
 
 from pyimgtag import __version__
-from pyimgtag.webapp.config import web_enabled as web_enabled  # re-export; noqa: PLC0414
 
 _DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
 

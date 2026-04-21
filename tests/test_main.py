@@ -1196,7 +1196,8 @@ class TestResumeFromDB:
 class TestRunWebFlags:
     def test_defaults_allow_web(self, monkeypatch):
         monkeypatch.delenv("PYIMGTAG_NO_WEB", raising=False)
-        from pyimgtag.main import build_parser, web_enabled
+        from pyimgtag.main import build_parser
+        from pyimgtag.webapp.config import web_enabled
 
         args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
         assert args.no_web is False
@@ -1208,28 +1209,32 @@ class TestRunWebFlags:
 
     def test_no_web_flag_disables(self, monkeypatch):
         monkeypatch.delenv("PYIMGTAG_NO_WEB", raising=False)
-        from pyimgtag.main import build_parser, web_enabled
+        from pyimgtag.main import build_parser
+        from pyimgtag.webapp.config import web_enabled
 
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--no-web"])
         assert web_enabled(args) is False
 
     def test_env_var_disables(self, monkeypatch):
         monkeypatch.setenv("PYIMGTAG_NO_WEB", "1")
-        from pyimgtag.main import build_parser, web_enabled
+        from pyimgtag.main import build_parser
+        from pyimgtag.webapp.config import web_enabled
 
         args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
         assert web_enabled(args) is False
 
     def test_web_flag_overrides_env_var(self, monkeypatch):
         monkeypatch.setenv("PYIMGTAG_NO_WEB", "1")
-        from pyimgtag.main import build_parser, web_enabled
+        from pyimgtag.main import build_parser
+        from pyimgtag.webapp.config import web_enabled
 
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--web"])
         assert web_enabled(args) is True
 
     def test_no_web_beats_web(self, monkeypatch):
         monkeypatch.delenv("PYIMGTAG_NO_WEB", raising=False)
-        from pyimgtag.main import build_parser, web_enabled
+        from pyimgtag.main import build_parser
+        from pyimgtag.webapp.config import web_enabled
 
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--web", "--no-web"])
         assert web_enabled(args) is False
