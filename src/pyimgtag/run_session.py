@@ -127,6 +127,38 @@ class RunSession:
             if timeout is not None:
                 return
 
+    # -- counters & progress ---------------------------------------------
+
+    def set_counter(self, key: str, value: int) -> None:
+        with self._lock:
+            self._counters[key] = value
+
+    def increment(self, key: str, by: int = 1) -> None:
+        with self._lock:
+            self._counters[key] = self._counters.get(key, 0) + by
+
+    def set_current(self, path: str | None) -> None:
+        with self._lock:
+            self._current_item = path
+
+    def record_item(
+        self,
+        path: str,
+        status: str,
+        error: str | None = None,
+    ) -> None:
+        entry: dict[str, Any] = {
+            "path": path,
+            "status": status,
+            "at": _utcnow_iso(),
+        }
+        if error:
+            entry["error"] = error
+        with self._lock:
+            self._recent.append(entry)
+            if error:
+                self._last_error = error
+
     # -- snapshot ---------------------------------------------------------
 
     def snapshot(self) -> dict[str, Any]:
