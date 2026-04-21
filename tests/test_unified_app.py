@@ -1,4 +1,4 @@
-"""End-to-end tests for the unified webapp (dashboard + review + faces)."""
+"""End-to-end tests for the unified webapp (dashboard + review + faces + tags + query + judge)."""
 
 from __future__ import annotations
 
@@ -71,3 +71,45 @@ def test_unified_app_faces_at_prefix(tmp_path):
     r = client.get("/faces/api/persons")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_unified_app_tags_at_prefix(tmp_path):
+    app = create_unified_app(db_path=_seed(tmp_path))
+    client = TestClient(app)
+    r = client.get("/tags/")
+    assert r.status_code == 200
+    assert "/tags/api/tags" in r.text
+    r = client.get("/tags/api/tags")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+def test_unified_app_query_at_prefix(tmp_path):
+    app = create_unified_app(db_path=_seed(tmp_path))
+    client = TestClient(app)
+    r = client.get("/query/")
+    assert r.status_code == 200
+    assert "/query/api/images" in r.text
+    r = client.get("/query/api/images")
+    assert r.status_code == 200
+    assert len(r.json()) == 1  # _seed inserts one image
+
+
+def test_unified_app_judge_at_prefix(tmp_path):
+    app = create_unified_app(db_path=_seed(tmp_path))
+    client = TestClient(app)
+    r = client.get("/judge/")
+    assert r.status_code == 200
+    assert "/judge/api/scores" in r.text
+    r = client.get("/judge/api/scores")
+    assert r.status_code == 200
+    assert r.json() == []  # _seed has no judge scores
+
+
+def test_unified_app_dashboard_nav_includes_new_links(tmp_path):
+    app = create_unified_app(db_path=_seed(tmp_path))
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    for href in ('href="/tags"', 'href="/query"', 'href="/judge"'):
+        assert href in r.text, f"dashboard nav missing {href}"

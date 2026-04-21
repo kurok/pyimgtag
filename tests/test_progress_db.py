@@ -1470,6 +1470,59 @@ class TestJudgeScores:
             ).fetchone()
             assert row is not None
 
+    def test_get_all_judge_results_empty(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            results = db.get_all_judge_results()
+        assert results == []
+
+    def test_get_all_judge_results_ordered_by_score(self, tmp_path):
+        from pyimgtag.models import JudgeResult, JudgeScores
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            for path, score in [
+                ("/img/low.jpg", 3.0),
+                ("/img/high.jpg", 9.0),
+                ("/img/mid.jpg", 6.0),
+            ]:
+                db.save_judge_result(
+                    JudgeResult(
+                        file_path=path,
+                        file_name=path.split("/")[-1],
+                        weighted_score=score,
+                        core_score=score,
+                        visible_score=score,
+                        scores=JudgeScores(),
+                    )
+                )
+            results = db.get_all_judge_results()
+
+        assert len(results) == 3
+        assert results[0]["file_path"] == "/img/high.jpg"
+        assert results[0]["weighted_score"] == 9.0
+        assert results[-1]["file_path"] == "/img/low.jpg"
+        assert "file_name" in results[0]
+        assert "verdict" in results[0]
+        assert "scored_at" in results[0]
+
+    def test_get_all_judge_results_respects_limit(self, tmp_path):
+        from pyimgtag.models import JudgeResult, JudgeScores
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            for i in range(5):
+                db.save_judge_result(
+                    JudgeResult(
+                        file_path=f"/img/{i}.jpg",
+                        file_name=f"{i}.jpg",
+                        weighted_score=float(i),
+                        core_score=float(i),
+                        visible_score=float(i),
+                        scores=JudgeScores(),
+                    )
+                )
+            results = db.get_all_judge_results(limit=2)
+
+        assert len(results) == 2
+
 
 class TestGetAssignedFaces:
     def test_returns_only_assigned(self, tmp_path):
