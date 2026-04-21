@@ -215,6 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--extensions", default="jpg,jpeg,heic,png", help="Comma-separated extensions"
     )
     faces_scan.add_argument("--limit", type=int, help="Max images to scan")
+    add_web_flags(faces_scan)
 
     # faces cluster
     faces_cluster = faces_sub.add_parser("cluster", help="Cluster faces into person groups")
