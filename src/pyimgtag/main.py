@@ -369,6 +369,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SEC",
         help="Ollama request timeout",
     )
+    add_web_flags(judge_p)
 
     # --- tags subcommand group ---
     tags_p = subparsers.add_parser("tags", help="Manage tags across the image database")
