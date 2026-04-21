@@ -11,7 +11,8 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from pyimgtag.models import ImageResult  # noqa: E402
 from pyimgtag.progress_db import ProgressDB  # noqa: E402
-from pyimgtag.review_server import _make_thumbnail, create_app  # noqa: E402
+from pyimgtag.review_server import create_app  # noqa: E402
+from pyimgtag.webapp.routes_review import _make_thumbnail  # noqa: E402
 
 
 def _make_db(tmp_path):
@@ -223,7 +224,7 @@ class TestThumbnailContainment:
         from PIL import Image
 
         thumb_dir = tmp_path / "thumbs"
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", thumb_dir)
         db_path, _ = self._make_db_with_real_image(tmp_path)
 
         # Create a real JPEG that is NOT indexed in the DB.
@@ -238,7 +239,7 @@ class TestThumbnailContainment:
     def test_indexed_path_returns_jpeg(self, tmp_path, monkeypatch):
         """A path recorded in the DB must return 200 with JPEG content."""
         thumb_dir = tmp_path / "thumbs"
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", thumb_dir)
         db_path, img_path = self._make_db_with_real_image(tmp_path)
         app = create_app(db_path=db_path)
         client = TestClient(app)
@@ -261,7 +262,7 @@ class TestMakeThumbnailExtra:
     def test_creates_cache_dir_if_missing(self, tmp_path, monkeypatch):
         thumb_dir = tmp_path / "new_thumbs"
         assert not thumb_dir.exists()
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", thumb_dir)
         from PIL import Image
 
         img_path = tmp_path / "img.jpg"
@@ -274,7 +275,7 @@ class TestMakeThumbnailExtra:
 
     def test_returns_none_on_pil_exception(self, tmp_path, monkeypatch):
         thumb_dir = tmp_path / "thumbs"
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", thumb_dir)
         from PIL import Image
 
         img_path = tmp_path / "img.jpg"
