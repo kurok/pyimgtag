@@ -600,7 +600,8 @@ or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only faile
 
 ## Live dashboard
 
-`pyimgtag run` starts a local dashboard at http://127.0.0.1:8770 by default.
+`pyimgtag run`, `pyimgtag judge`, and `pyimgtag faces scan` start a local
+dashboard at http://127.0.0.1:8770 by default.
 It shows live state, counters, the current file, recent errors, and a
 Pause/Unpause control that stops dispatching new files without interrupting
 in-flight Ollama requests.

@@ -1238,3 +1238,39 @@ class TestRunWebFlags:
 
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--web", "--no-web"])
         assert web_enabled(args) is False
+
+
+class TestJudgeWebFlags:
+    def test_judge_has_web_flags(self):
+        from pyimgtag.main import build_parser
+
+        args = build_parser().parse_args(["judge", "--input-dir", "/tmp"])
+        assert args.no_web is False
+        assert args.web is False
+        assert args.web_host == "127.0.0.1"
+        assert args.web_port == 8770
+        assert args.no_browser is False
+
+    def test_judge_no_web_flag(self):
+        from pyimgtag.main import build_parser
+
+        args = build_parser().parse_args(["judge", "--input-dir", "/tmp", "--no-web"])
+        assert args.no_web is True
+
+
+class TestFacesScanWebFlags:
+    def test_faces_scan_has_web_flags(self):
+        from pyimgtag.main import build_parser
+
+        args = build_parser().parse_args(["faces", "scan", "--input-dir", "/tmp"])
+        assert args.no_web is False
+        assert args.web is False
+        assert args.web_host == "127.0.0.1"
+        assert args.web_port == 8770
+        assert args.no_browser is False
+
+    def test_faces_scan_no_web_flag(self):
+        from pyimgtag.main import build_parser
+
+        args = build_parser().parse_args(["faces", "scan", "--input-dir", "/tmp", "--no-web"])
+        assert args.no_web is True

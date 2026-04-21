@@ -8,12 +8,14 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pyimgtag import run_registry
 from pyimgtag.applescript_writer import write_to_photos
 from pyimgtag.judge_scorer import compute_scores, strongest, weakest
 from pyimgtag.models import JudgeResult, JudgeScores
 from pyimgtag.ollama_client import OllamaClient
 from pyimgtag.preflight import check_ollama
 from pyimgtag.scanner import scan_directory, scan_photos_library
+from pyimgtag.webapp.bootstrap import start_dashboard_for
 
 if TYPE_CHECKING:
     pass
@@ -137,55 +139,92 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
     results: list[JudgeResult] = []
     total = len(files)
 
-    for idx, file_path in enumerate(files, start=1):
-        scores: JudgeScores | None = ollama.judge_image(str(file_path))
-        if scores is None:
-            print(f"  [{idx}/{total}] {file_path.name}: judge failed, skipping", file=sys.stderr)
-            continue
+    session, dashboard = start_dashboard_for(args, command="judge")
+    if session is not None:
+        session.set_counter("scanned", total)
+        session.mark_running()
 
-        weighted, core, visible = compute_scores(scores)
-        result = JudgeResult(
-            file_path=str(file_path),
-            file_name=file_path.name,
-            scores=scores,
-            weighted_score=weighted,
-            core_score=core,
-            visible_score=visible,
-        )
+    try:
+        try:
+            for idx, file_path in enumerate(files, start=1):
+                if session is not None:
+                    session.wait_if_paused()
+                    session.set_current(str(file_path))
 
-        if args.min_score is not None and weighted < args.min_score:
-            continue
+                scores: JudgeScores | None = ollama.judge_image(str(file_path))
+                if scores is None:
+                    print(
+                        f"  [{idx}/{total}] {file_path.name}: judge failed, skipping",
+                        file=sys.stderr,
+                    )
+                    if session is not None:
+                        session.increment("judge_failed")
+                        session.record_item(str(file_path), "error", error="judge failed")
+                        session.set_current(None)
+                    continue
 
-        results.append(result)
+                weighted, core, visible = compute_scores(scores)
+                result = JudgeResult(
+                    file_path=str(file_path),
+                    file_name=file_path.name,
+                    scores=scores,
+                    weighted_score=weighted,
+                    core_score=core,
+                    visible_score=visible,
+                )
 
-        if _db is not None:
-            _db.save_judge_result(result)
+                if args.min_score is not None and weighted < args.min_score:
+                    if session is not None:
+                        session.increment("skipped_min_score")
+                        session.set_current(None)
+                    continue
 
-        if write_back and getattr(args, "photos_library", None):
-            score_tag = f"score:{weighted:.1f}"
-            err = write_to_photos(
-                result.file_name,
-                [score_tag],
-                None,
-                mode=write_back_mode,
-            )
-            if err:
-                print(f"  Write-back failed: {err}", file=sys.stderr)
+                results.append(result)
 
-        if args.verbose:
-            _print_verbose(result, idx, total)
+                if _db is not None:
+                    _db.save_judge_result(result)
+
+                if write_back and getattr(args, "photos_library", None):
+                    score_tag = f"score:{weighted:.1f}"
+                    err = write_to_photos(
+                        result.file_name,
+                        [score_tag],
+                        None,
+                        mode=write_back_mode,
+                    )
+                    if err:
+                        print(f"  Write-back failed: {err}", file=sys.stderr)
+
+                if args.verbose:
+                    _print_verbose(result, idx, total)
+                else:
+                    _print_brief(result, idx, total)
+
+                if session is not None:
+                    session.record_item(str(file_path), "ok")
+                    session.increment("processed")
+                    session.set_current(None)
+        except KeyboardInterrupt:
+            if session is not None:
+                session.mark_interrupted()
+            print("\nInterrupted.", file=sys.stderr)
+
+        if args.sort_by == "score":
+            results.sort(key=lambda r: r.weighted_score, reverse=True)
         else:
-            _print_brief(result, idx, total)
+            results.sort(key=lambda r: r.file_name)
 
-    if args.sort_by == "score":
-        results.sort(key=lambda r: r.weighted_score, reverse=True)
-    else:
-        results.sort(key=lambda r: r.file_name)
+        if args.output_json:
+            Path(args.output_json).write_text(
+                json.dumps([_result_to_dict(r) for r in results], indent=2),
+                encoding="utf-8",
+            )
 
-    if args.output_json:
-        Path(args.output_json).write_text(
-            json.dumps([_result_to_dict(r) for r in results], indent=2),
-            encoding="utf-8",
-        )
+        if session is not None:
+            session.mark_completed()
+    finally:
+        if dashboard is not None:
+            dashboard.stop()
+        run_registry.set_current(None)
 
     return 0

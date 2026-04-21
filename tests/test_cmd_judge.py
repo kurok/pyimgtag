@@ -28,6 +28,11 @@ def _make_args(**kwargs) -> argparse.Namespace:
         write_back=False,
         write_back_mode="overwrite",
         no_recursive=False,
+        web=False,
+        no_web=True,
+        web_host="127.0.0.1",
+        web_port=8770,
+        no_browser=True,
     )
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
