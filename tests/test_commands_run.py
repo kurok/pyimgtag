@@ -662,3 +662,99 @@ class TestDryRunNoDbWrites:
 
         assert rc == 0
         assert not db_path.exists(), "DB must not be created by --dry-run"
+
+
+class TestSequentialPauseGate:
+    def test_pause_blocks_before_next_file_and_resume_continues(self, tmp_path):
+        """Pause must stop processing before the next file; resume must continue."""
+        import threading
+        import time
+
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+
+        run_registry.set_current(None)
+
+        for i in range(3):
+            (tmp_path / f"{i}.jpg").write_bytes(b"x")
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "run",
+                "--input-dir",
+                str(tmp_path),
+                "--extensions",
+                "jpg",
+                "--no-web",
+                "--no-cache",
+                "--dry-run",
+            ]
+        )
+
+        # Build a session and attach it manually via registry so --no-web
+        # still exercises the pause check inline.
+        from pyimgtag.run_session import RunSession
+
+        session = RunSession(command="run")
+        run_registry.set_current(session)
+
+        processed_paths: list[str] = []
+        pause_after_first = threading.Event()
+
+        def fake_tag(path, *a, **kw):
+            processed_paths.append(path)
+            if len(processed_paths) == 1:
+                pause_after_first.set()
+            return MagicMock(
+                error=None,
+                tags=[],
+                summary=None,
+                scene_category=None,
+                emotional_tone=None,
+                cleanup_class=None,
+                has_text=False,
+                text_summary=None,
+                event_hint=None,
+                significance=None,
+            )
+
+        result_holder: dict = {}
+
+        def run_cmd():
+            result_holder["rc"] = cmd_run(args, parser)
+
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif"),
+            patch("pyimgtag.commands.run._maybe_start_dashboard", return_value=(session, None)),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.side_effect = fake_tag
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+
+            worker = threading.Thread(target=run_cmd, daemon=True)
+            worker.start()
+
+            assert pause_after_first.wait(timeout=2.0)
+            session.request_pause()
+
+            # Give the loop up to 1s to reach PAUSED.
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                if session.snapshot()["state"] == "paused":
+                    break
+                time.sleep(0.02)
+            assert session.snapshot()["state"] == "paused"
+            assert len(processed_paths) == 1
+
+            session.resume()
+            worker.join(timeout=3.0)
+
+        assert result_holder["rc"] == 0
+        assert len(processed_paths) == 3
+        run_registry.set_current(None)

@@ -254,6 +254,10 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                 if args.limit and stats["processed"] >= args.limit:
                     break
 
+                if session is not None:
+                    session.wait_if_paused()
+                    session.set_current(str(file_path))
+
                 if str(file_path) in skipped_dedup:
                     stats["skipped_dedup"] += 1
                     continue
@@ -262,9 +266,22 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                     file_path, source_type, args, ollama, geocoder, stats, progress_db
                 )
                 if result is None:
+                    if session is not None:
+                        session.set_current(None)
                     continue
 
                 _finalize_result(result, file_path, args, progress_db, phash_map, results, stats)
+
+                if session is not None:
+                    status = "ok" if result.processing_status == "ok" else "error"
+                    session.record_item(
+                        str(file_path),
+                        status,
+                        error=result.error_message,
+                    )
+                    for k, v in stats.items():
+                        session.set_counter(k, v)
+                    session.set_current(None)
 
         except KeyboardInterrupt:
             if session is not None:
