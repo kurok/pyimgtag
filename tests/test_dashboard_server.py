@@ -76,3 +76,17 @@ def test_unpause_without_session_returns_404():
     client = TestClient(create_app())
     r = client.post("/api/run/current/unpause")
     assert r.status_code == 404
+
+
+def test_dashboard_html_contains_polling_and_controls():
+    client = TestClient(create_app())
+    body = client.get("/").text
+    # Polling and control contract
+    assert "/api/run/current" in body
+    assert "/api/run/current/pause" in body
+    assert "/api/run/current/unpause" in body
+    # Placeholders the JS fills in
+    assert 'id="state"' in body
+    assert 'id="current"' in body
+    assert 'id="counters"' in body
+    assert 'id="recent"' in body
