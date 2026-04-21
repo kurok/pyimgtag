@@ -165,8 +165,7 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
         from pydantic import BaseModel
     except ImportError as exc:
         raise ImportError(
-            "fastapi is required for the tags UI. "
-            "Install with: pip install 'pyimgtag[review]'"
+            "fastapi is required for the tags UI. Install with: pip install 'pyimgtag[review]'"
         ) from exc
 
     class _RenameBody(BaseModel):

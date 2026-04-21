@@ -917,8 +917,7 @@ class ProgressDB:
         rows = self._conn.execute(
             "SELECT file_path, weighted_score, core_score, visible_score, verdict, scored_at "
             "FROM judge_scores "
-            "ORDER BY weighted_score DESC "
-            + limit_clause  # nosec B608
+            "ORDER BY weighted_score DESC " + limit_clause  # nosec B608
         ).fetchall()
         return [
             {

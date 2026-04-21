@@ -90,8 +90,15 @@ def test_list_scores_includes_required_fields(tmp_path):
     client = TestClient(app)
     r = client.get("/api/scores")
     item = r.json()[0]
-    for key in ("file_path", "file_name", "weighted_score", "core_score", "visible_score",
-                "verdict", "scored_at"):
+    for key in (
+        "file_path",
+        "file_name",
+        "weighted_score",
+        "core_score",
+        "visible_score",
+        "verdict",
+        "scored_at",
+    ):
         assert key in item, f"missing key: {key}"
 
 

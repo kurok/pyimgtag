@@ -1479,7 +1479,11 @@ class TestJudgeScores:
         from pyimgtag.models import JudgeResult, JudgeScores
 
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            for path, score in [("/img/low.jpg", 3.0), ("/img/high.jpg", 9.0), ("/img/mid.jpg", 6.0)]:
+            for path, score in [
+                ("/img/low.jpg", 3.0),
+                ("/img/high.jpg", 9.0),
+                ("/img/mid.jpg", 6.0),
+            ]:
                 db.save_judge_result(
                     JudgeResult(
                         file_path=path,

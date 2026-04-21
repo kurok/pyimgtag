@@ -7,8 +7,14 @@ from pyimgtag.webapp.nav import NAV_STYLES, render_nav
 
 def test_render_nav_includes_all_links():
     html = render_nav("dashboard")
-    for href in ('href="/"', 'href="/review"', 'href="/faces"',
-                 'href="/tags"', 'href="/query"', 'href="/judge"'):
+    for href in (
+        'href="/"',
+        'href="/review"',
+        'href="/faces"',
+        'href="/tags"',
+        'href="/query"',
+        'href="/judge"',
+    ):
         assert href in html, f"missing {href}"
 
 

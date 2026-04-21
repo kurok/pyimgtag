@@ -157,8 +157,7 @@ def build_judge_router(db: "ProgressDB", api_base: str = "") -> Any:
         from fastapi.responses import HTMLResponse
     except ImportError as exc:
         raise ImportError(
-            "fastapi is required for the judge UI. "
-            "Install with: pip install 'pyimgtag[review]'"
+            "fastapi is required for the judge UI. Install with: pip install 'pyimgtag[review]'"
         ) from exc
 
     router = APIRouter()
