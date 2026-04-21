@@ -102,15 +102,37 @@ async function doSearch(e) {
     + '<th>Category</th><th>Cleanup</th><th>Location</th></tr>';
   for (const r of rows) {
     const tr = document.createElement('tr');
-    const tags = (r.tags_list || []).map(t => '<span class="tag-pill">' + t + '</span>').join('');
-    const loc = [r.nearest_city, r.nearest_country].filter(Boolean).join(', ');
+
+    const tdFile = document.createElement('td');
+    tdFile.title = r.file_path;
+    tdFile.textContent = r.file_name;
+
+    const tdTags = document.createElement('td');
+    for (const t of (r.tags_list || [])) {
+      const span = document.createElement('span');
+      span.className = 'tag-pill';
+      span.textContent = t;
+      tdTags.appendChild(span);
+    }
+
+    const tdCat = document.createElement('td');
+    tdCat.textContent = r.scene_category || '';
+
     const cc = r.cleanup_class === 'delete' ? 'cleanup-delete'
               : r.cleanup_class === 'review' ? 'cleanup-review' : '';
-    tr.innerHTML = '<td title="' + r.file_path + '">' + r.file_name + '</td>'
-      + '<td>' + tags + '</td>'
-      + '<td>' + (r.scene_category || '') + '</td>'
-      + '<td class="' + cc + '">' + (r.cleanup_class || '') + '</td>'
-      + '<td>' + loc + '</td>';
+    const tdClean = document.createElement('td');
+    if (cc) tdClean.className = cc;
+    tdClean.textContent = r.cleanup_class || '';
+
+    const loc = [r.nearest_city, r.nearest_country].filter(Boolean).join(', ');
+    const tdLoc = document.createElement('td');
+    tdLoc.textContent = loc;
+
+    tr.appendChild(tdFile);
+    tr.appendChild(tdTags);
+    tr.appendChild(tdCat);
+    tr.appendChild(tdClean);
+    tr.appendChild(tdLoc);
     tbl.appendChild(tr);
   }
   el.innerHTML = '';
