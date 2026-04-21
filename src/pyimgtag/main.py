@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from pyimgtag import __version__
+from pyimgtag.webapp.config import add_web_flags
 
 _DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
 
@@ -134,32 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Process newest files first (by modification time)",
     )
-    run_p.add_argument(
-        "--web",
-        action="store_true",
-        help="Force-enable the live dashboard (overrides PYIMGTAG_NO_WEB)",
-    )
-    run_p.add_argument(
-        "--no-web",
-        action="store_true",
-        help="Disable the live dashboard (terminal-only mode)",
-    )
-    run_p.add_argument(
-        "--web-host",
-        default="127.0.0.1",
-        help="Dashboard bind host (default: 127.0.0.1)",
-    )
-    run_p.add_argument(
-        "--web-port",
-        type=int,
-        default=8770,
-        help="Dashboard bind port (default: 8770)",
-    )
-    run_p.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Do not open the dashboard in a browser",
-    )
+    add_web_flags(run_p)
 
     # --- status subcommand ---
     status_p = subparsers.add_parser("status", help="Show progress stats from the DB")

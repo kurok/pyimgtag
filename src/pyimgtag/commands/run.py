@@ -8,10 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 from platform import system as get_platform_name
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pyimgtag.webapp.server_thread import DashboardServer
 
 from pyimgtag import run_registry
 from pyimgtag.applescript_writer import read_keywords_from_photos
@@ -23,7 +19,6 @@ from pyimgtag.ollama_client import OllamaClient
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
 from pyimgtag.preflight import check_ollama
 from pyimgtag.progress_db import ProgressDB
-from pyimgtag.run_session import RunSession
 from pyimgtag.scanner import scan_directory, scan_photos_library
 
 _FDA_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
@@ -168,7 +163,9 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     results: list[ImageResult] = []
     stats = _new_stats(len(files))
 
-    session, dashboard = _maybe_start_dashboard(args)
+    from pyimgtag.webapp.bootstrap import start_dashboard_for
+
+    session, dashboard = start_dashboard_for(args, command="run")
     if session is not None:
         session.set_counter("scanned", stats["scanned"])
         session.mark_running()
@@ -672,44 +669,3 @@ def _print_summary(stats: dict) -> None:
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
     print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
     print(f"  Resumed (DB):     {stats['resumed_from_db']}", file=sys.stderr)
-
-
-def _maybe_start_dashboard(
-    args: argparse.Namespace,
-) -> tuple[RunSession | None, DashboardServer | None]:
-    """Start the dashboard (if enabled) and return (session, dashboard_or_None)."""
-    from pyimgtag.webapp.config import web_enabled
-
-    if not web_enabled(args):
-        return None, None
-
-    session = RunSession(command="run")
-    run_registry.set_current(session)
-
-    try:
-        from pyimgtag.webapp.dashboard_server import create_app
-        from pyimgtag.webapp.server_thread import DashboardServer
-
-        dashboard = DashboardServer(create_app(), host=args.web_host, port=args.web_port)
-    except ImportError as exc:
-        print(f"Warning: dashboard disabled ({exc})", file=sys.stderr)
-        run_registry.set_current(None)
-        return None, None
-
-    ready = dashboard.start()
-    session.web_url = dashboard.url
-    if ready:
-        print(f"Dashboard: {dashboard.url}", flush=True)
-    else:
-        print(
-            f"Dashboard: {dashboard.url} (not yet ready; retrying in background)",
-            flush=True,
-        )
-    if not getattr(args, "no_browser", False):
-        import webbrowser
-
-        try:
-            webbrowser.open(dashboard.url)
-        except Exception as exc:  # noqa: BLE001 — best effort
-            print(f"Warning: could not open browser ({exc})", file=sys.stderr)
-    return session, dashboard

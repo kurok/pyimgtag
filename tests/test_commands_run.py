@@ -734,7 +734,7 @@ class TestSequentialPauseGate:
             patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
             patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
             patch("pyimgtag.commands.run.read_exif"),
-            patch("pyimgtag.commands.run._maybe_start_dashboard", return_value=(session, None)),
+            patch("pyimgtag.webapp.bootstrap.start_dashboard_for", return_value=(session, None)),
         ):
             ollama = MagicMock()
             ollama.tag_image.side_effect = fake_tag
@@ -854,7 +854,7 @@ class TestThreadedPauseGate:
             patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
             patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
             patch("pyimgtag.commands.run.read_exif"),
-            patch("pyimgtag.commands.run._maybe_start_dashboard", return_value=(session, None)),
+            patch("pyimgtag.webapp.bootstrap.start_dashboard_for", return_value=(session, None)),
         ):
             ollama = MagicMock()
             ollama.tag_image.side_effect = fake_tag

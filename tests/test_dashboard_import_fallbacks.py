@@ -40,10 +40,10 @@ def test_dashboard_server_init_raises_import_error_without_uvicorn():
 
 
 def test_maybe_start_dashboard_falls_back_on_import_error(capsys, tmp_path):
-    """_maybe_start_dashboard should return (None, None) and warn if uvicorn is missing."""
+    """start_dashboard_for should return (None, None) and warn if uvicorn is missing."""
     from pyimgtag import run_registry
-    from pyimgtag.commands.run import _maybe_start_dashboard
     from pyimgtag.main import build_parser
+    from pyimgtag.webapp.bootstrap import start_dashboard_for
 
     run_registry.set_current(None)
     parser = build_parser()
@@ -53,7 +53,7 @@ def test_maybe_start_dashboard_falls_back_on_import_error(capsys, tmp_path):
         "pyimgtag.webapp.server_thread.DashboardServer.__init__",
         side_effect=ImportError("fake missing uvicorn"),
     ):
-        session, dashboard = _maybe_start_dashboard(args)
+        session, dashboard = start_dashboard_for(args, command="run")
 
     assert session is None
     assert dashboard is None
@@ -65,8 +65,8 @@ def test_maybe_start_dashboard_falls_back_on_import_error(capsys, tmp_path):
 def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_path, monkeypatch):
     """When DashboardServer.start() returns False, the 'not yet ready' message should print."""
     from pyimgtag import run_registry
-    from pyimgtag.commands.run import _maybe_start_dashboard
     from pyimgtag.main import build_parser
+    from pyimgtag.webapp.bootstrap import start_dashboard_for
 
     run_registry.set_current(None)
     parser = build_parser()
@@ -93,7 +93,7 @@ def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_pat
 
     monkeypatch.setattr(server_thread, "DashboardServer", _FakeServer)
 
-    session, dashboard = _maybe_start_dashboard(args)
+    session, dashboard = start_dashboard_for(args, command="run")
     try:
         assert session is not None
         assert dashboard is not None
@@ -106,9 +106,9 @@ def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_pat
 def test_maybe_start_dashboard_webbrowser_failure_prints_warning(capsys, tmp_path, monkeypatch):
     """A webbrowser.open() failure must be caught and surfaced as a stderr warning."""
     from pyimgtag import run_registry
-    from pyimgtag.commands.run import _maybe_start_dashboard
     from pyimgtag.main import build_parser
     from pyimgtag.webapp import server_thread
+    from pyimgtag.webapp.bootstrap import start_dashboard_for
 
     run_registry.set_current(None)
     parser = build_parser()
@@ -134,7 +134,7 @@ def test_maybe_start_dashboard_webbrowser_failure_prints_warning(capsys, tmp_pat
     )
 
     try:
-        session, dashboard = _maybe_start_dashboard(args)
+        session, dashboard = start_dashboard_for(args, command="run")
         err = capsys.readouterr().err
         assert "could not open browser" in err
         assert session is not None
