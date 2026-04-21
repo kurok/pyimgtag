@@ -14,133 +14,140 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>pyimgtag Faces</title>
   <style>
-    :root{--bg:#121212;--surface:#1e1e1e;--card:#252525;--accent:#bb86fc;
-          --danger:#cf6679;--warn:#f9a825;--ok:#81c784;--text:#e0e0e0;
-          --muted:#888;--border:#333}
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
-    header{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--border);
-           padding:.75rem 1.5rem;display:flex;align-items:center;gap:1rem}
-    h1{font-size:1rem;font-weight:600;color:var(--accent)}
-    #persons{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-             gap:.75rem;padding:1rem 1.5rem}
-    .card{background:var(--card);border-radius:8px;overflow:hidden;border:1px solid var(--border);padding:.75rem}
-    .name{font-weight:600;font-size:.9rem;margin-bottom:.4rem}
-    .meta{font-size:.75rem;color:var(--muted);margin-bottom:.5rem}
-    .badge{display:inline-block;font-size:.6rem;padding:.1rem .35rem;border-radius:3px;
-           font-weight:700;text-transform:uppercase;margin-right:.3rem}
-    .trusted{background:#1b4332;color:#81c784}
-    .auto{background:#1a1a2e;color:#888}
-    .faces{display:flex;flex-wrap:wrap;gap:4px;margin-top:.5rem}
-    .face-thumb{width:60px;height:60px;object-fit:cover;border-radius:4px;border:1px solid var(--border)}
-    .actions{display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap}
-    button{padding:.25rem .6rem;font-size:.75rem;border:1px solid var(--border);background:transparent;
-           color:var(--text);cursor:pointer;border-radius:4px}
-    button:hover{background:var(--surface)}
-    button.danger{color:var(--danger);border-color:var(--danger)}
-    #status{margin-left:auto;font-size:.8rem;color:var(--muted)}
+    __NAV_STYLES__
+    #persons{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
+             gap:14px;padding:20px 32px}
+    .person-card{background:var(--surface);border-radius:var(--radius-md);
+                 box-shadow:var(--shadow-md);padding:16px}
+    .person-name{font-size:15px;font-weight:600;color:var(--text);margin-bottom:4px}
+    .person-meta{font-size:12px;color:var(--muted);margin-bottom:10px;
+                 display:flex;align-items:center;gap:6px}
+    .badge-trusted{background:rgba(52,199,89,.1);color:#1a7f50;font-size:10px;
+                   font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+    .badge-auto{background:rgba(0,0,0,.05);color:var(--muted);font-size:10px;
+                font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+    .faces-grid{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}
+    .face-thumb{width:60px;height:60px;object-fit:cover;border-radius:var(--radius-sm);
+                border:1px solid var(--border);cursor:pointer;transition:opacity .15s}
+    .face-thumb:hover{opacity:.7}
+    .person-actions{display:flex;gap:6px;flex-wrap:wrap}
+    .person-actions button{padding:5px 12px;border-radius:var(--radius-sm);font-size:12px;
+                           font-weight:500;border:1px solid var(--border);
+                           background:var(--surface);color:var(--text);cursor:pointer;
+                           transition:all .15s}
+    .person-actions button:hover{border-color:var(--accent);color:var(--accent)}
+    .del-btn{color:var(--danger)!important;border-color:rgba(255,59,48,.3)!important}
+    .del-btn:hover{background:rgba(255,59,48,.05)!important}
   </style>
 </head>
 <body>
-<header>
-  <h1>pyimgtag &mdash; Faces</h1>
-  <span id="status">Loading&hellip;</span>
-</header>
+__NAV__
+__MODAL_HTML__
+__MODAL_JS__
+<div class="page-hdr">
+  <h1 class="page-title">Faces</h1>
+  <span id="status" class="page-meta">Loading\u2026</span>
+</div>
 <div id="persons"></div>
 <script>
 async function load() {
   const resp = await fetch('__API_BASE__/api/persons');
   const persons = await resp.json();
-  const el = document.getElementById('persons');
   document.getElementById('status').textContent = persons.length + ' person(s)';
-  el.innerHTML = '';
+  const grid = document.getElementById('persons');
+  grid.innerHTML = '';
   for (const p of persons) {
-    const card = document.createElement('div');
-    card.className = 'card';
-
-    const nameDiv = document.createElement('div');
-    nameDiv.className = 'name';
-    nameDiv.textContent = p.label || ('(unlabelled #' + p.id + ')');
-
-    const metaDiv = document.createElement('div');
-    metaDiv.className = 'meta';
-    const badgeSpan = document.createElement('span');
-    // badge is a constant trusted HTML literal — no user input involved
-    badgeSpan.innerHTML = p.trusted
-      ? '<span class="badge trusted">&#9733; trusted</span>'
-      : '<span class="badge auto">auto</span>';
-    metaDiv.appendChild(badgeSpan);
-    metaDiv.appendChild(document.createTextNode(p.face_count + ' face(s) \u2022 source: '));
-    metaDiv.appendChild(document.createTextNode(p.source));
-
-    const facesDiv = document.createElement('div');
-    facesDiv.className = 'faces';
-    facesDiv.id = 'faces-' + p.id;
-
-    const actionsDiv = document.createElement('div');
-    actionsDiv.className = 'actions';
-
-    const renameBtn = document.createElement('button');
-    renameBtn.textContent = 'Rename';
-    renameBtn.addEventListener('click', () => rename(p.id, p.label));
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'danger';
-    deleteBtn.textContent = 'Delete';
-    deleteBtn.addEventListener('click', () => deletePerson(p.id));
-
-    actionsDiv.appendChild(renameBtn);
-    actionsDiv.appendChild(deleteBtn);
-
-    card.appendChild(nameDiv);
-    card.appendChild(metaDiv);
-    card.appendChild(facesDiv);
-    card.appendChild(actionsDiv);
-
-    el.appendChild(card);
-    loadFaces(p.id);
+    const fr = await fetch('__API_BASE__/api/persons/' + p.id + '/faces');
+    const faces = await fr.json();
+    grid.appendChild(renderPerson(p, faces));
   }
 }
 
-async function loadFaces(pid) {
-  const resp = await fetch('__API_BASE__/api/persons/' + pid + '/faces');
-  if (!resp.ok) return;
-  const faces = await resp.json();
-  const el = document.getElementById('faces-' + pid);
-  if (!el) return;
+function renderPerson(p, faces) {
+  const card = document.createElement('div');
+  card.className = 'person-card';
+
+  const nameEl = document.createElement('div');
+  nameEl.className = 'person-name';
+  nameEl.textContent = p.label || ('(unlabelled #' + p.id + ')');
+  card.appendChild(nameEl);
+
+  const meta = document.createElement('div');
+  meta.className = 'person-meta';
+  const badge = document.createElement('span');
+  badge.className = p.trusted ? 'badge-trusted' : 'badge-auto';
+  badge.textContent = p.trusted ? 'trusted' : 'auto';
+  meta.appendChild(badge);
+  const cnt = document.createTextNode(
+    p.face_count + ' face' + (p.face_count !== 1 ? 's' : ''));
+  meta.appendChild(cnt);
+  card.appendChild(meta);
+
+  const facesGrid = document.createElement('div');
+  facesGrid.className = 'faces-grid';
   for (const f of faces.slice(0, 8)) {
-    if (f.thumb) {
-      const img = document.createElement('img');
-      img.className = 'face-thumb';
-      img.src = 'data:image/jpeg;base64,' + f.thumb;
-      img.title = 'Face #' + f.id;
-      img.onclick = () => unassign(f.id);
-      el.appendChild(img);
-    }
+    if (!f.thumb) continue;
+    const img = document.createElement('img');
+    img.className = 'face-thumb';
+    img.src = 'data:image/jpeg;base64,' + f.thumb;
+    img.title = 'Click to unassign';
+    img.addEventListener('click', async () => {
+      await fetch('__API_BASE__/api/faces/' + f.id + '/unassign', {method: 'POST'});
+      load();
+    });
+    facesGrid.appendChild(img);
   }
-}
+  card.appendChild(facesGrid);
 
-async function rename(pid, cur) {
-  const label = prompt('New name:', cur);
-  if (!label) return;
-  await fetch('__API_BASE__/api/persons/' + pid + '/label', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({label})
+  const acts = document.createElement('div');
+  acts.className = 'person-actions';
+
+  const renBtn = document.createElement('button');
+  renBtn.textContent = 'Rename';
+  renBtn.addEventListener('click', () => {
+    openModal(
+      'Rename person',
+      'Enter a new name for this person.',
+      '<input class="inp" id="m-inp" placeholder="Name" />',
+      'Rename', 'btn-primary',
+      async () => {
+        const val = document.getElementById('m-inp').value.trim();
+        if (!val) return;
+        await fetch('__API_BASE__/api/persons/' + p.id + '/label', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label: val}),
+        });
+        closeModal();
+        load();
+      }
+    );
+    // Set value via DOM after modal renders — avoids XSS via innerHTML attribute
+    document.getElementById('m-inp').value = p.label || '';
+    setTimeout(() => document.getElementById('m-inp').focus(), 50);
   });
-  load();
-}
+  acts.appendChild(renBtn);
 
-async function deletePerson(pid) {
-  if (!confirm('Delete this person and unassign all their faces?')) return;
-  await fetch('__API_BASE__/api/persons/' + pid, {method: 'DELETE'});
-  load();
-}
+  const delBtn = document.createElement('button');
+  delBtn.className = 'del-btn';
+  delBtn.textContent = 'Delete';
+  delBtn.addEventListener('click', () => {
+    openModal(
+      'Delete person',
+      'Delete this person record? Face crops are kept but unassigned.',
+      '',
+      'Delete', 'btn-danger-text',
+      async () => {
+        await fetch('__API_BASE__/api/persons/' + p.id, {method: 'DELETE'});
+        closeModal();
+        load();
+      }
+    );
+  });
+  acts.appendChild(delBtn);
 
-async function unassign(fid) {
-  if (!confirm('Remove this face from its person?')) return;
-  await fetch('__API_BASE__/api/faces/' + fid + '/unassign', {method: 'POST'});
-  load();
+  card.appendChild(acts);
+  return card;
 }
 
 load();
@@ -150,8 +157,16 @@ load();
 
 
 def render_faces_html(api_base: str = "") -> str:
-    """Return the faces UI HTML with the given API base prefix."""
-    return _HTML_TEMPLATE.replace("__API_BASE__", api_base)
+    """Return the faces UI HTML with the given API base prefix inserted."""
+    from pyimgtag.webapp.nav import MODAL_HTML, MODAL_JS, NAV_STYLES, render_nav
+
+    return (
+        _HTML_TEMPLATE.replace("__API_BASE__", api_base)
+        .replace("__NAV__", render_nav("faces"))
+        .replace("__NAV_STYLES__", NAV_STYLES)
+        .replace("__MODAL_HTML__", MODAL_HTML)
+        .replace("__MODAL_JS__", MODAL_JS)
+    )
 
 
 def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
