@@ -6,7 +6,8 @@ from __future__ import annotations
 def render_nav(active: str) -> str:
     """Return the nav-bar HTML with the given section marked active.
 
-    ``active`` is one of ``"dashboard"``, ``"review"``, ``"faces"``.
+    ``active`` is one of ``"dashboard"``, ``"review"``, ``"faces"``,
+    ``"tags"``, ``"query"``, ``"judge"``.
     """
 
     def cls(name: str) -> str:
@@ -17,6 +18,9 @@ def render_nav(active: str) -> str:
         f'<a class="{cls("dashboard")}" href="/">Dashboard</a>'
         f'<a class="{cls("review")}" href="/review">Review</a>'
         f'<a class="{cls("faces")}" href="/faces">Faces</a>'
+        f'<a class="{cls("tags")}" href="/tags">Tags</a>'
+        f'<a class="{cls("query")}" href="/query">Query</a>'
+        f'<a class="{cls("judge")}" href="/judge">Judge</a>'
         "</nav>"
     )
 
