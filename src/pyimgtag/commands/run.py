@@ -224,6 +224,11 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             for file_path in fresh_files:
                 if args.limit and stats["processed"] >= args.limit:
                     break
+
+                if session is not None:
+                    session.wait_if_paused()
+                    session.set_current(str(file_path))
+
                 sentinel_seen = _drain(sentinel_seen)
                 result = _process_one(
                     file_path, source_type, args, ollama, geocoder, stats, progress_db
@@ -232,6 +237,17 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                     _finalize_result(
                         result, file_path, args, progress_db, phash_map, results, stats
                     )
+                    if session is not None:
+                        status = "ok" if result.processing_status == "ok" else "error"
+                        session.record_item(
+                            str(file_path),
+                            status,
+                            error=result.error_message,
+                        )
+                        for k, v in stats.items():
+                            session.set_counter(k, v)
+                if session is not None:
+                    session.set_current(None)
         except KeyboardInterrupt:
             stop_event.set()
             if session is not None:
