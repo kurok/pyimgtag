@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from pyimgtag import __version__
+from pyimgtag.webapp.config import web_enabled as web_enabled  # re-export; noqa: PLC0414
 
 _DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
 
@@ -425,17 +426,6 @@ def build_parser() -> argparse.ArgumentParser:
     tags_merge_p.add_argument("--db", help=_DEFAULT_DB_HELP)
 
     return p
-
-
-def web_enabled(args: argparse.Namespace) -> bool:
-    """Resolve whether the dashboard should start for this invocation."""
-    if getattr(args, "no_web", False):
-        return False
-    if getattr(args, "web", False):
-        return True
-    if os.environ.get("PYIMGTAG_NO_WEB", "").strip().lower() in {"1", "true", "yes"}:
-        return False
-    return True
 
 
 def main(argv: list[str] | None = None) -> int:

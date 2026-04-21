@@ -678,7 +678,7 @@ def _maybe_start_dashboard(
     args: argparse.Namespace,
 ) -> tuple[RunSession | None, DashboardServer | None]:
     """Start the dashboard (if enabled) and return (session, dashboard_or_None)."""
-    from pyimgtag.main import web_enabled
+    from pyimgtag.webapp.config import web_enabled
 
     if not web_enabled(args):
         return None, None
