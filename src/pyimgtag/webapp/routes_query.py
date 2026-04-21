@@ -14,74 +14,79 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>pyimgtag Query</title>
   <style>
-    :root{--bg:#121212;--surface:#1e1e1e;--card:#252525;--accent:#bb86fc;
-          --danger:#cf6679;--warn:#f9a825;--text:#e0e0e0;--muted:#888;--border:#333}
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
     __NAV_STYLES__
-    header{background:var(--surface);border-bottom:1px solid var(--border);padding:.75rem 1.5rem}
-    h1{font-size:1rem;font-weight:600;color:var(--accent)}
-    form{display:flex;flex-wrap:wrap;gap:.5rem;padding:.75rem 1.5rem;
-         background:var(--surface);border-bottom:1px solid var(--border);align-items:flex-end}
-    label{font-size:.75rem;color:var(--muted);display:flex;flex-direction:column;gap:.25rem}
-    input,select{padding:.35rem .6rem;background:var(--card);border:1px solid var(--border);
-                 border-radius:4px;color:var(--text);font-size:.8rem}
-    button[type=submit]{padding:.35rem .9rem;font-size:.8rem;border:none;
-                        background:var(--accent);color:#000;cursor:pointer;
-                        border-radius:4px;font-weight:600;align-self:flex-end}
-    #count{padding:.5rem 1.5rem;font-size:.8rem;color:var(--muted)}
-    #results{padding:0 1.5rem 2rem;overflow-x:auto}
-    table{width:100%;border-collapse:collapse;font-size:.8rem}
-    th{text-align:left;padding:.4rem .6rem;background:var(--surface);
-       border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;white-space:nowrap}
-    td{padding:.35rem .6rem;border-bottom:1px solid var(--border);
-       max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    tr:hover td{background:var(--card)}
-    .tag-pill{display:inline-block;background:#1e3a5a;border-radius:3px;
-              padding:.1rem .3rem;font-size:.68rem;margin:.05rem}
-    .cleanup-delete{color:var(--danger)}
-    .cleanup-review{color:var(--warn)}
+    .filter-card{margin:20px 32px 0;background:var(--surface);
+                 border-radius:var(--radius-md);box-shadow:var(--shadow-sm);
+                 padding:18px 20px}
+    .filter-row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+    .field{display:flex;flex-direction:column;gap:5px}
+    .field label{font-size:11px;font-weight:600;color:var(--muted);
+                 text-transform:uppercase;letter-spacing:.4px}
+    .field input,.field select{padding:8px 10px;border:1px solid var(--border);
+                               border-radius:var(--radius-sm);font-size:13px;
+                               font-family:inherit;color:var(--text);background:var(--bg);
+                               outline:none;transition:border-color .15s,box-shadow .15s}
+    .field input:focus,.field select:focus{border-color:var(--accent);
+                                           box-shadow:0 0 0 3px rgba(0,113,227,.15)}
+    .field input[type=number]{width:80px}
+    #count{padding:14px 32px 0;font-size:13px;color:var(--muted)}
+    #results{padding:12px 32px 32px;overflow-x:auto}
+    .cleanup-del{background:rgba(255,59,48,.1);color:var(--danger);padding:2px 7px;
+                 border-radius:5px;font-size:11px;font-weight:600}
+    .cleanup-rev{background:rgba(255,159,10,.1);color:var(--warn);padding:2px 7px;
+                 border-radius:5px;font-size:11px;font-weight:600}
   </style>
 </head>
 <body>
 __NAV__
-<header><h1>pyimgtag &mdash; Query</h1></header>
-<form id="qform" onsubmit="doSearch(event)">
-  <label>Tag contains<input id="f_tag" placeholder="e.g. sunset"></label>
-  <label>Cleanup
-    <select id="f_cleanup">
-      <option value="">any</option>
-      <option value="delete">delete</option>
-      <option value="review">review</option>
-      <option value="keep">keep</option>
-    </select>
-  </label>
-  <label>Category<input id="f_cat" placeholder="e.g. landscape"></label>
-  <label>City<input id="f_city" placeholder="e.g. Tokyo"></label>
-  <label>Country<input id="f_country" placeholder="e.g. Japan"></label>
-  <label>Status
-    <select id="f_status">
-      <option value="">any</option>
-      <option value="ok">ok</option>
-      <option value="error">error</option>
-    </select>
-  </label>
-  <label>Limit
-    <input id="f_limit" type="number" value="100" min="1" max="5000" style="width:72px">
-  </label>
-  <button type="submit">Search</button>
-</form>
+<div class="page-hdr">
+  <h1 class="page-title">Query</h1>
+</div>
+<div class="filter-card">
+  <div class="filter-row">
+    <div class="field"><label>Tag</label>
+      <input id="f_tag" type="text" placeholder="e.g. sunset"></div>
+    <div class="field"><label>Has text</label>
+      <select id="f_text">
+        <option value="">any</option>
+        <option value="true">yes</option>
+        <option value="false">no</option>
+      </select></div>
+    <div class="field"><label>Cleanup</label>
+      <select id="f_cleanup">
+        <option value="">any</option>
+        <option value="delete">delete</option>
+        <option value="review">review</option>
+        <option value="keep">keep</option>
+      </select></div>
+    <div class="field"><label>Category</label>
+      <input id="f_cat" type="text" placeholder="e.g. landscape"></div>
+    <div class="field"><label>City</label>
+      <input id="f_city" type="text" placeholder="e.g. Kyiv"></div>
+    <div class="field"><label>Country</label>
+      <input id="f_country" type="text" placeholder="e.g. UA"></div>
+    <div class="field"><label>Status</label>
+      <select id="f_status">
+        <option value="">any</option>
+        <option value="ok">ok</option>
+        <option value="error">error</option>
+      </select></div>
+    <div class="field"><label>Limit</label>
+      <input id="f_limit" type="number" value="100" min="1" max="5000"></div>
+    <button class="btn btn-primary" onclick="search()">Search</button>
+  </div>
+</div>
 <div id="count"></div>
 <div id="results"></div>
 <script>
-async function doSearch(e) {
-  if (e) e.preventDefault();
+async function search() {
   const params = new URLSearchParams();
   const add = (id, key) => {
     const v = document.getElementById(id).value.trim();
     if (v) params.set(key, v);
   };
   add('f_tag', 'tag');
+  add('f_text', 'has_text');
   add('f_cleanup', 'cleanup');
   add('f_cat', 'scene_category');
   add('f_city', 'city');
@@ -89,54 +94,59 @@ async function doSearch(e) {
   add('f_status', 'status');
   add('f_limit', 'limit');
 
-  const resp = await fetch('__API_BASE__/api/images?' + params.toString());
-  const rows = await resp.json();
-  document.getElementById('count').textContent = rows.length + ' result(s)';
-  const el = document.getElementById('results');
-  if (!rows.length) {
-    el.innerHTML = '<p style="padding:1rem;color:var(--muted)">No results.</p>';
-    return;
-  }
-  const tbl = document.createElement('table');
-  tbl.innerHTML = '<tr><th>File</th><th>Tags</th>'
-    + '<th>Category</th><th>Cleanup</th><th>Location</th></tr>';
-  for (const r of rows) {
-    const tr = document.createElement('tr');
+  const r = await fetch('__API_BASE__/api/images?' + params.toString());
+  const rows = await r.json();
+  document.getElementById('count').textContent = rows.length + ' results';
+  const wrap = document.getElementById('results');
+  wrap.innerHTML = '';
+  if (!rows.length) return;
 
+  const tbl = document.createElement('table');
+  tbl.className = 'tbl';
+  const hdr = document.createElement('tr');
+  for (const h of ['File','Tags','Category','Cleanup','Location']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    hdr.appendChild(th);
+  }
+  tbl.appendChild(hdr);
+
+  for (const row of rows) {
+    const tr = document.createElement('tr');
     const tdFile = document.createElement('td');
-    tdFile.title = r.file_path;
-    tdFile.textContent = r.file_name;
+    tdFile.className = 'fname';
+    tdFile.title = row.file_path;
+    tdFile.textContent = row.file_name;
 
     const tdTags = document.createElement('td');
-    for (const t of (r.tags_list || [])) {
-      const span = document.createElement('span');
-      span.className = 'tag-pill';
-      span.textContent = t;
-      tdTags.appendChild(span);
+    for (const t of (row.tags_list || [])) {
+      const chip = document.createElement('span');
+      chip.className = 'tag-chip';
+      chip.style.marginRight = '3px';
+      chip.textContent = t;
+      tdTags.appendChild(chip);
     }
 
     const tdCat = document.createElement('td');
-    tdCat.textContent = r.scene_category || '';
+    tdCat.textContent = row.scene_category || '';
 
-    const cc = r.cleanup_class === 'delete' ? 'cleanup-delete'
-              : r.cleanup_class === 'review' ? 'cleanup-review' : '';
     const tdClean = document.createElement('td');
-    if (cc) tdClean.className = cc;
-    tdClean.textContent = r.cleanup_class || '';
+    if (row.cleanup_class) {
+      const badge = document.createElement('span');
+      badge.className = row.cleanup_class === 'delete' ? 'cleanup-del' : 'cleanup-rev';
+      badge.textContent = row.cleanup_class;
+      tdClean.appendChild(badge);
+    } else {
+      tdClean.textContent = '\u2014';
+    }
 
-    const loc = [r.nearest_city, r.nearest_country].filter(Boolean).join(', ');
     const tdLoc = document.createElement('td');
-    tdLoc.textContent = loc;
+    tdLoc.textContent = [row.city, row.country].filter(Boolean).join(', ');
 
-    tr.appendChild(tdFile);
-    tr.appendChild(tdTags);
-    tr.appendChild(tdCat);
-    tr.appendChild(tdClean);
-    tr.appendChild(tdLoc);
+    for (const td of [tdFile, tdTags, tdCat, tdClean, tdLoc]) tr.appendChild(td);
     tbl.appendChild(tr);
   }
-  el.innerHTML = '';
-  el.appendChild(tbl);
+  wrap.appendChild(tbl);
 }
 </script>
 </body>

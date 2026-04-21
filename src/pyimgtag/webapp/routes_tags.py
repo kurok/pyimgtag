@@ -14,44 +14,48 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>pyimgtag Tags</title>
   <style>
-    :root{--bg:#121212;--surface:#1e1e1e;--card:#252525;--accent:#bb86fc;
-          --danger:#cf6679;--text:#e0e0e0;--muted:#888;--border:#333}
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
     __NAV_STYLES__
-    header{background:var(--surface);border-bottom:1px solid var(--border);
-           padding:.75rem 1.5rem;display:flex;align-items:center;gap:1rem}
-    h1{font-size:1rem;font-weight:600;color:var(--accent)}
-    #search{margin:.75rem 1.5rem;padding:.4rem .8rem;background:var(--surface);
-            border:1px solid var(--border);border-radius:4px;color:var(--text);
-            font-size:.85rem;width:280px}
-    #list{padding:0 1.5rem 2rem}
-    .row{display:flex;align-items:center;gap:.5rem;padding:.4rem 0;
-         border-bottom:1px solid var(--border)}
-    .tag-name{flex:1;font-size:.85rem}
-    .cnt{font-size:.75rem;color:var(--muted);min-width:3.5rem;text-align:right}
-    button{padding:.2rem .55rem;font-size:.72rem;border:1px solid var(--border);
-           background:transparent;color:var(--text);cursor:pointer;border-radius:4px}
-    button:hover{background:var(--surface)}
-    button.danger{color:var(--danger);border-color:var(--danger)}
-    #status{margin-left:auto;font-size:.8rem;color:var(--muted)}
+    .tags-toolbar{padding:16px 32px;display:flex;align-items:center;gap:12px}
+    .search-inp{padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);
+                font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);
+                outline:none;box-shadow:var(--shadow-sm);width:260px;
+                transition:border-color .15s,box-shadow .15s}
+    .search-inp:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,113,227,.15)}
+    #list{padding:0 32px 32px;display:flex;flex-direction:column;gap:4px}
+    .row{display:flex;align-items:center;gap:8px;padding:10px 14px;
+         background:var(--surface);border-radius:var(--radius-sm);
+         box-shadow:var(--shadow-sm);transition:box-shadow .15s}
+    .row:hover{box-shadow:var(--shadow-md)}
+    .tag-name{flex:1;font-size:13px;font-weight:500;color:var(--text)}
+    .cnt{font-size:12px;color:var(--muted);min-width:56px;text-align:right}
+    .row-btn{padding:5px 10px;font-size:12px;font-weight:500;border-radius:6px;
+             border:1px solid var(--border);background:transparent;color:var(--muted);
+             cursor:pointer;transition:all .15s}
+    .row-btn:hover{border-color:var(--accent);color:var(--accent)}
+    .row-btn.danger{color:var(--danger);border-color:rgba(255,59,48,.3)}
+    .row-btn.danger:hover{background:rgba(255,59,48,.05)}
   </style>
 </head>
 <body>
 __NAV__
-<header>
-  <h1>pyimgtag &mdash; Tags</h1>
-  <span id="status">Loading&hellip;</span>
-</header>
-<input id="search" placeholder="Filter tags&hellip;" oninput="filterTags(this.value)">
+__MODAL_HTML__
+__MODAL_JS__
+<div class="page-hdr">
+  <h1 class="page-title">Tags</h1>
+  <span id="status" class="page-meta">Loading\u2026</span>
+</div>
+<div class="tags-toolbar">
+  <input class="search-inp" id="search" placeholder="Filter tags\u2026"
+         oninput="filterTags(this.value)">
+</div>
 <div id="list"></div>
 <script>
 let allTags = [];
 
 async function load() {
-  const resp = await fetch('__API_BASE__/api/tags');
-  allTags = await resp.json();
-  document.getElementById('status').textContent = allTags.length + ' tag(s)';
+  const r = await fetch('__API_BASE__/api/tags');
+  allTags = await r.json();
+  document.getElementById('status').textContent = allTags.length + ' tags';
   render(allTags);
 }
 
@@ -62,29 +66,79 @@ function render(tags) {
     const row = document.createElement('div');
     row.className = 'row';
 
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'tag-name';
-    nameSpan.textContent = t.tag;
-
-    const cntSpan = document.createElement('span');
-    cntSpan.className = 'cnt';
-    cntSpan.textContent = t.count + '\\u00a0img';
+    const nameEl = document.createElement('span');
+    nameEl.className = 'tag-name';
+    nameEl.textContent = t.tag;
+    const cntEl = document.createElement('span');
+    cntEl.className = 'cnt';
+    cntEl.textContent = t.count + '\u00a0img';
 
     const renBtn = document.createElement('button');
+    renBtn.className = 'row-btn';
     renBtn.textContent = 'Rename';
-    renBtn.addEventListener('click', () => renameTag(t.tag));
+    renBtn.addEventListener('click', () => {
+      openModal(
+        'Rename tag',
+        'Renaming "' + t.tag + '" will update all ' + t.count + ' images.',
+        '<input class="inp" id="m-inp" />',
+        'Rename', 'btn-primary',
+        async () => {
+          const val = document.getElementById('m-inp').value.trim();
+          if (!val || val === t.tag) return;
+          await fetch('__API_BASE__/api/tags/rename', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({old_tag: t.tag, new_tag: val}),
+          });
+          closeModal(); load();
+        }
+      );
+      document.getElementById('m-inp').value = t.tag;
+      setTimeout(() => document.getElementById('m-inp').focus(), 50);
+    });
 
     const merBtn = document.createElement('button');
+    merBtn.className = 'row-btn';
     merBtn.textContent = 'Merge into';
-    merBtn.addEventListener('click', () => mergeTag(t.tag));
+    merBtn.addEventListener('click', () => {
+      openModal(
+        'Merge tag',
+        'Merge "' + t.tag + '" into which tag? The source tag is removed.',
+        '<input class="inp" id="m-inp" placeholder="Target tag" />',
+        'Merge', 'btn-primary',
+        async () => {
+          const val = document.getElementById('m-inp').value.trim();
+          if (!val || val === t.tag) return;
+          await fetch('__API_BASE__/api/tags/merge', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source_tag: t.tag, target_tag: val}),
+          });
+          closeModal(); load();
+        }
+      );
+      setTimeout(() => document.getElementById('m-inp').focus(), 50);
+    });
 
     const delBtn = document.createElement('button');
-    delBtn.className = 'danger';
+    delBtn.className = 'row-btn danger';
     delBtn.textContent = 'Delete';
-    delBtn.addEventListener('click', () => deleteTag(t.tag));
+    delBtn.addEventListener('click', () => {
+      openModal(
+        'Delete tag',
+        'Remove "' + t.tag + '" from all ' + t.count + ' images? Cannot be undone.',
+        '',
+        'Delete', 'btn-danger-text',
+        async () => {
+          await fetch('__API_BASE__/api/tags/delete', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({tag: t.tag}),
+          });
+          closeModal(); load();
+        }
+      );
+    });
 
-    row.appendChild(nameSpan);
-    row.appendChild(cntSpan);
+    row.appendChild(nameEl);
+    row.appendChild(cntEl);
     row.appendChild(renBtn);
     row.appendChild(merBtn);
     row.appendChild(delBtn);
@@ -97,38 +151,6 @@ function filterTags(q) {
   render(lower ? allTags.filter(t => t.tag.includes(lower)) : allTags);
 }
 
-async function renameTag(tag) {
-  const newTag = prompt('Rename "' + tag + '" to:');
-  if (!newTag || newTag.trim() === '' || newTag.trim() === tag) return;
-  await fetch('__API_BASE__/api/tags/rename', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({old_tag: tag, new_tag: newTag.trim()})
-  });
-  load();
-}
-
-async function mergeTag(tag) {
-  const target = prompt('Merge "' + tag + '" into which tag?');
-  if (!target || target.trim() === '' || target.trim() === tag) return;
-  await fetch('__API_BASE__/api/tags/merge', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({source_tag: tag, target_tag: target.trim()})
-  });
-  load();
-}
-
-async function deleteTag(tag) {
-  if (!confirm('Delete tag "' + tag + '" from all images?')) return;
-  await fetch('__API_BASE__/api/tags/delete', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({tag})
-  });
-  load();
-}
-
 load();
 </script>
 </body>
@@ -137,12 +159,14 @@ load();
 
 def render_tags_html(api_base: str = "") -> str:
     """Return the tags UI HTML with the given API base prefix inserted."""
-    from pyimgtag.webapp.nav import NAV_STYLES, render_nav
+    from pyimgtag.webapp.nav import MODAL_HTML, MODAL_JS, NAV_STYLES, render_nav
 
     return (
         _HTML_TEMPLATE.replace("__API_BASE__", api_base)
         .replace("__NAV__", render_nav("tags"))
         .replace("__NAV_STYLES__", NAV_STYLES)
+        .replace("__MODAL_HTML__", MODAL_HTML)
+        .replace("__MODAL_JS__", MODAL_JS)
     )
 
 

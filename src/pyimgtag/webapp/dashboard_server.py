@@ -5,137 +5,138 @@ from __future__ import annotations
 from typing import Any
 
 from pyimgtag.run_registry import get_current
-from pyimgtag.webapp.nav import NAV_STYLES, render_nav
 
 
 def _render_html() -> str:
     """Assemble and return the dashboard HTML page."""
+    from pyimgtag.webapp.nav import DESIGN_CSS, render_nav
+
+    nav_html = render_nav("dashboard")
     return (
-        "<!DOCTYPE html>\n"
-        '<html lang="en">\n'
-        "<head>\n"
-        '  <meta charset="UTF-8">\n'
-        '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
-        "  <title>pyimgtag dashboard</title>\n"
-        "  <style>\n"
-        "    :root{--bg:#121212;--surface:#1e1e1e;--card:#252525;--accent:#bb86fc;\n"
-        "          --danger:#cf6679;--warn:#f9a825;--ok:#81c784;--text:#e0e0e0;\n"
-        "          --muted:#888;--border:#333}\n"
-        "    *{box-sizing:border-box;margin:0;padding:0}\n"
-        "    body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);\n"
-        "         color:var(--text);min-height:100vh}\n"
-        "    .page{padding:1.5rem}\n"
-        "    header.dash{display:flex;align-items:center;gap:1rem;margin-bottom:1rem}\n"
-        "    h1{color:var(--accent);font-size:1.1rem}\n"
-        "    .pill{padding:.2rem .6rem;border-radius:999px;font-size:.75rem;\n"
-        "          background:var(--surface);border:1px solid var(--border)}\n"
-        "    .pill.running{color:var(--ok);border-color:var(--ok)}\n"
-        "    .pill.pausing,.pill.paused{color:var(--warn);border-color:var(--warn)}\n"
-        "    .pill.failed,.pill.interrupted{color:var(--danger);border-color:var(--danger)}\n"
-        "    button{padding:.35rem .8rem;background:transparent;color:var(--text);\n"
-        "           border:1px solid var(--border);border-radius:4px;cursor:pointer;\n"
-        "           font-size:.8rem}\n"
-        "    button:hover{border-color:var(--accent);color:var(--accent)}\n"
-        "    button:disabled{opacity:.4;cursor:not-allowed}\n"
-        "    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));\n"
-        "          gap:.5rem;margin:1rem 0}\n"
-        "    .card{background:var(--card);border:1px solid var(--border);border-radius:6px;\n"
-        "          padding:.6rem}\n"
-        "    .card .k{font-size:.7rem;color:var(--muted);text-transform:uppercase}\n"
-        "    .card .v{font-size:1.3rem;margin-top:.2rem}\n"
-        "    #current{font-family:ui-monospace,monospace;font-size:.8rem;color:var(--muted);\n"
-        "             word-break:break-all;margin:.5rem 0}\n"
-        "    #recent{margin-top:1rem;list-style:none;border-top:1px solid var(--border)}\n"
-        "    #recent li{font-size:.75rem;padding:.35rem 0;border-bottom:1px solid var(--border);\n"
-        "               display:flex;gap:.5rem}\n"
-        "    #recent li .s{font-weight:600;text-transform:uppercase;font-size:.65rem}\n"
-        "    #recent li .s.ok{color:var(--ok)}\n"
-        "    #recent li .s.error{color:var(--danger)}\n"
-        "    #recent li .p{font-family:ui-monospace,monospace;color:var(--muted);\n"
-        "                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}\n"
-        "    #error{color:var(--danger);font-size:.8rem;margin-top:.5rem}\n"
-        "    .muted{color:var(--muted);font-size:.8rem}\n" + NAV_STYLES + "  </style>\n"
-        "</head>\n"
-        "<body>\n" + render_nav("dashboard") + "\n"
-        '  <div class="page">\n'
-        '  <header class="dash">\n'
-        "    <h1>pyimgtag</h1>\n"
-        '    <span id="state" class="pill">idle</span>\n'
-        '    <span id="command" class="muted"></span>\n'
-        '    <div style="flex:1"></div>\n'
-        '    <button id="pauseBtn">Pause</button>\n'
-        '    <button id="unpauseBtn" disabled>Unpause</button>\n'
-        "  </header>\n"
-        "\n"
-        '  <div id="current">(no active item)</div>\n'
-        '  <div id="counters" class="grid"></div>\n'
-        '  <div id="error"></div>\n'
-        "\n"
-        '  <h2 class="muted" style="margin-top:1rem;font-size:.8rem;text-transform:uppercase">'
-        "Recent</h2>\n"
-        '  <ul id="recent"></ul>\n'
-        "\n"
-        "  <script>\n"
-        "    const stateEl = document.getElementById('state');\n"
-        "    const cmdEl = document.getElementById('command');\n"
-        "    const currentEl = document.getElementById('current');\n"
-        "    const countersEl = document.getElementById('counters');\n"
-        "    const recentEl = document.getElementById('recent');\n"
-        "    const errorEl = document.getElementById('error');\n"
-        "    const pauseBtn = document.getElementById('pauseBtn');\n"
-        "    const unpauseBtn = document.getElementById('unpauseBtn');\n"
-        "\n"
-        "    async function fetchSnapshot() {\n"
-        "      try {\n"
-        "        const r = await fetch('/api/run/current');\n"
-        "        if (!r.ok) return;\n"
-        "        render(await r.json());\n"
-        "      } catch (e) { /* transient */ }\n"
-        "    }\n"
-        "\n"
-        "    function render(snap) {\n"
-        "      if (!snap.active) {\n"
-        "        stateEl.textContent = 'no active run';\n"
-        "        stateEl.className = 'pill';\n"
-        "        cmdEl.textContent = '';\n"
-        "        currentEl.textContent = '(no active run)';\n"
-        "        countersEl.innerHTML = '';\n"
-        "        recentEl.innerHTML = '';\n"
-        "        errorEl.textContent = '';\n"
-        "        pauseBtn.disabled = true;\n"
-        "        unpauseBtn.disabled = true;\n"
-        "        return;\n"
-        "      }\n"
-        "      stateEl.textContent = snap.state;\n"
-        "      stateEl.className = 'pill ' + snap.state;\n"
-        "      cmdEl.textContent = snap.command + ' \u00b7 ' + snap.run_id;\n"
-        "      currentEl.textContent = snap.current_item || '(idle between items)';\n"
-        "      countersEl.innerHTML = Object.entries(snap.counters || {})\n"
-        '        .map(([k, v]) => `<div class="card"><div class="k">${k}</div>`\n'
-        '                       + `<div class="v">${v}</div></div>`)\n'
-        "        .join('');\n"
-        "      recentEl.innerHTML = (snap.recent || []).slice().reverse()\n"
-        '        .map(e => `<li><span class="s ${e.status}">${e.status}</span>`\n'
-        '                + `<span class="p">${e.path}</span></li>`)\n'
-        "        .join('');\n"
-        "      errorEl.textContent = snap.last_error ? 'last error: ' + snap.last_error : '';\n"
-        "      pauseBtn.disabled = !(snap.state === 'running' || snap.state === 'starting');\n"
-        "      unpauseBtn.disabled = !(snap.state === 'paused' || snap.state === 'pausing');\n"
-        "    }\n"
-        "\n"
-        "    async function post(path) {\n"
-        "      await fetch(path, { method: 'POST' });\n"
-        "      fetchSnapshot();\n"
-        "    }\n"
-        "    pauseBtn.addEventListener('click', () => post('/api/run/current/pause'));\n"
-        "    unpauseBtn.addEventListener('click', () => post('/api/run/current/unpause'));\n"
-        "\n"
-        "    fetchSnapshot();\n"
-        "    setInterval(fetchSnapshot, 1500);\n"
-        "  </script>\n"
-        "  </div>\n"
-        "</body>\n"
-        "</html>\n"
+        "<!DOCTYPE html><html lang='en'><head>"
+        "<meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
+        "<title>pyimgtag dashboard</title>"
+        "<style>"
+        + DESIGN_CSS
+        + """
+.dash-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+           gap:12px;padding:20px 32px 0}
+.pill-state{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;
+            border:1px solid var(--border);background:var(--surface)}
+.pill-state.running{color:var(--ok);border-color:var(--ok)}
+.pill-state.pausing,.pill-state.paused{color:var(--warn);border-color:var(--warn)}
+.pill-state.failed,.pill-state.interrupted{color:var(--danger);border-color:var(--danger)}
+.recent-list{list-style:none;margin:0 32px;border-top:1px solid var(--border)}
+.recent-li{display:flex;align-items:center;gap:8px;padding:8px 0;
+           border-bottom:1px solid var(--border);font-size:12px}
+.recent-status{font-weight:700;font-size:10px;text-transform:uppercase;min-width:36px}
+.recent-status.ok{color:var(--ok)}.recent-status.error{color:var(--danger)}
+.recent-path{font-family:ui-monospace,'SF Mono',monospace;color:var(--muted);
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+#current{font-family:ui-monospace,'SF Mono',monospace;font-size:13px;color:var(--muted);
+         padding:12px 32px 0;word-break:break-all}
+#error{color:var(--danger);font-size:13px;padding:8px 32px 0}
+.ctrl-btn{padding:6px 14px;border-radius:var(--radius-sm);font-size:12px;font-weight:500;
+          border:1px solid var(--border);background:var(--surface);color:var(--text);
+          cursor:pointer;transition:all .15s}
+.ctrl-btn:hover{border-color:var(--accent);color:var(--accent)}
+.ctrl-btn:disabled{opacity:.4;cursor:not-allowed}
+</style></head><body>"""
+        + nav_html
+        + """
+<div class="page-hdr" style="flex-wrap:wrap;gap:10px">
+  <h1 class="page-title">Dashboard</h1>
+  <span id="state" class="pill-state">idle</span>
+  <span id="command" style="font-size:13px;color:var(--muted)"></span>
+  <span style="flex:1"></span>
+  <button id="pauseBtn" class="ctrl-btn">Pause</button>
+  <button id="unpauseBtn" class="ctrl-btn" disabled>Unpause</button>
+</div>
+<div id="current">(no active item)</div>
+<div class="dash-grid" id="counters"></div>
+<div id="error"></div>
+<div style="padding:20px 32px 0">
+  <p style="font-size:11px;font-weight:600;text-transform:uppercase;
+            letter-spacing:.8px;color:var(--muted);margin-bottom:10px">Recent</p>
+  <ul id="recent" class="recent-list"></ul>
+</div>
+<script>
+  const stateEl = document.getElementById('state');
+  const cmdEl = document.getElementById('command');
+  const currentEl = document.getElementById('current');
+  const countersEl = document.getElementById('counters');
+  const recentEl = document.getElementById('recent');
+  const errorEl = document.getElementById('error');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const unpauseBtn = document.getElementById('unpauseBtn');
+
+  async function refresh() {
+    try {
+      const r = await fetch('/api/run/current');
+      const d = await r.json();
+      if (!d.active) {
+        stateEl.textContent = 'idle';
+        stateEl.className = 'pill-state';
+        cmdEl.textContent = '';
+        currentEl.textContent = '(no active item)';
+        countersEl.innerHTML = '';
+        recentEl.innerHTML = '';
+        errorEl.textContent = '';
+        pauseBtn.disabled = true;
+        unpauseBtn.disabled = true;
+        return;
+      }
+      stateEl.textContent = d.state || 'running';
+      stateEl.className = 'pill-state ' + (d.state || 'running');
+      cmdEl.textContent = d.command || '';
+      currentEl.textContent = d.current_file || '';
+      errorEl.textContent = d.error || '';
+      pauseBtn.disabled = d.state !== 'running';
+      unpauseBtn.disabled = d.state !== 'paused';
+      countersEl.innerHTML = '';
+      for (const [k, v] of Object.entries(d.counters || {})) {
+        const card = document.createElement('div');
+        card.className = 'stat-card';
+        const val = document.createElement('div');
+        val.className = 'stat-val';
+        val.textContent = v;
+        const lbl = document.createElement('div');
+        lbl.className = 'stat-label';
+        lbl.textContent = k;
+        card.appendChild(val);
+        card.appendChild(lbl);
+        countersEl.appendChild(card);
+      }
+      recentEl.innerHTML = '';
+      for (const item of (d.recent || [])) {
+        const li = document.createElement('li');
+        li.className = 'recent-li';
+        const s = document.createElement('span');
+        s.className = 'recent-status ' + (item.status || '');
+        s.textContent = item.status || '';
+        const p = document.createElement('span');
+        p.className = 'recent-path';
+        p.textContent = item.path || '';
+        li.appendChild(s);
+        li.appendChild(p);
+        recentEl.appendChild(li);
+      }
+    } catch (e) { errorEl.textContent = String(e); }
+  }
+
+  pauseBtn.addEventListener('click', async () => {
+    await fetch('/api/run/current/pause', {method: 'POST'});
+    refresh();
+  });
+  unpauseBtn.addEventListener('click', async () => {
+    await fetch('/api/run/current/unpause', {method: 'POST'});
+    refresh();
+  });
+
+  refresh();
+  setInterval(refresh, 1500);
+</script></body></html>"""
     )
 
 
