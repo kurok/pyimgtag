@@ -903,6 +903,36 @@ class ProgressDB:
             },
         }
 
+    def get_all_judge_results(self, limit: int | None = 200) -> list[dict]:
+        """Return all judge scores ordered by weighted_score descending.
+
+        Args:
+            limit: Max rows to return. None = no limit (caution: may be large).
+
+        Returns:
+            List of dicts with keys: file_path, file_name, weighted_score,
+            core_score, visible_score, verdict, scored_at.
+        """
+        limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
+        rows = self._conn.execute(
+            "SELECT file_path, weighted_score, core_score, visible_score, verdict, scored_at "
+            "FROM judge_scores "
+            "ORDER BY weighted_score DESC "
+            + limit_clause  # nosec B608
+        ).fetchall()
+        return [
+            {
+                "file_path": row[0],
+                "file_name": Path(row[0]).name,
+                "weighted_score": row[1],
+                "core_score": row[2],
+                "visible_score": row[3],
+                "verdict": row[4],
+                "scored_at": row[5],
+            }
+            for row in rows
+        ]
+
     def is_fresh(self, file_path: Path) -> bool:
         """Return True if DB has a row for this file and size/mtime still match."""
         row = self._conn.execute(
