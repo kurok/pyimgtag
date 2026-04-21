@@ -90,3 +90,12 @@ def test_dashboard_html_contains_polling_and_controls():
     assert 'id="current"' in body
     assert 'id="counters"' in body
     assert 'id="recent"' in body
+
+
+def test_dashboard_html_has_nav_links_to_review_and_faces():
+    client = TestClient(create_app())
+    body = client.get("/").text
+    assert 'href="/"' in body
+    assert 'href="/review"' in body
+    assert 'href="/faces"' in body
+    assert 'class="nav"' in body
