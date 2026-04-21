@@ -8,6 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 from platform import system as get_platform_name
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pyimgtag.webapp.server_thread import DashboardServer
 
 from pyimgtag import run_registry
 from pyimgtag.applescript_writer import read_keywords_from_photos
@@ -664,7 +668,7 @@ def _print_summary(stats: dict) -> None:
 
 def _maybe_start_dashboard(
     args: argparse.Namespace,
-) -> tuple[RunSession | None, "object | None"]:
+) -> tuple[RunSession | None, DashboardServer | None]:
     """Start the dashboard (if enabled) and return (session, dashboard_or_None)."""
     from pyimgtag.main import web_enabled
 
