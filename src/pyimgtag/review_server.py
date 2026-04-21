@@ -56,7 +56,9 @@ def serve(
             "uvicorn is required for the review UI. Install with: pip install 'pyimgtag[review]'"
         ) from exc
 
-    app = create_app(db_path=db_path)
+    from pyimgtag.webapp.unified_app import create_unified_app
+
+    app = create_unified_app(db_path=db_path)
 
     if open_browser:
         import threading
@@ -65,9 +67,9 @@ def serve(
 
         def _open() -> None:
             time.sleep(1.0)
-            webbrowser.open(f"http://{host}:{port}")
+            webbrowser.open(f"http://{host}:{port}/review")
 
         threading.Thread(target=_open, daemon=True).start()
 
-    print(f"Review UI: http://{host}:{port}", flush=True)
+    print(f"pyimgtag webapp: http://{host}:{port} (review at /review)", flush=True)
     uvicorn.run(app, host=host, port=port)
