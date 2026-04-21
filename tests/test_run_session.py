@@ -157,3 +157,20 @@ class TestCountersAndRecent:
         for t in threads:
             t.join()
         assert s.snapshot()["counters"]["k"] == 1000
+
+
+class TestTerminalGuards:
+    def test_mark_completed_does_not_override_interrupted(self):
+        s = RunSession(command="run")
+        s.mark_running()
+        s.mark_interrupted()
+        s.mark_completed()
+        assert s.snapshot()["state"] == "interrupted"
+
+    def test_mark_failed_does_not_override_completed(self):
+        s = RunSession(command="run")
+        s.mark_completed()
+        s.mark_failed("nope")
+        snap = s.snapshot()
+        assert snap["state"] == "completed"
+        assert snap["last_error"] is None

@@ -74,11 +74,15 @@ class RunSession:
 
     def mark_completed(self) -> None:
         with self._lock:
+            if self._state in _TERMINAL:
+                return
             self._state = RunState.COMPLETED
         self._resume_event.set()
 
     def mark_failed(self, err: str) -> None:
         with self._lock:
+            if self._state in _TERMINAL:
+                return
             self._state = RunState.FAILED
             self._last_error = err
         self._resume_event.set()
