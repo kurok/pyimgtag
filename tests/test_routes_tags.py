@@ -112,9 +112,4 @@ def test_build_tags_router_import_error():
     with pytest.raises(ImportError, match="fastapi"):
         with pytest.MonkeyPatch().context() as mp:
             mp.setitem(sys.modules, "fastapi", None)
-            from importlib import reload
-
-            import pyimgtag.webapp.routes_tags as rt
-
-            reload(rt)
-            rt.build_tags_router(None)
+            build_tags_router(None)
