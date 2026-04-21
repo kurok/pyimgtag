@@ -88,6 +88,45 @@ class RunSession:
             self._state = RunState.INTERRUPTED
         self._resume_event.set()
 
+    # -- pause gate --------------------------------------------------------
+
+    def request_pause(self) -> None:
+        with self._lock:
+            if self._state in _TERMINAL or self._state in {
+                RunState.PAUSING,
+                RunState.PAUSED,
+            }:
+                return
+            self._state = RunState.PAUSING
+            self._resume_event.clear()
+
+    def resume(self) -> None:
+        with self._lock:
+            if self._state in _TERMINAL:
+                return
+            self._state = RunState.RUNNING
+        self._resume_event.set()
+
+    def wait_if_paused(self, timeout: float | None = None) -> None:
+        """Block while the session is paused.
+
+        Call before starting any expensive work unit. Returns when the
+        session is running, completed, failed, or interrupted. If ``timeout``
+        is given and expires while paused, returns without changing state so
+        callers can re-check cancellation flags.
+        """
+        while True:
+            with self._lock:
+                if self._state == RunState.PAUSING:
+                    self._state = RunState.PAUSED
+                state = self._state
+            if state != RunState.PAUSED:
+                return
+            if self._resume_event.wait(timeout=timeout):
+                return
+            if timeout is not None:
+                return
+
     # -- snapshot ---------------------------------------------------------
 
     def snapshot(self) -> dict[str, Any]:
