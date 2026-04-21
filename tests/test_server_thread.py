@@ -48,3 +48,29 @@ def test_start_serves_and_stop_shuts_down():
 def test_url_property():
     server = DashboardServer(create_app(), host="127.0.0.1", port=65432)
     assert server.url == "http://127.0.0.1:65432"
+
+
+def test_start_returns_false_when_server_never_ready():
+    """DashboardServer.start should return False when uvicorn never sets started."""
+    import threading as _t
+
+    server = DashboardServer(create_app(), host="127.0.0.1", port=0)
+    # Replace the real uvicorn.Server instance with a stub that never becomes ready.
+
+    class _NeverReady:
+        started = False
+        should_exit = False
+
+        def run(self):
+            import time as _time
+
+            while not self.should_exit:
+                _time.sleep(0.02)
+
+    stub = _NeverReady()
+    server._server = stub
+    server._thread = _t.Thread(target=stub.run, name="pyimgtag-never-ready", daemon=True)
+
+    started_ok = server.start(ready_timeout=0.1)
+    assert started_ok is False
+    server.stop(timeout=0.5)
