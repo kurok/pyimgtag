@@ -60,7 +60,7 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
-      run: uv pip install -e ".[dev,lint]"
+      run: uv pip install -e ".[dev,lint,review]"
     - name: Run tests
       shell: bash
       run: |
