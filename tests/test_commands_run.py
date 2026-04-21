@@ -702,11 +702,15 @@ class TestSequentialPauseGate:
 
         processed_paths: list[str] = []
         pause_after_first = threading.Event()
+        pause_requested = threading.Event()
 
         def fake_tag(path, *a, **kw):
             processed_paths.append(path)
             if len(processed_paths) == 1:
                 pause_after_first.set()
+                # Block the first call until the test has issued request_pause(),
+                # so the loop can't race past the next wait_if_paused() check.
+                pause_requested.wait(timeout=5.0)
             return MagicMock(
                 error=None,
                 tags=[],
@@ -742,6 +746,7 @@ class TestSequentialPauseGate:
 
             assert pause_after_first.wait(timeout=2.0)
             session.request_pause()
+            pause_requested.set()  # release the first fake_tag call
 
             # Give the loop up to 1s to reach PAUSED.
             deadline = time.monotonic() + 1.0
