@@ -61,3 +61,28 @@ def test_review_router_mounted_at_root_serves_unprefixed_paths(tmp_path):
     r = client.get("/api/stats")
     assert r.status_code == 200
     assert r.json()["total"] == 1
+
+
+def test_thumbnail_returns_404_when_make_thumbnail_fails(tmp_path):
+    """If the DB has the image but PIL can't decode it, thumbnail must 404."""
+    from unittest.mock import patch
+
+    from pyimgtag.models import ImageResult
+    from pyimgtag.progress_db import ProgressDB
+
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    img = tmp_path / "broken.jpg"
+    img.write_bytes(b"not an image")
+    db.mark_done(
+        img,
+        ImageResult(file_path=str(img), file_name="broken.jpg", tags=[]),
+    )
+
+    app = FastAPI()
+    app.include_router(build_review_router(db, api_base=""))
+    client = TestClient(app)
+
+    with patch("pyimgtag.webapp.routes_review._make_thumbnail", return_value=None):
+        r = client.get(f"/thumbnail?path={img}")
+    assert r.status_code == 404
