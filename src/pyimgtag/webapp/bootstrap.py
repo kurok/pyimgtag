@@ -31,10 +31,10 @@ def start_dashboard_for(
     run_registry.set_current(session)
 
     try:
-        from pyimgtag.webapp.dashboard_server import create_app
         from pyimgtag.webapp.server_thread import DashboardServer
+        from pyimgtag.webapp.unified_app import create_unified_app
 
-        dashboard = DashboardServer(create_app(), host=args.web_host, port=args.web_port)
+        dashboard = DashboardServer(create_unified_app(), host=args.web_host, port=args.web_port)
     except ImportError as exc:
         print(f"Warning: dashboard disabled ({exc})", file=sys.stderr)
         run_registry.set_current(None)
