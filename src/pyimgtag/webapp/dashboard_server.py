@@ -45,4 +45,24 @@ def create_app() -> Any:
             return {"active": False}
         return {"active": True, **session.snapshot()}
 
+    @app.post("/api/run/current/pause")
+    async def pause_current() -> dict:
+        from fastapi import HTTPException
+
+        session = get_current()
+        if session is None:
+            raise HTTPException(status_code=404, detail="no active run")
+        session.request_pause()
+        return session.snapshot()
+
+    @app.post("/api/run/current/unpause")
+    async def unpause_current() -> dict:
+        from fastapi import HTTPException
+
+        session = get_current()
+        if session is None:
+            raise HTTPException(status_code=404, detail="no active run")
+        session.resume()
+        return session.snapshot()
+
     return app

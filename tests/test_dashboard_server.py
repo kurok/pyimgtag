@@ -48,3 +48,31 @@ def test_current_run_returns_snapshot_when_active():
     assert body["command"] == "run"
     assert body["state"] == "running"
     assert body["counters"]["processed"] == 5
+
+
+def test_pause_without_session_returns_404():
+    client = TestClient(create_app())
+    r = client.post("/api/run/current/pause")
+    assert r.status_code == 404
+
+
+def test_pause_and_unpause_transitions():
+    s = RunSession(command="run")
+    s.mark_running()
+    run_registry.set_current(s)
+
+    client = TestClient(create_app())
+
+    r = client.post("/api/run/current/pause")
+    assert r.status_code == 200
+    assert r.json()["state"] in {"pausing", "paused"}
+
+    r = client.post("/api/run/current/unpause")
+    assert r.status_code == 200
+    assert r.json()["state"] == "running"
+
+
+def test_unpause_without_session_returns_404():
+    client = TestClient(create_app())
+    r = client.post("/api/run/current/unpause")
+    assert r.status_code == 404
