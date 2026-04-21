@@ -173,74 +173,132 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         session.set_counter("scanned", stats["scanned"])
         session.mark_running()
 
-    use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
-    use_threaded = use_resume and getattr(args, "resume_threaded", False)
+    try:
+        use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
+        use_threaded = use_resume and getattr(args, "resume_threaded", False)
 
-    if use_threaded and progress_db is not None:
-        import queue as _queue
-        import threading as _threading
+        if use_threaded and progress_db is not None:
+            import queue as _queue
+            import threading as _threading
 
-        cached_files = [
-            f
-            for f in files
-            if str(f) not in skipped_dedup and progress_db.has_usable_model_result(f)
-        ]
-        cached_set = {str(f) for f in cached_files}
-        fresh_files = [f for f in files if str(f) not in skipped_dedup and str(f) not in cached_set]
-        result_q: _queue.Queue = _queue.Queue()
-        thread_stats: dict = {k: 0 for k in stats if k != "scanned"}
-        stop_event = _threading.Event()
+            cached_files = [
+                f
+                for f in files
+                if str(f) not in skipped_dedup and progress_db.has_usable_model_result(f)
+            ]
+            cached_set = {str(f) for f in cached_files}
+            fresh_files = [
+                f for f in files if str(f) not in skipped_dedup and str(f) not in cached_set
+            ]
+            result_q: _queue.Queue = _queue.Queue()
+            thread_stats: dict = {k: 0 for k in stats if k != "scanned"}
+            stop_event = _threading.Event()
 
-        def _cache_worker() -> None:
-            thread_db = ProgressDB(db_path=args.db)
-            thread_geo = ReverseGeocoder(cache_dir=args.cache_dir)
-            try:
-                for fp in cached_files:
-                    if stop_event.is_set():
-                        break
-                    r = _hydrate_from_db(fp, source_type, args, thread_geo, thread_stats, thread_db)
-                    if r is not None:
-                        result_q.put(r)
-            finally:
-                thread_db.close()
-                thread_geo.close()
-                result_q.put(None)  # sentinel
-
-        worker_thread = _threading.Thread(target=_cache_worker, daemon=True)
-        worker_thread.start()
-
-        def _drain(sentinel_seen: bool) -> bool:
-            while True:
+            def _cache_worker() -> None:
+                thread_db = ProgressDB(db_path=args.db)
+                thread_geo = ReverseGeocoder(cache_dir=args.cache_dir)
                 try:
-                    item = result_q.get_nowait()
-                except _queue.Empty:
-                    break
-                if item is None:
-                    sentinel_seen = True
-                else:
-                    _finalize_result(
-                        item, Path(item.file_path), args, progress_db, phash_map, results, stats
+                    for fp in cached_files:
+                        if stop_event.is_set():
+                            break
+                        r = _hydrate_from_db(
+                            fp, source_type, args, thread_geo, thread_stats, thread_db
+                        )
+                        if r is not None:
+                            result_q.put(r)
+                finally:
+                    thread_db.close()
+                    thread_geo.close()
+                    result_q.put(None)  # sentinel
+
+            worker_thread = _threading.Thread(target=_cache_worker, daemon=True)
+            worker_thread.start()
+
+            def _drain(sentinel_seen: bool) -> bool:
+                while True:
+                    try:
+                        item = result_q.get_nowait()
+                    except _queue.Empty:
+                        break
+                    if item is None:
+                        sentinel_seen = True
+                    else:
+                        _finalize_result(
+                            item, Path(item.file_path), args, progress_db, phash_map, results, stats
+                        )
+                return sentinel_seen
+
+            sentinel_seen = False
+            try:
+                for file_path in fresh_files:
+                    if args.limit and stats["processed"] >= args.limit:
+                        break
+
+                    if session is not None:
+                        session.wait_if_paused()
+                        session.set_current(str(file_path))
+
+                    sentinel_seen = _drain(sentinel_seen)
+                    result = _process_one(
+                        file_path, source_type, args, ollama, geocoder, stats, progress_db
                     )
-            return sentinel_seen
-
-        sentinel_seen = False
-        try:
-            for file_path in fresh_files:
-                if args.limit and stats["processed"] >= args.limit:
-                    break
-
+                    if result is not None:
+                        _finalize_result(
+                            result, file_path, args, progress_db, phash_map, results, stats
+                        )
+                        if session is not None:
+                            status = "ok" if result.processing_status == "ok" else "error"
+                            session.record_item(
+                                str(file_path),
+                                status,
+                                error=result.error_message,
+                            )
+                            for k, v in stats.items():
+                                session.set_counter(k, v)
+                    if session is not None:
+                        session.set_current(None)
+            except KeyboardInterrupt:
+                stop_event.set()
                 if session is not None:
-                    session.wait_if_paused()
-                    session.set_current(str(file_path))
+                    session.mark_interrupted()
+                print("\nInterrupted.", file=sys.stderr)
+            finally:
+                if not stop_event.is_set():
+                    worker_thread.join()
+                    while not sentinel_seen:
+                        sentinel_seen = _drain(sentinel_seen)
+                for k, v in thread_stats.items():
+                    stats[k] += v
+                ollama.close()
+                geocoder.close()
+                if progress_db is not None:
+                    progress_db.close()
+        else:
+            try:
+                for file_path in files:
+                    if args.limit and stats["processed"] >= args.limit:
+                        break
 
-                sentinel_seen = _drain(sentinel_seen)
-                result = _process_one(
-                    file_path, source_type, args, ollama, geocoder, stats, progress_db
-                )
-                if result is not None:
+                    if session is not None:
+                        session.wait_if_paused()
+                        session.set_current(str(file_path))
+
+                    if str(file_path) in skipped_dedup:
+                        stats["skipped_dedup"] += 1
+                        continue
+
+                    result = _process_one(
+                        file_path, source_type, args, ollama, geocoder, stats, progress_db
+                    )
+                    if result is None:
+                        if session is not None:
+                            session.set_current(None)
+                        continue
+
                     _finalize_result(
                         result, file_path, args, progress_db, phash_map, results, stats
                     )
+
                     if session is not None:
                         status = "ok" if result.processing_status == "ok" else "error"
                         session.record_item(
@@ -250,84 +308,34 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                         )
                         for k, v in stats.items():
                             session.set_counter(k, v)
-                if session is not None:
-                    session.set_current(None)
-        except KeyboardInterrupt:
-            stop_event.set()
-            if session is not None:
-                session.mark_interrupted()
-            print("\nInterrupted.", file=sys.stderr)
-        finally:
-            if not stop_event.is_set():
-                worker_thread.join()
-                while not sentinel_seen:
-                    sentinel_seen = _drain(sentinel_seen)
-            for k, v in thread_stats.items():
-                stats[k] += v
-            ollama.close()
-            geocoder.close()
-            if progress_db is not None:
-                progress_db.close()
-    else:
-        try:
-            for file_path in files:
-                if args.limit and stats["processed"] >= args.limit:
-                    break
-
-                if session is not None:
-                    session.wait_if_paused()
-                    session.set_current(str(file_path))
-
-                if str(file_path) in skipped_dedup:
-                    stats["skipped_dedup"] += 1
-                    continue
-
-                result = _process_one(
-                    file_path, source_type, args, ollama, geocoder, stats, progress_db
-                )
-                if result is None:
-                    if session is not None:
                         session.set_current(None)
-                    continue
 
-                _finalize_result(result, file_path, args, progress_db, phash_map, results, stats)
-
+            except KeyboardInterrupt:
                 if session is not None:
-                    status = "ok" if result.processing_status == "ok" else "error"
-                    session.record_item(
-                        str(file_path),
-                        status,
-                        error=result.error_message,
-                    )
-                    for k, v in stats.items():
-                        session.set_counter(k, v)
-                    session.set_current(None)
+                    session.mark_interrupted()
+                print("\nInterrupted.", file=sys.stderr)
+            finally:
+                ollama.close()
+                geocoder.close()
+                if progress_db is not None:
+                    progress_db.close()
 
-        except KeyboardInterrupt:
-            if session is not None:
-                session.mark_interrupted()
-            print("\nInterrupted.", file=sys.stderr)
-        finally:
-            ollama.close()
-            geocoder.close()
-            if progress_db is not None:
-                progress_db.close()
+        if args.output_json:
+            write_json(results, args.output_json)
+            print(f"Wrote {len(results)} results to {args.output_json}", file=sys.stderr)
+        if args.output_csv:
+            write_csv(results, args.output_csv)
+            print(f"Wrote {len(results)} results to {args.output_csv}", file=sys.stderr)
 
-    if args.output_json:
-        write_json(results, args.output_json)
-        print(f"Wrote {len(results)} results to {args.output_json}", file=sys.stderr)
-    if args.output_csv:
-        write_csv(results, args.output_csv)
-        print(f"Wrote {len(results)} results to {args.output_csv}", file=sys.stderr)
-
-    _print_summary(stats)
-    if session is not None:
-        for k, v in stats.items():
-            session.set_counter(k, v)
-        session.mark_completed()
-    if dashboard is not None:
-        dashboard.stop()
-    run_registry.set_current(None)
+        _print_summary(stats)
+        if session is not None:
+            for k, v in stats.items():
+                session.set_counter(k, v)
+            session.mark_completed()
+    finally:
+        if dashboard is not None:
+            dashboard.stop()
+        run_registry.set_current(None)
     return 0
 
 
