@@ -710,6 +710,6 @@ def _maybe_start_dashboard(
 
         try:
             webbrowser.open(dashboard.url)
-        except Exception:  # noqa: BLE001 — best effort
-            pass
+        except Exception as exc:  # noqa: BLE001 — best effort
+            print(f"Warning: could not open browser ({exc})", file=sys.stderr)
     return session, dashboard
