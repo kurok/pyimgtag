@@ -90,3 +90,29 @@ def test_dashboard_html_contains_polling_and_controls():
     assert 'id="current"' in body
     assert 'id="counters"' in body
     assert 'id="recent"' in body
+
+
+def test_dashboard_html_has_nav_links_to_review_and_faces():
+    client = TestClient(create_app())
+    body = client.get("/").text
+    assert 'href="/"' in body
+    assert 'href="/review"' in body
+    assert 'href="/faces"' in body
+    assert 'class="nav"' in body
+
+
+def test_dashboard_router_can_be_mounted_on_a_composite_app():
+    """build_dashboard_router should produce a router usable on any FastAPI app."""
+    from fastapi import FastAPI
+
+    from pyimgtag.webapp.dashboard_server import build_dashboard_router
+
+    app = FastAPI()
+    app.include_router(build_dashboard_router())
+
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200
+    r = client.get("/api/run/current")
+    assert r.status_code == 200
+    assert r.json() == {"active": False}

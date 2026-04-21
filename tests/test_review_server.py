@@ -11,7 +11,8 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from pyimgtag.models import ImageResult  # noqa: E402
 from pyimgtag.progress_db import ProgressDB  # noqa: E402
-from pyimgtag.review_server import _make_thumbnail, create_app  # noqa: E402
+from pyimgtag.review_server import create_app  # noqa: E402
+from pyimgtag.webapp.routes_review import _make_thumbnail  # noqa: E402
 
 
 def _make_db(tmp_path):
@@ -223,7 +224,7 @@ class TestThumbnailContainment:
         from PIL import Image
 
         thumb_dir = tmp_path / "thumbs"
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", thumb_dir)
         db_path, _ = self._make_db_with_real_image(tmp_path)
 
         # Create a real JPEG that is NOT indexed in the DB.
@@ -238,7 +239,7 @@ class TestThumbnailContainment:
     def test_indexed_path_returns_jpeg(self, tmp_path, monkeypatch):
         """A path recorded in the DB must return 200 with JPEG content."""
         thumb_dir = tmp_path / "thumbs"
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", thumb_dir)
         db_path, img_path = self._make_db_with_real_image(tmp_path)
         app = create_app(db_path=db_path)
         client = TestClient(app)
@@ -261,7 +262,7 @@ class TestMakeThumbnailExtra:
     def test_creates_cache_dir_if_missing(self, tmp_path, monkeypatch):
         thumb_dir = tmp_path / "new_thumbs"
         assert not thumb_dir.exists()
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", thumb_dir)
         from PIL import Image
 
         img_path = tmp_path / "img.jpg"
@@ -274,7 +275,7 @@ class TestMakeThumbnailExtra:
 
     def test_returns_none_on_pil_exception(self, tmp_path, monkeypatch):
         thumb_dir = tmp_path / "thumbs"
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", thumb_dir)
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", thumb_dir)
         from PIL import Image
 
         img_path = tmp_path / "img.jpg"
@@ -284,3 +285,73 @@ class TestMakeThumbnailExtra:
         with patch("PIL.Image.open", side_effect=Exception("PIL broke")):
             result = _make_thumbnail(str(img_path), 20)
         assert result is None
+
+
+class TestReviewServerServe:
+    def test_serve_invokes_uvicorn_with_unified_app(self, tmp_path, capsys):
+        """Happy path: serve() should build the unified app and hand it to uvicorn.run."""
+        from unittest.mock import MagicMock, patch
+
+        from pyimgtag.review_server import serve
+
+        with (
+            patch("uvicorn.run") as mock_run,
+            patch("pyimgtag.webapp.unified_app.create_unified_app") as mock_create,
+        ):
+            mock_create.return_value = MagicMock(name="fastapi-app")
+            serve(db_path=str(tmp_path / "p.db"), host="127.0.0.1", port=9999, open_browser=False)
+
+        mock_create.assert_called_once()
+        mock_run.assert_called_once()
+        assert mock_run.call_args.kwargs["host"] == "127.0.0.1"
+        assert mock_run.call_args.kwargs["port"] == 9999
+        out = capsys.readouterr().out
+        assert "pyimgtag webapp" in out
+        assert "/review" in out
+
+    def test_serve_open_browser_deep_links_to_review(self, tmp_path):
+        """With open_browser=True, a thread opens webbrowser pointing at /review."""
+        import time
+        from unittest.mock import MagicMock, patch
+
+        from pyimgtag.review_server import serve
+
+        opened: list[str] = []
+
+        def fake_open(url, *a, **kw):
+            opened.append(url)
+            return True
+
+        with (
+            patch("uvicorn.run"),
+            patch("pyimgtag.webapp.unified_app.create_unified_app", return_value=MagicMock()),
+            patch("webbrowser.open", side_effect=fake_open),
+        ):
+            serve(db_path=str(tmp_path / "p.db"), host="127.0.0.1", port=7777, open_browser=True)
+            # Browser opens in a background thread with a 1-second sleep; wait for it.
+            deadline = time.monotonic() + 3.0
+            while time.monotonic() < deadline and not opened:
+                time.sleep(0.1)
+
+        assert opened, "browser was never opened"
+        assert opened[0].endswith("/review")
+        assert "7777" in opened[0]
+
+    def test_serve_raises_when_uvicorn_missing(self, tmp_path, monkeypatch):
+        """Missing uvicorn should surface a helpful ImportError."""
+        import builtins
+
+        import pytest
+
+        from pyimgtag.review_server import serve
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *a, **kw):
+            if name == "uvicorn":
+                raise ImportError("gone")
+            return real_import(name, *a, **kw)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ImportError, match="uvicorn is required"):
+            serve(db_path=str(tmp_path / "p.db"))

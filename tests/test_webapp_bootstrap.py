@@ -95,3 +95,47 @@ def test_start_dashboard_for_warns_and_returns_none_on_import_error(monkeypatch,
     assert run_registry.get_current() is None
     err = capsys.readouterr().err
     assert "dashboard disabled" in err
+
+
+def test_bootstrap_serves_unified_app(monkeypatch):
+    """The dashboard started by start_dashboard_for must also serve /review and /faces."""
+    pytest.importorskip("fastapi")
+    pytest.importorskip("uvicorn")
+    monkeypatch.delenv("PYIMGTAG_NO_WEB", raising=False)
+
+    import socket
+    import time
+    import urllib.request
+
+    from pyimgtag.webapp.bootstrap import start_dashboard_for
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        free_port = s.getsockname()[1]
+
+    args = _parser_with_flags().parse_args(["--web", "--web-port", str(free_port), "--no-browser"])
+    session, dashboard = start_dashboard_for(args, command="run")
+    try:
+        # Poll for readiness (server thread may need a moment).
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{free_port}/api/run/current", timeout=0.5)
+                break
+            except OSError:
+                time.sleep(0.05)
+
+        for path in (
+            "/",
+            "/api/run/current",
+            "/review/",
+            "/review/api/stats",
+            "/faces/",
+            "/faces/api/persons",
+        ):
+            with urllib.request.urlopen(f"http://127.0.0.1:{free_port}{path}", timeout=2.0) as r:
+                assert r.status == 200, path
+    finally:
+        if dashboard is not None:
+            dashboard.stop()
+        run_registry.set_current(None)

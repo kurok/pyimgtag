@@ -17,7 +17,7 @@ from pyimgtag.commands.faces import (
 )
 from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
-from pyimgtag.review_server import _make_thumbnail
+from pyimgtag.webapp.routes_review import _make_thumbnail
 
 
 def _make_args(**kwargs) -> argparse.Namespace:
@@ -225,7 +225,7 @@ class TestWritePersonKeywords:
 
 class TestMakeThumbnail:
     def test_returns_jpeg_bytes_for_valid_image(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", tmp_path / "thumbs")
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", tmp_path / "thumbs")
         img_path = tmp_path / "test.jpg"
         img = Image.new("RGB", (50, 50), color="blue")
         img.save(str(img_path), "JPEG")
@@ -236,12 +236,12 @@ class TestMakeThumbnail:
         assert result[:2] == b"\xff\xd8"  # JPEG magic
 
     def test_returns_none_for_missing_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", tmp_path / "thumbs")
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", tmp_path / "thumbs")
         result = _make_thumbnail(str(tmp_path / "nonexistent.jpg"), 100)
         assert result is None
 
     def test_returns_cached_bytes_on_second_call(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("pyimgtag.review_server._THUMB_DIR", tmp_path / "thumbs")
+        monkeypatch.setattr("pyimgtag.webapp.routes_review._THUMB_DIR", tmp_path / "thumbs")
         img_path = tmp_path / "img.jpg"
         img = Image.new("RGB", (80, 80), color="green")
         img.save(str(img_path), "JPEG")

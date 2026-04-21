@@ -598,15 +598,20 @@ A file is eligible for DB resume if:
 Use `pyimgtag reprocess --db ~/my-progress.db` to force a full re-run for all files,
 or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only failed files.
 
-## Live dashboard
+## Local webapp
 
-`pyimgtag run`, `pyimgtag judge`, and `pyimgtag faces scan` start a local
-dashboard at http://127.0.0.1:8770 by default.
-It shows live state, counters, the current file, recent errors, and a
-Pause/Unpause control that stops dispatching new files without interrupting
-in-flight Ollama requests.
+`pyimgtag run`, `pyimgtag judge`, and `pyimgtag faces scan` auto-start a
+local webapp at http://127.0.0.1:8770 by default. The same app also hosts:
 
-Flags:
+- `/review` — browse DB entries, edit tags, change cleanup class.
+- `/faces` — manage person clusters, rename, merge, delete.
+
+The standalone commands continue to work and serve the **same** unified app:
+
+- `pyimgtag review` on http://127.0.0.1:8765 (review at `/review`).
+- `pyimgtag faces ui` on http://127.0.0.1:8766 (faces at `/faces`).
+
+Flags (apply to `run`, `judge`, `faces scan`):
 
 - `--no-web` — terminal-only mode, no server started.
 - `--web` — force-enable (overrides `PYIMGTAG_NO_WEB=1`).
@@ -618,9 +623,13 @@ Environment variable:
 
 - `PYIMGTAG_NO_WEB=1` — disable the dashboard by default (same as `--no-web`).
 
-Pause semantics are cooperative: the gate is checked before each file, so the
-UI may show `pausing…` until the current request returns. Pause never
-interrupts metadata write-back mid-write.
+Pause semantics are cooperative: the gate is checked before each file so
+in-flight Ollama / face-detection requests are never interrupted mid-call.
+
+**Migration note:** the `pyimgtag review` and `pyimgtag faces ui` commands
+now serve the unified app, so the URL paths have shifted. Bookmarks that
+used `http://localhost:8765/api/stats` should be updated to
+`http://localhost:8765/review/api/stats`.
 
 ## Contributing
 

@@ -81,3 +81,5 @@ select = ["E", "F", "W", "I"]
 [tool.ruff.lint.per-file-ignores]
 "src/pyimgtag/review_server.py" = ["E501"]  # HTML/CSS template has long lines
 "src/pyimgtag/faces_review_server.py" = ["E501"]
+"src/pyimgtag/webapp/routes_review.py" = ["E501"]  # HTML/CSS template has long lines
+"src/pyimgtag/webapp/routes_faces.py" = ["E501"]  # HTML/CSS template has long lines

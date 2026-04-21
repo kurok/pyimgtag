@@ -264,17 +264,26 @@ def _handle_faces_import_photos(args: argparse.Namespace) -> int:
 def _handle_faces_ui(args: argparse.Namespace) -> int:
     """Start the face management web UI."""
     try:
-        from pyimgtag.faces_review_server import run_server
+        import uvicorn
+    except ImportError:
+        print(
+            "Error: uvicorn is required for the faces UI. "
+            "Install with: pip install 'pyimgtag[review]'",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        from pyimgtag.webapp.unified_app import create_unified_app
     except ImportError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    with ProgressDB(db_path=args.db) as db:
-        try:
-            run_server(db, host=args.host, port=args.port)
-        except ImportError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
+    app = create_unified_app(db_path=args.db)
+    host = getattr(args, "host", "127.0.0.1")
+    port = getattr(args, "port", 8766)
+    print(f"pyimgtag webapp: http://{host}:{port} (faces at /faces)", flush=True)
+    uvicorn.run(app, host=host, port=port)
     return 0
 
 
