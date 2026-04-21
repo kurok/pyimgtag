@@ -17,7 +17,9 @@ def _render_html() -> str:
         "<meta charset='UTF-8'>"
         "<meta name='viewport' content='width=device-width,initial-scale=1.0'>"
         "<title>pyimgtag dashboard</title>"
-        "<style>" + DESIGN_CSS + """
+        "<style>"
+        + DESIGN_CSS
+        + """
 .dash-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
            gap:12px;padding:20px 32px 0}
 .pill-state{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;
