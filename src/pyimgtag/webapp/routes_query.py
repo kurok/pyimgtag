@@ -66,7 +66,9 @@ __NAV__
       <option value="error">error</option>
     </select>
   </label>
-  <label>Limit<input id="f_limit" type="number" value="100" min="1" max="5000" style="width:72px"></label>
+  <label>Limit
+    <input id="f_limit" type="number" value="100" min="1" max="5000" style="width:72px">
+  </label>
   <button type="submit">Search</button>
 </form>
 <div id="count"></div>
@@ -75,7 +77,10 @@ __NAV__
 async function doSearch(e) {
   if (e) e.preventDefault();
   const params = new URLSearchParams();
-  const add = (id, key) => { const v = document.getElementById(id).value.trim(); if (v) params.set(key, v); };
+  const add = (id, key) => {
+    const v = document.getElementById(id).value.trim();
+    if (v) params.set(key, v);
+  };
   add('f_tag', 'tag');
   add('f_cleanup', 'cleanup');
   add('f_cat', 'scene_category');
@@ -93,7 +98,8 @@ async function doSearch(e) {
     return;
   }
   const tbl = document.createElement('table');
-  tbl.innerHTML = '<tr><th>File</th><th>Tags</th><th>Category</th><th>Cleanup</th><th>Location</th></tr>';
+  tbl.innerHTML = '<tr><th>File</th><th>Tags</th>'
+    + '<th>Category</th><th>Cleanup</th><th>Location</th></tr>';
   for (const r of rows) {
     const tr = document.createElement('tr');
     const tags = (r.tags_list || []).map(t => '<span class="tag-pill">' + t + '</span>').join('');
@@ -144,8 +150,7 @@ def build_query_router(db: "ProgressDB", api_base: str = "") -> Any:
         from fastapi.responses import HTMLResponse
     except ImportError as exc:
         raise ImportError(
-            "fastapi is required for the query UI. "
-            "Install with: pip install 'pyimgtag[review]'"
+            "fastapi is required for the query UI. Install with: pip install 'pyimgtag[review]'"
         ) from exc
 
     router = APIRouter()
