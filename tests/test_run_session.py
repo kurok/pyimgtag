@@ -159,6 +159,37 @@ class TestCountersAndRecent:
         assert s.snapshot()["counters"]["k"] == 1000
 
 
+class TestPauseGateEdge:
+    def test_resume_ignored_when_already_terminal(self):
+        """resume() on a terminated session must not flip state back to running."""
+        s = RunSession(command="run")
+        s.mark_completed()
+        s.resume()
+        assert s.snapshot()["state"] == "completed"
+
+    def test_wait_if_paused_timeout_returns_while_still_paused(self):
+        """wait_if_paused(timeout=...) must return (not hang) if the gate is still held."""
+        import time
+
+        s = RunSession(command="run")
+        s.mark_running()
+        s.request_pause()
+
+        start = time.monotonic()
+        # Worker-style call from the main thread: first iteration transitions
+        # PAUSING→PAUSED, then the event wait times out, then the `timeout is
+        # not None` branch returns.
+        s.wait_if_paused(timeout=0.05)
+        assert time.monotonic() - start < 1.0
+        # State is still paused after the timeout-return.
+        assert s.snapshot()["state"] == "paused"
+
+        # Clean up so the session is resumable (not required for the assertion,
+        # but documents intent).
+        s.resume()
+        assert s.snapshot()["state"] == "running"
+
+
 class TestTerminalGuards:
     def test_mark_completed_does_not_override_interrupted(self):
         s = RunSession(command="run")
