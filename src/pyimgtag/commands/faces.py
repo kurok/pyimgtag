@@ -6,8 +6,15 @@ import argparse
 import sys
 from pathlib import Path
 
+from pyimgtag import run_registry
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.scanner import scan_directory, scan_photos_library
+from pyimgtag.webapp.bootstrap import start_dashboard_for
+
+try:
+    from pyimgtag.face_embedding import scan_and_store
+except ImportError:
+    scan_and_store = None  # type: ignore[assignment]
 
 
 def cmd_faces(args: argparse.Namespace) -> int:
@@ -34,10 +41,12 @@ def cmd_faces(args: argparse.Namespace) -> int:
 
 def _handle_faces_scan(args: argparse.Namespace) -> int:
     """Detect faces and compute embeddings for all images."""
-    try:
-        from pyimgtag.face_embedding import scan_and_store
-    except ImportError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+    if scan_and_store is None:
+        print(
+            "Error: face_recognition is not installed. "
+            "Install the [face] extra: pip install pyimgtag[face]",
+            file=sys.stderr,
+        )
         return 1
 
     try:
@@ -65,22 +74,49 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
 
     total_faces = 0
     scanned = 0
-    with ProgressDB(db_path=args.db) as db:
-        try:
-            for i, file_path in enumerate(files):
-                if args.limit and i >= args.limit:
-                    break
-                count = scan_and_store(
-                    file_path, db, max_dim=args.max_dim, model=args.detection_model
-                )
-                scanned += 1
-                if count > 0:
-                    total_faces += count
-                    print(f"  {file_path.name}: {count} face(s)", file=sys.stderr)
-        except KeyboardInterrupt:
-            print("\nInterrupted.", file=sys.stderr)
 
-    print(f"\nScanned {scanned} images, detected {total_faces} faces.", file=sys.stderr)
+    session, dashboard = start_dashboard_for(args, command="faces scan")
+    if session is not None:
+        session.set_counter("scanned_total", len(files))
+        session.mark_running()
+
+    try:
+        with ProgressDB(db_path=args.db) as db:
+            try:
+                for i, file_path in enumerate(files):
+                    if args.limit and i >= args.limit:
+                        break
+
+                    if session is not None:
+                        session.wait_if_paused()
+                        session.set_current(str(file_path))
+
+                    count = scan_and_store(
+                        file_path, db, max_dim=args.max_dim, model=args.detection_model
+                    )
+                    scanned += 1
+                    if count > 0:
+                        total_faces += count
+                        print(f"  {file_path.name}: {count} face(s)", file=sys.stderr)
+
+                    if session is not None:
+                        session.record_item(str(file_path), "ok")
+                        session.set_counter("scanned", scanned)
+                        session.set_counter("faces_detected", total_faces)
+                        session.set_current(None)
+            except KeyboardInterrupt:
+                if session is not None:
+                    session.mark_interrupted()
+                print("\nInterrupted.", file=sys.stderr)
+
+        print(f"\nScanned {scanned} images, detected {total_faces} faces.", file=sys.stderr)
+        if session is not None:
+            session.mark_completed()
+    finally:
+        if dashboard is not None:
+            dashboard.stop()
+        run_registry.set_current(None)
+
     return 0
 
 
