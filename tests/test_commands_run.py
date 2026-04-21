@@ -482,6 +482,134 @@ class TestSkipIfTagged:
         mock_read.assert_not_called()
 
 
+class TestRunSessionWiring:
+    def test_no_web_does_not_register_session(self, tmp_path):
+        """--no-web leaves the RunRegistry empty."""
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+
+        run_registry.set_current(None)
+
+        img = tmp_path / "a.jpg"
+        img.write_bytes(b"x")
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "run",
+                "--input-dir",
+                str(tmp_path),
+                "--extensions",
+                "jpg",
+                "--no-web",
+                "--no-cache",
+                "--dry-run",
+            ]
+        )
+
+        # Avoid real Ollama / geocoder / exif work by monkeypatching at runtime.
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif"),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.return_value = MagicMock(
+                error=None,
+                tags=["x"],
+                summary=None,
+                scene_category=None,
+                emotional_tone=None,
+                cleanup_class=None,
+                has_text=False,
+                text_summary=None,
+                event_hint=None,
+                significance=None,
+            )
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+            rc = cmd_run(args, parser)
+
+        assert rc == 0
+        assert run_registry.get_current() is None
+
+    def test_web_enabled_registers_and_clears_session(self, tmp_path):
+        """With the default (web on), the registry is populated during the run
+        and cleared after it returns."""
+        import pytest
+
+        pytest.importorskip("fastapi")
+        pytest.importorskip("uvicorn")
+
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+
+        run_registry.set_current(None)
+
+        img = tmp_path / "a.jpg"
+        img.write_bytes(b"x")
+
+        parser = build_parser()
+        # Use port 0 trick is tricky with uvicorn.Config; pick a fixed, likely-free port.
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            free_port = s.getsockname()[1]
+
+        args = parser.parse_args(
+            [
+                "run",
+                "--input-dir",
+                str(tmp_path),
+                "--extensions",
+                "jpg",
+                "--web",
+                "--web-port",
+                str(free_port),
+                "--no-browser",
+                "--no-cache",
+                "--dry-run",
+            ]
+        )
+
+        seen: list[bool] = []
+
+        def fake_tag_image(*a, **kw):
+            seen.append(run_registry.get_current() is not None)
+            return MagicMock(
+                error=None,
+                tags=["x"],
+                summary=None,
+                scene_category=None,
+                emotional_tone=None,
+                cleanup_class=None,
+                has_text=False,
+                text_summary=None,
+                event_hint=None,
+                significance=None,
+            )
+
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif"),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.side_effect = fake_tag_image
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+            rc = cmd_run(args, parser)
+
+        assert rc == 0
+        assert seen == [True]  # session registered during processing
+        assert run_registry.get_current() is None  # cleared after teardown
+
+
 class TestDryRunNoDbWrites:
     """Regression: --dry-run must not create or write to the progress DB."""
 

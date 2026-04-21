@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from platform import system as get_platform_name
 
+from pyimgtag import run_registry
 from pyimgtag.applescript_writer import read_keywords_from_photos
 from pyimgtag.exif_reader import read_exif
 from pyimgtag.filters import passes_date_filter
@@ -18,6 +19,7 @@ from pyimgtag.ollama_client import OllamaClient
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
 from pyimgtag.preflight import check_ollama
 from pyimgtag.progress_db import ProgressDB
+from pyimgtag.run_session import RunSession
 from pyimgtag.scanner import scan_directory, scan_photos_library
 
 _FDA_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
@@ -162,6 +164,11 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     results: list[ImageResult] = []
     stats = _new_stats(len(files))
 
+    session, dashboard = _maybe_start_dashboard(args)
+    if session is not None:
+        session.set_counter("scanned", stats["scanned"])
+        session.mark_running()
+
     use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
     use_threaded = use_resume and getattr(args, "resume_threaded", False)
 
@@ -227,6 +234,8 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                     )
         except KeyboardInterrupt:
             stop_event.set()
+            if session is not None:
+                session.mark_interrupted()
             print("\nInterrupted.", file=sys.stderr)
         finally:
             if not stop_event.is_set():
@@ -258,6 +267,8 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                 _finalize_result(result, file_path, args, progress_db, phash_map, results, stats)
 
         except KeyboardInterrupt:
+            if session is not None:
+                session.mark_interrupted()
             print("\nInterrupted.", file=sys.stderr)
         finally:
             ollama.close()
@@ -273,6 +284,13 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         print(f"Wrote {len(results)} results to {args.output_csv}", file=sys.stderr)
 
     _print_summary(stats)
+    if session is not None:
+        for k, v in stats.items():
+            session.set_counter(k, v)
+        session.mark_completed()
+    if dashboard is not None:
+        dashboard.stop()
+    run_registry.set_current(None)
     return 0
 
 
@@ -609,3 +627,44 @@ def _print_summary(stats: dict) -> None:
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
     print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
     print(f"  Resumed (DB):     {stats['resumed_from_db']}", file=sys.stderr)
+
+
+def _maybe_start_dashboard(
+    args: argparse.Namespace,
+) -> tuple[RunSession | None, "object | None"]:
+    """Start the dashboard (if enabled) and return (session, dashboard_or_None)."""
+    from pyimgtag.main import web_enabled
+
+    if not web_enabled(args):
+        return None, None
+
+    session = RunSession(command="run")
+    run_registry.set_current(session)
+
+    try:
+        from pyimgtag.webapp.dashboard_server import create_app
+        from pyimgtag.webapp.server_thread import DashboardServer
+
+        dashboard = DashboardServer(create_app(), host=args.web_host, port=args.web_port)
+    except ImportError as exc:
+        print(f"Warning: dashboard disabled ({exc})", file=sys.stderr)
+        run_registry.set_current(None)
+        return None, None
+
+    ready = dashboard.start()
+    session.web_url = dashboard.url
+    if ready:
+        print(f"Dashboard: {dashboard.url}", flush=True)
+    else:
+        print(
+            f"Dashboard: {dashboard.url} (not yet ready; retrying in background)",
+            flush=True,
+        )
+    if not getattr(args, "no_browser", False):
+        import webbrowser
+
+        try:
+            webbrowser.open(dashboard.url)
+        except Exception:  # noqa: BLE001 — best effort
+            pass
+    return session, dashboard
