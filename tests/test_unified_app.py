@@ -1,4 +1,4 @@
-"""End-to-end tests for the unified webapp (dashboard + review + faces)."""
+"""End-to-end tests for the unified webapp (dashboard + review + faces + tags + query + judge)."""
 
 from __future__ import annotations
 
