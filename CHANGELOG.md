@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-27
+
+### Security
+- Upgraded `pip` to 26.1 in `uv.lock` to fix CVE-2026-3219 (GHSA-58qw-9mgm-455v): pip incorrectly handled concatenated tar+ZIP files as ZIP-only, which could result in wrong files being installed. (#130)
+
+### CI
+- Added `configure-pages` step to GitHub Pages docs deploy to prevent first-run 404. (#129)
+
 ## [0.5.2] - 2026-04-20
 
 ### Security
