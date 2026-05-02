@@ -50,25 +50,27 @@ _PROMPT_BASE = "Tag this image for a photo gallery.\n\n" + _PROMPT_FIELDS
 
 _JUDGE_PROMPT = """\
 You are a professional photo judge. Score this photograph on each criterion \
-from 1 to 5 where 1=poor, 2=weak, 3=acceptable, 4=strong, 5=exceptional.
+as a whole integer from 1 to 10, where 1=poor, 5=acceptable/competent, \
+8=strong, 10=exceptional. Use whole numbers only — no decimals.
 
 Respond with ONLY a valid JSON object. Required fields:
-- impact: 1-5  (emotional pull, memorability)
-- story_subject: 1-5  (clear subject and meaning)
-- composition_center: 1-5  (visual flow, balance, center of interest)
-- lighting: 1-5  (quality, control, mood support)
-- creativity_style: 1-5  (originality of treatment)
-- color_mood: 1-5  (color balance and mood fit)
-- presentation_crop: 1-5  (crop, framing, aspect ratio)
-- technical_excellence: 1-5  (exposure, retouching, overall finish)
-- focus_sharpness: 1-5  (critical detail is sharp; blur is intentional)
-- exposure_tonal: 1-5  (highlights and shadows under control)
-- noise_cleanliness: 1-5  (clean detail, no distracting grain)
-- subject_separation: 1-5  (subject stands out from background)
-- edit_integrity: 1-5  (no halos, overprocessing, or clone artefacts)
+- impact: 1-10  (emotional pull, memorability)
+- story_subject: 1-10  (clear subject and meaning)
+- composition_center: 1-10  (visual flow, balance, center of interest)
+- lighting: 1-10  (quality, control, mood support)
+- creativity_style: 1-10  (originality of treatment)
+- color_mood: 1-10  (color balance and mood fit)
+- presentation_crop: 1-10  (crop, framing, aspect ratio)
+- technical_excellence: 1-10  (exposure, retouching, overall finish)
+- focus_sharpness: 1-10  (critical detail is sharp; blur is intentional)
+- exposure_tonal: 1-10  (highlights and shadows under control)
+- noise_cleanliness: 1-10  (clean detail, no distracting grain)
+- subject_separation: 1-10  (subject stands out from background)
+- edit_integrity: 1-10  (no halos, overprocessing, or clone artefacts)
 - verdict: one sentence naming the key strength and key weakness
 
-Score honestly. A 3 means competent and deliverable. A 5 means exceptional."""
+Score honestly. A 5 means competent and deliverable. A 10 means exceptional. \
+Output integers only — no fractional values like 7.5."""
 
 _JUDGE_SCORE_FIELDS: tuple[str, ...] = (
     "impact",
@@ -323,12 +325,12 @@ def _parse_judge_response(text: str) -> JudgeScores | None:
     if parsed is None:
         return None
 
-    def _score(key: str) -> float:
-        val = parsed.get(key, 3)
+    def _score(key: str) -> int:
+        val = parsed.get(key, 5)
         try:
-            return float(max(1.0, min(5.0, float(val))))
+            return int(round(max(1.0, min(10.0, float(val)))))
         except (TypeError, ValueError):
-            return 3.0
+            return 5
 
     verdict = parsed.get("verdict", "")
     if not isinstance(verdict, str):

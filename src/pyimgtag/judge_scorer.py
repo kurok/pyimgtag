@@ -45,13 +45,18 @@ def _wavg(vals: dict[str, float], keys: list[str]) -> float:
     return total / weight if weight else 0.0
 
 
-def compute_scores(scores: JudgeScores) -> tuple[float, float, float]:
-    """Return (weighted_total, core_score, visible_score) each on a 1-5 scale."""
+def compute_scores(scores: JudgeScores) -> tuple[int, int, int]:
+    """Return (weighted_total, core_score, visible_score) each as an integer 1-10.
+
+    The weighted average over rubric criteria is computed in floating point
+    and then rounded to the nearest integer so the rating system has no
+    decimal component anywhere it is displayed or stored.
+    """
     d = {k: float(getattr(scores, k)) for k in WEIGHTS}
     return (
-        _wavg(d, list(WEIGHTS.keys())),
-        _wavg(d, _CORE),
-        _wavg(d, _VISIBLE),
+        round(_wavg(d, list(WEIGHTS.keys()))),
+        round(_wavg(d, _CORE)),
+        round(_wavg(d, _VISIBLE)),
     )
 
 

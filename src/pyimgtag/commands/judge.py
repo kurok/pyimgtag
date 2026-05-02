@@ -21,14 +21,14 @@ if TYPE_CHECKING:
     pass
 
 
-def _score_label(score: float) -> str:
-    if score >= 4.5:
+def _score_label(score: int) -> str:
+    if score >= 9:
         return "outstanding"
-    if score >= 4.0:
+    if score >= 8:
         return "strong"
-    if score >= 3.5:
+    if score >= 7:
         return "solid"
-    if score >= 3.0:
+    if score >= 5:
         return "acceptable"
     return "weak"
 
@@ -39,7 +39,7 @@ def _print_brief(result: JudgeResult, idx: int, total: int) -> None:
     label = _score_label(result.weighted_score)
     print(
         f"[{idx}/{total}] {result.file_name} → "
-        f"{result.weighted_score:.2f}/5 {label} | "
+        f"{result.weighted_score}/10 {label} | "
         f"+ {', '.join(top)} | - {', '.join(bot)}"
     )
     if result.scores.verdict:
@@ -49,13 +49,13 @@ def _print_brief(result: JudgeResult, idx: int, total: int) -> None:
 def _print_verbose(result: JudgeResult, idx: int, total: int) -> None:
     print(f"[{idx}/{total}] {result.file_name}")
     print(
-        f"  Score:   {result.weighted_score:.2f}/5  "
-        f"(core: {result.core_score:.2f}, visible: {result.visible_score:.2f})"
+        f"  Score:   {result.weighted_score}/10  "
+        f"(core: {result.core_score}, visible: {result.visible_score})"
     )
     top = strongest(result.scores, 3)
     bot = weakest(result.scores, 3)
-    print(f"  Best:    {', '.join(f'{k}={getattr(result.scores, k):.0f}' for k in top)}")
-    print(f"  Weakest: {', '.join(f'{k}={getattr(result.scores, k):.0f}' for k in bot)}")
+    print(f"  Best:    {', '.join(f'{k}={getattr(result.scores, k)}' for k in top)}")
+    print(f"  Weakest: {', '.join(f'{k}={getattr(result.scores, k)}' for k in bot)}")
     if result.scores.verdict:
         print(f"  Verdict: {result.scores.verdict}")
 
@@ -65,9 +65,9 @@ def _result_to_dict(result: JudgeResult) -> dict[str, Any]:
     return {
         "file_path": result.file_path,
         "file_name": result.file_name,
-        "weighted_score": round(result.weighted_score, 4),
-        "core_score": round(result.core_score, 4),
-        "visible_score": round(result.visible_score, 4),
+        "weighted_score": result.weighted_score,
+        "core_score": result.core_score,
+        "visible_score": result.visible_score,
         "verdict": scores.verdict,
         "scores": {
             "impact": scores.impact,
@@ -185,7 +185,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
                     _db.save_judge_result(result)
 
                 if write_back and getattr(args, "photos_library", None):
-                    score_tag = f"score:{weighted:.1f}"
+                    score_tag = f"score:{weighted}"
                     err = write_to_photos(
                         result.file_name,
                         [score_tag],

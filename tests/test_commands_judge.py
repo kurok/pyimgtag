@@ -33,19 +33,19 @@ def _make_scores(**overrides):
     from pyimgtag.models import JudgeScores
 
     defaults = dict(
-        impact=4.0,
-        story_subject=4.0,
-        composition_center=4.0,
-        lighting=4.0,
-        creativity_style=4.0,
-        color_mood=4.0,
-        presentation_crop=4.0,
-        technical_excellence=4.0,
-        focus_sharpness=4.0,
-        exposure_tonal=4.0,
-        noise_cleanliness=4.0,
-        subject_separation=4.0,
-        edit_integrity=4.0,
+        impact=8,
+        story_subject=8,
+        composition_center=8,
+        lighting=8,
+        creativity_style=8,
+        color_mood=8,
+        presentation_crop=8,
+        technical_excellence=8,
+        focus_sharpness=8,
+        exposure_tonal=8,
+        noise_cleanliness=8,
+        subject_separation=8,
+        edit_integrity=8,
         verdict="Good overall.",
     )
     defaults.update(overrides)
@@ -53,43 +53,43 @@ def _make_scores(**overrides):
 
 
 class TestScoreLabel:
-    """Tests for the _score_label function."""
+    """Tests for the _score_label function (integer 1-10 scale)."""
 
-    def test_outstanding_at_4_5(self) -> None:
+    def test_outstanding_at_9(self) -> None:
         from pyimgtag.commands.judge import _score_label
 
-        assert _score_label(4.5) == "outstanding"
+        assert _score_label(9) == "outstanding"
 
-    def test_outstanding_at_5_0(self) -> None:
+    def test_outstanding_at_10(self) -> None:
         from pyimgtag.commands.judge import _score_label
 
-        assert _score_label(5.0) == "outstanding"
+        assert _score_label(10) == "outstanding"
 
-    def test_strong_at_4_0(self) -> None:
+    def test_strong_at_8(self) -> None:
         from pyimgtag.commands.judge import _score_label
 
-        assert _score_label(4.0) == "strong"
+        assert _score_label(8) == "strong"
 
-    def test_strong_at_4_4(self) -> None:
+    def test_solid_at_7(self) -> None:
         from pyimgtag.commands.judge import _score_label
 
-        assert _score_label(4.4) == "strong"
+        assert _score_label(7) == "solid"
 
-    def test_solid_at_3_5(self) -> None:
+    def test_acceptable_at_5(self) -> None:
         from pyimgtag.commands.judge import _score_label
 
-        assert _score_label(3.5) == "solid"
+        assert _score_label(5) == "acceptable"
 
-    def test_acceptable_at_3_0(self) -> None:
+    def test_acceptable_at_6(self) -> None:
         from pyimgtag.commands.judge import _score_label
 
-        assert _score_label(3.0) == "acceptable"
+        assert _score_label(6) == "acceptable"
 
-    def test_weak_below_3_0(self) -> None:
+    def test_weak_below_5(self) -> None:
         from pyimgtag.commands.judge import _score_label
 
-        assert _score_label(2.9) == "weak"
-        assert _score_label(1.0) == "weak"
+        assert _score_label(4) == "weak"
+        assert _score_label(1) == "weak"
 
 
 class TestCmdJudgeBasic:
@@ -165,14 +165,14 @@ class TestCmdJudgeBasic:
         from pyimgtag.commands.judge import cmd_judge
 
         (tmp_path / "photo.jpg").write_bytes(b"x")
-        args = _make_args(tmp_path, min_score=4.5)
+        args = _make_args(tmp_path, min_score=9)
 
         with (
             patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
             patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
         ):
             mock_client = MagicMock()
-            mock_client.judge_image.return_value = _make_scores()  # weighted ~4.0, below 4.5
+            mock_client.judge_image.return_value = _make_scores()  # weighted ~8, below 9
             mock_cls.return_value = mock_client
             rc = cmd_judge(args, MagicMock())
 
@@ -251,8 +251,8 @@ class TestCmdJudgeBasic:
         out = tmp_path / "out.json"
         args = _make_args(tmp_path, sort_by="score", output_json=str(out))
 
-        scores_high = _make_scores(impact=5.0, composition_center=5.0)
-        scores_low = _make_scores(impact=1.0, composition_center=1.0)
+        scores_high = _make_scores(impact=10, composition_center=10)
+        scores_low = _make_scores(impact=1, composition_center=1)
         call_count = 0
 
         def fake_judge(path):

@@ -5,8 +5,6 @@ from __future__ import annotations
 import argparse
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from pyimgtag.commands.judge import cmd_judge
 from pyimgtag.models import JudgeScores
 
@@ -40,19 +38,19 @@ def _make_args(**kwargs) -> argparse.Namespace:
 
 def _make_scores() -> JudgeScores:
     return JudgeScores(
-        impact=4.0,
-        story_subject=3.5,
-        composition_center=4.0,
-        lighting=3.5,
-        creativity_style=3.0,
-        color_mood=4.0,
-        presentation_crop=3.5,
-        technical_excellence=4.0,
-        focus_sharpness=4.5,
-        exposure_tonal=3.5,
-        noise_cleanliness=4.0,
-        subject_separation=3.0,
-        edit_integrity=3.5,
+        impact=8,
+        story_subject=7,
+        composition_center=8,
+        lighting=7,
+        creativity_style=6,
+        color_mood=8,
+        presentation_crop=7,
+        technical_excellence=8,
+        focus_sharpness=9,
+        exposure_tonal=7,
+        noise_cleanliness=8,
+        subject_separation=6,
+        edit_integrity=7,
         verdict="Good shot",
     )
 
@@ -77,7 +75,7 @@ class TestCmdJudgeDBStorage:
         mock_db.save_judge_result.assert_called_once()
         saved = mock_db.save_judge_result.call_args[0][0]
         assert saved.file_name == "test.jpg"
-        assert saved.scores.impact == pytest.approx(4.0)
+        assert saved.scores.impact == 8
 
     def test_no_db_does_not_crash(self, tmp_path):
         img = tmp_path / "test.jpg"

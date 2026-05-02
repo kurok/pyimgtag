@@ -86,7 +86,7 @@ pyimgtag judge --input-dir ~/Pictures/exported --limit 20 --verbose
 
 # Filter to only strong photos, save ranking to JSON
 pyimgtag judge --input-dir ~/Pictures/exported \
-  --min-score 3.5 --output-json ranking.json
+  --min-score 7 --output-json ranking.json
 ```
 
 ## Installation
@@ -143,7 +143,7 @@ Typical macOS workflow:
 pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary --write-back --limit 50
 
 # Score photo quality
-pyimgtag judge --photos-library ~/Pictures/Photos\ Library.photoslibrary --min-score 4.0
+pyimgtag judge --photos-library ~/Pictures/Photos\ Library.photoslibrary --min-score 8
 
 # Import named faces from Apple Photos
 pyimgtag faces import-photos  # reads system default Photos library
@@ -187,7 +187,7 @@ pyimgtag run --input-dir ~/Pictures/exported --output-json results.json
 pyimgtag run --input-dir ~/Pictures/exported --write-exif
 
 # Score photo quality
-pyimgtag judge --input-dir ~/Pictures/exported --min-score 3.5 --output-json ranking.json
+pyimgtag judge --input-dir ~/Pictures/exported --min-score 7 --output-json ranking.json
 ```
 
 **Note:** `--write-back` (Apple Photos) is silently skipped on Linux with a warning. Use `--write-exif` instead.
@@ -223,7 +223,7 @@ Typical Windows workflow (PowerShell):
 pyimgtag run --input-dir C:\Users\Me\Pictures\exported --output-json results.json
 
 # Score photo quality
-pyimgtag judge --input-dir C:\Users\Me\Pictures\exported --min-score 3.5
+pyimgtag judge --input-dir C:\Users\Me\Pictures\exported --min-score 7
 
 # Check what was processed
 pyimgtag status
@@ -386,14 +386,14 @@ pyimgtag preflight --input-dir ~/Pictures/exported
 
 #### `pyimgtag judge` — score photo quality
 
-Score each image against a 13-criterion professional rubric. Outputs a ranked list with weighted scores on a 1–5 scale. Requires Ollama.
+Score each image against a 13-criterion professional rubric. Outputs a ranked list with weighted scores as **integers on a 1–10 scale** (no decimal component). Requires Ollama.
 
 ```bash
 # Score all images in a folder
 pyimgtag judge --input-dir ~/Pictures/exported
 
 # Only show photos scoring 3.5 or above
-pyimgtag judge --input-dir ~/Pictures/exported --min-score 3.5
+pyimgtag judge --input-dir ~/Pictures/exported --min-score 7
 
 # Verbose breakdown (per-criterion scores)
 pyimgtag judge --input-dir ~/Pictures/exported --limit 20 --verbose
@@ -403,7 +403,7 @@ pyimgtag judge --input-dir ~/Pictures/exported --sort-by name
 
 # Score Photos library
 pyimgtag judge --photos-library ~/Pictures/Photos\ Library.photoslibrary \
-  --limit 50 --min-score 4.0
+  --limit 50 --min-score 8
 
 # Save full ranking to JSON
 pyimgtag judge --input-dir ~/Pictures/exported \
@@ -412,18 +412,18 @@ pyimgtag judge --input-dir ~/Pictures/exported \
 
 **Sample output (brief mode):**
 ```
-[1/5] golden_hour.jpg → 4.32/5 strong | + impact, composition_center | - edit_integrity, noise_cleanliness
+[1/5] golden_hour.jpg → 9/10 outstanding | + impact, composition_center | - edit_integrity, noise_cleanliness
   Golden light over the cityscape; strong composition but slight haloing on edges.
-[2/5] portrait.jpg → 3.87/5 solid | + focus_sharpness, lighting | - creativity_style, color_mood
+[2/5] portrait.jpg → 7/10 solid | + focus_sharpness, lighting | - creativity_style, color_mood
   Well-lit portrait; technically solid but conventional treatment.
 ```
 
 **Sample output (--verbose):**
 ```
 [1/5] golden_hour.jpg
-  Score:   4.32/5  (core: 4.55, visible: 3.90)
-  Best:    impact=5, composition_center=5, lighting=4
-  Weakest: edit_integrity=3, noise_cleanliness=3, subject_separation=3
+  Score:   9/10  (core: 9, visible: 8)
+  Best:    impact=10, composition_center=10, lighting=8
+  Weakest: edit_integrity=6, noise_cleanliness=6, subject_separation=6
   Verdict: Golden light over the cityscape; strong composition but slight haloing on edges.
 ```
 
@@ -508,23 +508,23 @@ Results from `pyimgtag judge --output-json` use a different structure:
 |---|---|
 | `file_path` | Full path to image |
 | `file_name` | Filename |
-| `weighted_score` | Overall weighted score (1.0–5.0) |
-| `core_score` | Artistic criteria average (impact, composition, lighting, etc.) |
-| `visible_score` | Technical criteria average (focus, exposure, noise, etc.) |
+| `weighted_score` | Overall weighted score (integer 1–10) |
+| `core_score` | Artistic criteria average (integer 1–10) |
+| `visible_score` | Technical criteria average (integer 1–10) |
 | `verdict` | One-sentence summary of key strength and weakness |
-| `scores.impact` | Emotional pull and memorability (1–5) |
-| `scores.story_subject` | Clear subject and meaning (1–5) |
-| `scores.composition_center` | Visual flow, balance, center of interest (1–5) |
-| `scores.lighting` | Quality, control, mood support (1–5) |
-| `scores.creativity_style` | Originality of treatment (1–5) |
-| `scores.color_mood` | Color balance and mood fit (1–5) |
-| `scores.presentation_crop` | Crop, framing, aspect ratio (1–5) |
-| `scores.technical_excellence` | Exposure, retouching, overall finish (1–5) |
-| `scores.focus_sharpness` | Critical detail is sharp (1–5) |
-| `scores.exposure_tonal` | Highlights and shadows under control (1–5) |
-| `scores.noise_cleanliness` | Clean detail, no distracting grain (1–5) |
-| `scores.subject_separation` | Subject stands out from background (1–5) |
-| `scores.edit_integrity` | No halos, overprocessing, or clone artefacts (1–5) |
+| `scores.impact` | Emotional pull and memorability (integer 1–10) |
+| `scores.story_subject` | Clear subject and meaning (integer 1–10) |
+| `scores.composition_center` | Visual flow, balance, center of interest (integer 1–10) |
+| `scores.lighting` | Quality, control, mood support (integer 1–10) |
+| `scores.creativity_style` | Originality of treatment (integer 1–10) |
+| `scores.color_mood` | Color balance and mood fit (integer 1–10) |
+| `scores.presentation_crop` | Crop, framing, aspect ratio (integer 1–10) |
+| `scores.technical_excellence` | Exposure, retouching, overall finish (integer 1–10) |
+| `scores.focus_sharpness` | Critical detail is sharp (integer 1–10) |
+| `scores.exposure_tonal` | Highlights and shadows under control (integer 1–10) |
+| `scores.noise_cleanliness` | Clean detail, no distracting grain (integer 1–10) |
+| `scores.subject_separation` | Subject stands out from background (integer 1–10) |
+| `scores.edit_integrity` | No halos, overprocessing, or clone artefacts (integer 1–10) |
 
 ## Architecture
 

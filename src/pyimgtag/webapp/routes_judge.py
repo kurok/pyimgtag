@@ -37,9 +37,9 @@ __NAV__
 <div id="grid"></div>
 <script>
 function tier(s) {
-  if (s >= 7.5) return ['Excellent','tier-excellent'];
-  if (s >= 5.5) return ['Good','tier-good'];
-  if (s >= 3.5) return ['Average','tier-average'];
+  if (s >= 8) return ['Excellent','tier-excellent'];
+  if (s >= 6) return ['Good','tier-good'];
+  if (s >= 4) return ['Average','tier-average'];
   return ['Poor','tier-poor'];
 }
 
@@ -70,7 +70,7 @@ async function load() {
     barBg.appendChild(barFill);
     const scoreValEl = document.createElement('span');
     scoreValEl.className = 'score-val';
-    scoreValEl.textContent = s.weighted_score.toFixed(1);
+    scoreValEl.textContent = String(Math.round(s.weighted_score)) + '/10';
     barRow.appendChild(barBg);
     barRow.appendChild(scoreValEl);
     card.appendChild(barRow);
@@ -83,9 +83,9 @@ async function load() {
 
     const sub = document.createElement('div');
     sub.className = 'score-sub';
-    sub.textContent = 'core\u00a0' + (s.core_score || 0).toFixed(1) +
+    sub.textContent = 'core\u00a0' + Math.round(s.core_score || 0) +
                       '\u00a0\u00b7\u00a0visible\u00a0' +
-                      (s.visible_score || 0).toFixed(1);
+                      Math.round(s.visible_score || 0);
     card.appendChild(sub);
 
     if (s.verdict) {

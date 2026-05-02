@@ -387,53 +387,53 @@ class TestParseJudgeResponse:
         assert result is not None
         assert result.verdict == ""
 
-    def test_score_clamped_to_1_5(self):
+    def test_score_clamped_to_1_10(self):
         import json
 
         raw = json.dumps(
             {
-                "impact": 6,
-                "story_subject": 0,
-                "composition_center": 3,
-                "lighting": 3,
-                "creativity_style": 3,
-                "color_mood": 3,
-                "presentation_crop": 3,
-                "technical_excellence": 3,
-                "focus_sharpness": 3,
-                "exposure_tonal": 3,
-                "noise_cleanliness": 3,
-                "subject_separation": 3,
-                "edit_integrity": 3,
+                "impact": 11,  # over the max
+                "story_subject": 0,  # under the min
+                "composition_center": 5,
+                "lighting": 5,
+                "creativity_style": 5,
+                "color_mood": 5,
+                "presentation_crop": 5,
+                "technical_excellence": 5,
+                "focus_sharpness": 5,
+                "exposure_tonal": 5,
+                "noise_cleanliness": 5,
+                "subject_separation": 5,
+                "edit_integrity": 5,
             }
         )
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.impact == 5.0
-        assert result.story_subject == 1.0
+        assert result.impact == 10
+        assert result.story_subject == 1
 
-    def test_missing_score_field_defaults_to_3(self):
+    def test_missing_score_field_defaults_to_5(self):
         import json
 
         raw = json.dumps(
             {
-                "impact": 4,
-                "story_subject": 4,
-                "composition_center": 4,
-                "lighting": 4,
-                "creativity_style": 4,
-                "color_mood": 4,
-                "presentation_crop": 4,
-                "technical_excellence": 4,
-                "focus_sharpness": 4,
-                "exposure_tonal": 4,
-                "subject_separation": 4,
-                "edit_integrity": 4,
+                "impact": 8,
+                "story_subject": 8,
+                "composition_center": 8,
+                "lighting": 8,
+                "creativity_style": 8,
+                "color_mood": 8,
+                "presentation_crop": 8,
+                "technical_excellence": 8,
+                "focus_sharpness": 8,
+                "exposure_tonal": 8,
+                "subject_separation": 8,
+                "edit_integrity": 8,
             }
         )
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.noise_cleanliness == 3.0
+        assert result.noise_cleanliness == 5
 
     def test_unparseable_returns_none(self):
         assert _parse_judge_response("not json at all") is None
@@ -606,38 +606,38 @@ class TestParseJudgeResponseEdgeCases:
         assert result is not None
         assert result.impact == 5.0
 
-    def test_judge_response_missing_all_scores_defaults_to_3(self):
+    def test_judge_response_missing_all_scores_defaults_to_5(self):
         import json
 
         raw = json.dumps({"verdict": "No scores provided"})
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.impact == 3.0
-        assert result.story_subject == 3.0
-        assert result.composition_center == 3.0
+        assert result.impact == 5
+        assert result.story_subject == 5
+        assert result.composition_center == 5
 
-    def test_judge_response_string_scores_converted_to_float(self):
+    def test_judge_response_string_scores_converted_to_int(self):
         import json
 
         raw = json.dumps(
             {
-                "impact": "4.5",
-                "story_subject": "3",
-                "composition_center": 4,
-                "lighting": 4,
-                "creativity_style": 3,
-                "color_mood": 4,
-                "presentation_crop": 4,
-                "technical_excellence": 4,
-                "focus_sharpness": 4,
-                "exposure_tonal": 4,
-                "noise_cleanliness": 3,
-                "subject_separation": 4,
-                "edit_integrity": 4,
+                "impact": "9",
+                "story_subject": "6",
+                "composition_center": 8,
+                "lighting": 8,
+                "creativity_style": 6,
+                "color_mood": 8,
+                "presentation_crop": 8,
+                "technical_excellence": 8,
+                "focus_sharpness": 8,
+                "exposure_tonal": 8,
+                "noise_cleanliness": 6,
+                "subject_separation": 8,
+                "edit_integrity": 8,
                 "verdict": "Good",
             }
         )
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.impact == 4.5
-        assert result.story_subject == 3.0
+        assert result.impact == 9
+        assert result.story_subject == 6
