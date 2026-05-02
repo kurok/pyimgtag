@@ -5,11 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-05-02
 
 ### Changed
-- **Breaking**: judge rating system now uses **integer scores from 1 to 10** instead of decimal 1–5. Per-criterion scores, `weighted_score`, `core_score`, and `visible_score` are all integers. Display formats `7/10` instead of `4.20/5`; the `score:N` write-back keyword is now a whole number. Old judge results stored on the previous scale are still readable but will round to integers.
-- Judge label thresholds adjusted for the new scale: ≥9 outstanding, ≥8 strong, ≥7 solid, ≥5 acceptable, otherwise weak.
+- **Breaking**: judge rating system now uses **integer scores from 1 to 10** instead of decimal 1–5. Per-criterion scores, `weighted_score`, `core_score`, and `visible_score` are all integers. Display formats `7/10` instead of `4.20/5`; the `score:N` write-back keyword is now a whole number. Old judge results stored on the previous scale are still readable but will round to integers. (#134)
+- Judge label thresholds adjusted for the new scale: ≥9 outstanding, ≥8 strong, ≥7 solid, ≥5 acceptable, otherwise weak. (#134)
+- README, mkdocs `platform-setup`, and the GitHub Wiki `Scoring Photos` page updated for the new scale; new wiki page **Use-Case Diagrams** documents the algorithm flow of every subcommand with Mermaid diagrams.
+
+### Fixed
+- `--resume-threaded` mode silently dropped the dedup-skipped count so the run summary under-reported activity; the threaded path now records `stats["skipped_dedup"]` consistently with the sequential path. (#133)
+- `face_thumbnail_b64` chained `Image.open(p).convert("RGB")` and left the source file handle open until garbage collection; it now uses a context manager. (#132)
+- `pyimgtag judge --extensions "jpg, jpeg"` silently dropped the second extension because the parser did not strip whitespace; it now matches `commands/faces.py` (`.strip().lstrip(".").lower()`). (#132)
+- Review UI's `removeTag`, `addTag`, and `setCleanup` PATCH calls did not check the response status, so failed updates left the UI showing modified state. They now revert local state and surface an alert on non-OK responses. (#132)
+
+### Security
+- Smoke scripts `scripts/test_faces_ui.sh` and `scripts/test_faces_import_photos.sh` no longer use hardcoded `/tmp/*.db` and `/tmp/resp.json` paths; they use `mktemp -t` so parallel runs cannot collide and the trap reliably cleans up. (#133)
+- `.dockerignore` now excludes `.git/`, `.worktrees/`, `.env*`, `*.pem`, `*.key`, `.aws/`, `.ssh/`, `.kube/` so repo history and dev credentials cannot be baked into images by accident. (#133)
 
 ## [0.6.1] - 2026-04-27
 
