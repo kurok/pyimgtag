@@ -80,6 +80,7 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         session.set_counter("scanned_total", len(files))
         session.mark_running()
 
+    interrupted = False
     try:
         with ProgressDB(db_path=args.db) as db:
             try:
@@ -105,19 +106,20 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
                         session.set_counter("faces_detected", total_faces)
                         session.set_current(None)
             except KeyboardInterrupt:
+                interrupted = True
                 if session is not None:
                     session.mark_interrupted()
                 print("\nInterrupted.", file=sys.stderr)
 
         print(f"\nScanned {scanned} images, detected {total_faces} faces.", file=sys.stderr)
-        if session is not None:
+        if session is not None and not interrupted:
             session.mark_completed()
     finally:
         if dashboard is not None:
             dashboard.stop()
         run_registry.set_current(None)
 
-    return 0
+    return 1 if interrupted else 0
 
 
 def _handle_faces_cluster(args: argparse.Namespace) -> int:
