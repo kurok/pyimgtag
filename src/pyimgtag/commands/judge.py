@@ -10,9 +10,10 @@ from typing import TYPE_CHECKING, Any
 
 from pyimgtag import run_registry
 from pyimgtag.applescript_writer import write_to_photos
+from pyimgtag.cloud_clients import CloudClientError, make_image_client
 from pyimgtag.judge_scorer import compute_scores, strongest, weakest
 from pyimgtag.models import JudgeResult, JudgeScores
-from pyimgtag.ollama_client import OllamaClient
+from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
 from pyimgtag.preflight import check_ollama
 from pyimgtag.scanner import scan_directory, scan_photos_library
 from pyimgtag.webapp.bootstrap import start_dashboard_for
@@ -88,10 +89,14 @@ def _result_to_dict(result: JudgeResult) -> dict[str, Any]:
 
 
 def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
-    ok, msg = check_ollama(args.ollama_url)
-    if not ok:
-        print(f"Ollama not available: {msg}", file=sys.stderr)
-        return 1
+    backend = getattr(args, "backend", "ollama")
+    if not isinstance(backend, str):
+        backend = "ollama"
+    if backend == "ollama":
+        ok, msg = check_ollama(args.ollama_url)
+        if not ok:
+            print(f"Ollama not available: {msg}", file=sys.stderr)
+            return 1
 
     exts = {e.strip().lstrip(".").lower() for e in args.extensions.split(",") if e.strip()}
 
@@ -129,12 +134,28 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
     if args.limit:
         files = files[: args.limit]
 
-    ollama = OllamaClient(
-        model=args.model,
-        base_url=args.ollama_url,
-        max_dim=args.max_dim,
-        timeout=args.timeout,
-    )
+    if backend == "ollama":
+        # Constructed directly so tests that patch
+        # ``pyimgtag.commands.judge.OllamaClient`` keep working.
+        ollama = OllamaClient(
+            model=args.model or "gemma4:e4b",
+            base_url=args.ollama_url,
+            max_dim=args.max_dim,
+            timeout=args.timeout,
+        )
+    else:
+        try:
+            ollama = make_image_client(
+                backend,
+                model=args.model,
+                max_dim=args.max_dim,
+                timeout=args.timeout,
+                api_key=getattr(args, "api_key", None),
+                api_base=getattr(args, "api_base", None),
+            )
+        except CloudClientError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
 
     results: list[JudgeResult] = []
     total = len(files)

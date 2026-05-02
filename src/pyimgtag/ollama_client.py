@@ -203,47 +203,58 @@ class OllamaClient:
             return None
 
     def _prepare_image(self, file_path: str) -> str:
-        """Load, resize to *max_dim*, convert to JPEG, and base64-encode."""
-        temp_jpeg: str | None = None
-        open_path = file_path
-
-        if is_heic(file_path) and sips_available():
-            temp_jpeg_path = convert_heic_to_jpeg(file_path)
-            temp_jpeg = str(temp_jpeg_path)
-            open_path = temp_jpeg
-        elif is_raw(file_path):
-            try:
-                temp_jpeg_path = extract_raw_thumbnail(file_path)
-            except RuntimeError:
-                if rawpy_available():
-                    temp_jpeg_path = convert_raw_with_rawpy(file_path)
-                else:
-                    raise
-            temp_jpeg = str(temp_jpeg_path)
-            open_path = temp_jpeg
-
-        try:
-            with Image.open(open_path) as raw:
-                converted = raw.convert("RGB")
-                w, h = converted.size
-                if max(w, h) > self.max_dim:
-                    ratio = self.max_dim / max(w, h)
-                    converted = converted.resize(
-                        (int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS
-                    )
-                buf = io.BytesIO()
-                converted.save(buf, format="JPEG", quality=85)
-                return base64.b64encode(buf.getvalue()).decode("ascii")
-        finally:
-            if temp_jpeg is not None:
-                with contextlib.suppress(OSError):
-                    os.unlink(temp_jpeg)
-                    temp_dir = os.path.dirname(temp_jpeg)
-                    if temp_dir and not os.listdir(temp_dir):
-                        os.rmdir(temp_dir)
+        """Backwards-compatible wrapper around :func:`prepare_image_b64`."""
+        return prepare_image_b64(file_path, self.max_dim)
 
     def close(self) -> None:
         self._session.close()
+
+
+def prepare_image_b64(file_path: str, max_dim: int) -> str:
+    """Load *file_path*, resize to ``max_dim`` longest edge, encode as JPEG b64.
+
+    Handles HEIC and RAW inputs by routing through ``sips`` / exiftool / rawpy
+    first and cleaning up the intermediate JPEG. The same helper backs every
+    image-model client (Ollama, Anthropic, OpenAI, Gemini) so they all see the
+    exact same bytes for a given input.
+    """
+    temp_jpeg: str | None = None
+    open_path = file_path
+
+    if is_heic(file_path) and sips_available():
+        temp_jpeg_path = convert_heic_to_jpeg(file_path)
+        temp_jpeg = str(temp_jpeg_path)
+        open_path = temp_jpeg
+    elif is_raw(file_path):
+        try:
+            temp_jpeg_path = extract_raw_thumbnail(file_path)
+        except RuntimeError:
+            if rawpy_available():
+                temp_jpeg_path = convert_raw_with_rawpy(file_path)
+            else:
+                raise
+        temp_jpeg = str(temp_jpeg_path)
+        open_path = temp_jpeg
+
+    try:
+        with Image.open(open_path) as raw:
+            converted = raw.convert("RGB")
+            w, h = converted.size
+            if max(w, h) > max_dim:
+                ratio = max_dim / max(w, h)
+                converted = converted.resize(
+                    (int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS
+                )
+            buf = io.BytesIO()
+            converted.save(buf, format="JPEG", quality=85)
+            return base64.b64encode(buf.getvalue()).decode("ascii")
+    finally:
+        if temp_jpeg is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(temp_jpeg)
+                temp_dir = os.path.dirname(temp_jpeg)
+                if temp_dir and not os.listdir(temp_dir):
+                    os.rmdir(temp_dir)
 
 
 _SCENE_CATEGORY_ALLOWED = frozenset(

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Pluggable vision backends**: `pyimgtag run` and `pyimgtag judge` accept `--backend ollama|anthropic|openai|gemini`. The default `ollama` backend is unchanged (and still supports remote Ollama via `--ollama-url`); the three new backends call hosted vision APIs. API keys are read from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GOOGLE_API_KEY`/`GEMINI_API_KEY` respectively, or via `--api-key`. `--api-base` overrides the cloud-API base URL for self-hosted gateways. Per-backend default models: `gemma4:e4b` (ollama), `claude-sonnet-4-6` (anthropic), `gpt-4o-mini` (openai), `gemini-1.5-flash` (gemini).
+
 ## [0.7.0] - 2026-05-02
 
 ### Changed

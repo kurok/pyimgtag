@@ -8,14 +8,16 @@ import subprocess
 import sys
 from pathlib import Path
 from platform import system as get_platform_name
+from typing import Any
 
 from pyimgtag import run_registry
 from pyimgtag.applescript_writer import read_keywords_from_photos
+from pyimgtag.cloud_clients import CloudClientError, make_image_client
 from pyimgtag.exif_reader import read_exif
 from pyimgtag.filters import passes_date_filter
 from pyimgtag.geocoder import ReverseGeocoder
 from pyimgtag.models import ExifData, ImageResult
-from pyimgtag.ollama_client import OllamaClient
+from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
 from pyimgtag.preflight import check_ollama
 from pyimgtag.progress_db import ProgressDB
@@ -112,9 +114,13 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
     extensions = {e.strip().lstrip(".").lower() for e in args.extensions.split(",")}
 
-    ok, msg = check_ollama(args.ollama_url)
-    if not ok:
-        print(f"Warning: {msg}", file=sys.stderr)
+    backend = getattr(args, "backend", "ollama")
+    if not isinstance(backend, str):
+        backend = "ollama"
+    if backend == "ollama":
+        ok, msg = check_ollama(args.ollama_url)
+        if not ok:
+            print(f"Warning: {msg}", file=sys.stderr)
 
     try:
         if args.input_dir:
@@ -152,9 +158,28 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if args.dedup:
         phash_map, skipped_dedup = _compute_dedup_map(files, args.dedup_threshold)
 
-    ollama = OllamaClient(
-        model=args.model, base_url=args.ollama_url, max_dim=args.max_dim, timeout=args.timeout
-    )
+    if backend == "ollama":
+        # Constructed directly so tests that patch
+        # ``pyimgtag.commands.run.OllamaClient`` keep working.
+        ollama = OllamaClient(
+            model=args.model or "gemma4:e4b",
+            base_url=args.ollama_url,
+            max_dim=args.max_dim,
+            timeout=args.timeout,
+        )
+    else:
+        try:
+            ollama = make_image_client(
+                backend,
+                model=args.model,
+                max_dim=args.max_dim,
+                timeout=args.timeout,
+                api_key=getattr(args, "api_key", None),
+                api_base=getattr(args, "api_base", None),
+            )
+        except CloudClientError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
     geocoder = ReverseGeocoder(cache_dir=args.cache_dir)
     progress_db: ProgressDB | None = None
     if not args.no_cache and not args.dry_run:
@@ -341,7 +366,7 @@ def _process_one(
     file_path: Path,
     source_type: str,
     args: argparse.Namespace,
-    ollama: OllamaClient,
+    ollama: Any,
     geocoder: ReverseGeocoder,
     stats: dict,
     progress_db: ProgressDB | None = None,
