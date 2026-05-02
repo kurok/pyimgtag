@@ -9,7 +9,10 @@ if ! python3 -c "import photoscript" 2>/dev/null; then
     exit 0
 fi
 
-DB=/tmp/test_faces_smoke.db
+DB=$(mktemp -t test_faces_smoke.XXXXXX.db)
+trap 'rm -f "$DB"' EXIT
+
+# mktemp creates an empty file; remove so sqlite can initialise cleanly.
 rm -f "$DB"
 
 echo "Running: pyimgtag faces import-photos --db $DB"
@@ -18,9 +21,9 @@ if ! pyimgtag faces import-photos --db "$DB"; then
     exit 1
 fi
 
-python3 -c "
-import sqlite3
-c = sqlite3.connect('$DB')
+DB_PATH="$DB" python3 -c "
+import os, sqlite3
+c = sqlite3.connect(os.environ['DB_PATH'])
 count = c.execute(\"SELECT COUNT(*) FROM persons WHERE source='photos'\").fetchone()[0]
 print('Persons imported:', count)
 "
