@@ -93,7 +93,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
         print(f"Ollama not available: {msg}", file=sys.stderr)
         return 1
 
-    exts = {e.lstrip(".") for e in args.extensions.split(",")}
+    exts = {e.strip().lstrip(".").lower() for e in args.extensions.split(",") if e.strip()}
 
     if not getattr(args, "photos_library", None) and not getattr(args, "input_dir", None):
         print("Error: one of --input-dir or --photos-library is required", file=sys.stderr)

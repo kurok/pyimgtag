@@ -36,23 +36,23 @@ def face_thumbnail_b64(
         return None
 
     try:
-        img = Image.open(image_path).convert("RGB")
+        with Image.open(image_path) as src:
+            iw, ih = src.size
+            pad_x = math.ceil(bbox_w * padding)
+            pad_y = math.ceil(bbox_h * padding)
+
+            left = max(0, bbox_x - pad_x)
+            top = max(0, bbox_y - pad_y)
+            right = min(iw, bbox_x + bbox_w + pad_x)
+            bottom = min(ih, bbox_y + bbox_h + pad_y)
+
+            if right <= left or bottom <= top:
+                return None
+
+            cropped = src.crop((left, top, right, bottom)).convert("RGB")
     except Exception:
         return None
 
-    iw, ih = img.size
-    pad_x = math.ceil(bbox_w * padding)
-    pad_y = math.ceil(bbox_h * padding)
-
-    left = max(0, bbox_x - pad_x)
-    top = max(0, bbox_y - pad_y)
-    right = min(iw, bbox_x + bbox_w + pad_x)
-    bottom = min(ih, bbox_y + bbox_h + pad_y)
-
-    if right <= left or bottom <= top:
-        return None
-
-    cropped = img.crop((left, top, right, bottom))
     thumb = cropped.resize((size, size), Image.Resampling.LANCZOS)
 
     buf = io.BytesIO()
