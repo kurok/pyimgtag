@@ -144,6 +144,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
         session.set_counter("scanned", total)
         session.mark_running()
 
+    interrupted = False
     try:
         try:
             for idx, file_path in enumerate(files, start=1):
@@ -205,6 +206,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
                     session.increment("processed")
                     session.set_current(None)
         except KeyboardInterrupt:
+            interrupted = True
             if session is not None:
                 session.mark_interrupted()
             print("\nInterrupted.", file=sys.stderr)
@@ -220,11 +222,11 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
                 encoding="utf-8",
             )
 
-        if session is not None:
+        if session is not None and not interrupted:
             session.mark_completed()
     finally:
         if dashboard is not None:
             dashboard.stop()
         run_registry.set_current(None)
 
-    return 0
+    return 1 if interrupted else 0

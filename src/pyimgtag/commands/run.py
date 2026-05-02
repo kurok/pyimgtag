@@ -170,6 +170,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         session.set_counter("scanned", stats["scanned"])
         session.mark_running()
 
+    interrupted = False
     try:
         use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
         use_threaded = use_resume and getattr(args, "resume_threaded", False)
@@ -256,6 +257,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                     if session is not None:
                         session.set_current(None)
             except KeyboardInterrupt:
+                interrupted = True
                 stop_event.set()
                 if session is not None:
                     session.mark_interrupted()
@@ -309,6 +311,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                         session.set_current(None)
 
             except KeyboardInterrupt:
+                interrupted = True
                 if session is not None:
                     session.mark_interrupted()
                 print("\nInterrupted.", file=sys.stderr)
@@ -329,12 +332,13 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         if session is not None:
             for k, v in stats.items():
                 session.set_counter(k, v)
-            session.mark_completed()
+            if not interrupted:
+                session.mark_completed()
     finally:
         if dashboard is not None:
             dashboard.stop()
         run_registry.set_current(None)
-    return 0
+    return 1 if interrupted else 0
 
 
 def _process_one(
