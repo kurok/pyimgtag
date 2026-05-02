@@ -187,6 +187,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             fresh_files = [
                 f for f in files if str(f) not in skipped_dedup and str(f) not in cached_set
             ]
+            stats["skipped_dedup"] = sum(1 for f in files if str(f) in skipped_dedup)
             result_q: _queue.Queue = _queue.Queue()
             thread_stats: dict = {k: 0 for k in stats if k != "scanned"}
             stop_event = _threading.Event()

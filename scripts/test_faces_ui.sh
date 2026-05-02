@@ -9,17 +9,19 @@ if ! python3 -c "import fastapi, uvicorn, httpx" 2>/dev/null; then
 fi
 
 PORT=18766
-DB=/tmp/test_faces_ui_smoke.db
+DB=$(mktemp -t test_faces_ui_smoke.XXXXXX.db)
+RESP=$(mktemp -t test_faces_ui_resp.XXXXXX.json)
 SERVER_PID=""
 
-trap 'kill "$SERVER_PID" 2>/dev/null; rm -f "$DB"' EXIT
+trap 'kill "$SERVER_PID" 2>/dev/null; rm -f "$DB" "$RESP"' EXIT
 
+# mktemp creates an empty file; remove so sqlite can initialise cleanly.
 rm -f "$DB"
 
-python3 - <<'PYEOF'
-import sqlite3, sys
+DB_PATH="$DB" python3 - <<'PYEOF'
+import os, sqlite3
 
-conn = sqlite3.connect('/tmp/test_faces_ui_smoke.db')
+conn = sqlite3.connect(os.environ["DB_PATH"])
 conn.executescript("""
 CREATE TABLE IF NOT EXISTS persons (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,17 +73,17 @@ fi
 FAILURES=0
 
 # GET /api/persons
-CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" "http://127.0.0.1:${PORT}/api/persons")
+CODE=$(curl -s -o "$RESP" -w "%{http_code}" "http://127.0.0.1:${PORT}/api/persons")
 if [ "$CODE" -ne 200 ]; then
     echo "FAIL: GET /api/persons returned $CODE"
     FAILURES=$((FAILURES + 1))
 else
-    COUNT=$(python3 -c "import json; d=json.load(open('/tmp/resp.json')); print(len(d) if isinstance(d, list) else d.get('total', '?'))" 2>/dev/null || echo "?")
+    COUNT=$(RESP_PATH="$RESP" python3 -c "import json, os; d=json.load(open(os.environ['RESP_PATH'])); print(len(d) if isinstance(d, list) else d.get('total', '?'))" 2>/dev/null || echo "?")
     echo "OK: GET /api/persons -> 200 (count: $COUNT)"
 fi
 
 # GET /
-CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" "http://127.0.0.1:${PORT}/")
+CODE=$(curl -s -o "$RESP" -w "%{http_code}" "http://127.0.0.1:${PORT}/")
 if [ "$CODE" -ne 200 ]; then
     echo "FAIL: GET / returned $CODE"
     FAILURES=$((FAILURES + 1))
@@ -90,7 +92,7 @@ else
 fi
 
 # POST /api/persons/1/label
-CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+CODE=$(curl -s -o "$RESP" -w "%{http_code}" \
     -X POST \
     -H "Content-Type: application/json" \
     -d '{"label":"Test Person"}' \
@@ -103,7 +105,7 @@ else
 fi
 
 # GET /api/persons/1/faces
-CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" "http://127.0.0.1:${PORT}/api/persons/1/faces")
+CODE=$(curl -s -o "$RESP" -w "%{http_code}" "http://127.0.0.1:${PORT}/api/persons/1/faces")
 if [ "$CODE" -ne 200 ]; then
     echo "FAIL: GET /api/persons/1/faces returned $CODE"
     FAILURES=$((FAILURES + 1))
@@ -112,7 +114,7 @@ else
 fi
 
 # POST /api/faces/1/unassign
-CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+CODE=$(curl -s -o "$RESP" -w "%{http_code}" \
     -X POST \
     "http://127.0.0.1:${PORT}/api/faces/1/unassign")
 if [ "$CODE" -ne 200 ]; then
@@ -123,7 +125,7 @@ else
 fi
 
 # DELETE /api/persons/1
-CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+CODE=$(curl -s -o "$RESP" -w "%{http_code}" \
     -X DELETE \
     "http://127.0.0.1:${PORT}/api/persons/1")
 if [ "$CODE" -ne 200 ]; then

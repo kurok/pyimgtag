@@ -30,3 +30,16 @@ docs/
 
 # Runtime cache (mount as volume instead)
 .cache/
+
+# VCS / worktrees
+.git/
+.worktrees/
+
+# Secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+.aws/
+.ssh/
+.kube/
