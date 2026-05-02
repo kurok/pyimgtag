@@ -11,9 +11,16 @@ Tag images using a local Gemma model for searchable tags, with optional Apple Ph
 
 ## Overview
 
-pyimgtag uses a locally-running Gemma model (via [Ollama](https://ollama.ai)) to
-analyse images and generate 1-5 descriptive tags per photo. Image analysis and
-tagging run entirely on-device -- your photos themselves are never uploaded.
+pyimgtag uses a vision model to analyse images and generate 1-5 descriptive
+tags per photo. By default it calls a locally-running Gemma model via
+[Ollama](https://ollama.ai), so image analysis and tagging stay on-device.
+You can also point pyimgtag at a **remote Ollama server** or one of three
+hosted vision APIs — [Anthropic Claude](https://docs.anthropic.com/en/api/messages),
+[OpenAI](https://platform.openai.com/docs/api-reference/chat),
+or [Google Gemini](https://ai.google.dev/api/generate-content) — by passing
+`--backend`. When a cloud backend is selected, the JPEG bytes leave the
+machine; otherwise they don't.
+
 If EXIF GPS is present, only the latitude/longitude is sent to [OpenStreetMap
 Nominatim](https://nominatim.openstreetmap.org/) for reverse geocoding to a
 city/place; results are cached locally so repeat lookups stay offline.
@@ -22,7 +29,8 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 
 **Key features:**
 
-- One local model call per image, compact prompt, low token usage
+- One model call per image, compact prompt, low token usage
+- **Pluggable vision backends**: local Ollama (default), remote Ollama via `--ollama-url`, Anthropic Claude, OpenAI, or Google Gemini via `--backend`
 - Rich AI metadata: scene category, emotional tone, cleanup classification, text detection, event hints
 - EXIF GPS as source of truth for location (never guessed from image content)
 - Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
@@ -281,6 +289,46 @@ pyimgtag run --input-dir /path/to/photos --dedup
 # Export to JSON
 pyimgtag run --input-dir /path/to/photos --output-json results.json
 ```
+
+##### Choosing a vision backend
+
+By default pyimgtag calls a local Ollama server. Use `--backend` to pick a
+different provider; the same prompt and result schema apply across backends.
+
+```bash
+# Default: local Ollama
+pyimgtag run --input-dir /path/to/photos
+
+# Remote Ollama server (e.g. on another machine in your LAN)
+pyimgtag run --input-dir /path/to/photos --ollama-url http://gpu-host:11434
+
+# Anthropic Claude
+ANTHROPIC_API_KEY=sk-ant-... pyimgtag run --input-dir /path/to/photos \
+  --backend anthropic
+
+# OpenAI (override the default model if needed)
+OPENAI_API_KEY=sk-... pyimgtag run --input-dir /path/to/photos \
+  --backend openai --model gpt-4o
+
+# Google Gemini
+GOOGLE_API_KEY=... pyimgtag run --input-dir /path/to/photos \
+  --backend gemini
+```
+
+Per-backend defaults:
+
+| Backend     | Default model         | Auth env var                          |
+|-------------|-----------------------|---------------------------------------|
+| `ollama`    | `gemma4:e4b`          | none (uses `--ollama-url`)            |
+| `anthropic` | `claude-sonnet-4-6`   | `ANTHROPIC_API_KEY`                   |
+| `openai`    | `gpt-4o-mini`         | `OPENAI_API_KEY`                      |
+| `gemini`    | `gemini-1.5-flash`    | `GOOGLE_API_KEY` (or `GEMINI_API_KEY`)|
+
+Cloud backends send the JPEG bytes for each image to the provider. Use
+`--api-base` to override the base URL (for self-hosted gateways or
+proxies) and `--api-key` if you want to pass the secret on the command
+line instead of via an environment variable. The `--backend` flag works
+identically for `pyimgtag judge`.
 
 **Run flags:**
 

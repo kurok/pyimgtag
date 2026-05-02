@@ -27,6 +27,26 @@ def check_ollama(base_url: str = "http://localhost:11434") -> tuple[bool, str]:
         return (False, f"Ollama is not reachable at {base_url}: {e}")
 
 
+def check_cloud_backend(backend: str) -> tuple[bool, str]:
+    """Check that the API key for a cloud backend is present in the env.
+
+    No network call is made — this verifies only that the user has set the
+    expected env var, which surfaces the most common misconfiguration.
+    """
+    env_vars = {
+        "anthropic": ("ANTHROPIC_API_KEY",),
+        "openai": ("OPENAI_API_KEY",),
+        "gemini": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    }.get(backend)
+    if env_vars is None:
+        return (False, f"Unknown backend: {backend}")
+    for var in env_vars:
+        if os.environ.get(var, "").strip():
+            return (True, f"{backend}: {var} is set")
+    joined = " or ".join(env_vars)
+    return (False, f"{backend}: no API key — set {joined}")
+
+
 def check_ollama_model(model: str, base_url: str = "http://localhost:11434") -> tuple[bool, str]:
     """Check that a specific model is available in Ollama.
 

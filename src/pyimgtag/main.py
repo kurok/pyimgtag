@@ -29,11 +29,39 @@ def build_parser() -> argparse.ArgumentParser:
     src.add_argument("--input-dir", help="Path to an exported image folder")
     src.add_argument("--photos-library", help="Path to an Apple Photos library package")
 
-    run_p.add_argument("--model", default="gemma4:e4b", help="Ollama model (default: gemma4:e4b)")
+    run_p.add_argument(
+        "--backend",
+        choices=("ollama", "anthropic", "openai", "gemini"),
+        default=os.environ.get("PYIMGTAG_BACKEND", "ollama"),
+        help=(
+            "Vision-model backend. 'ollama' (default) calls a local or remote "
+            "Ollama server; 'anthropic', 'openai', and 'gemini' call hosted "
+            "APIs and require an API key (ANTHROPIC_API_KEY, OPENAI_API_KEY, "
+            "GOOGLE_API_KEY respectively, or pass --api-key)."
+        ),
+    )
+    run_p.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Model name. Backend-specific defaults: ollama=gemma4:e4b, "
+            "anthropic=claude-sonnet-4-6, openai=gpt-4o-mini, gemini=gemini-1.5-flash."
+        ),
+    )
     run_p.add_argument(
         "--ollama-url",
         default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
-        help="Ollama base URL",
+        help="Ollama base URL (used when --backend=ollama; supports remote Ollama too)",
+    )
+    run_p.add_argument(
+        "--api-base",
+        default=None,
+        help="Override the cloud-API base URL (anthropic / openai / gemini)",
+    )
+    run_p.add_argument(
+        "--api-key",
+        default=None,
+        help="Cloud-API key. Defaults to the provider's conventional env var.",
     )
     run_p.add_argument(
         "--max-dim",
@@ -346,15 +374,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     judge_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     judge_p.add_argument(
+        "--backend",
+        choices=("ollama", "anthropic", "openai", "gemini"),
+        default=os.environ.get("PYIMGTAG_BACKEND", "ollama"),
+        help=(
+            "Vision-model backend. 'ollama' (default) calls a local or remote "
+            "Ollama server; the others call hosted APIs and need an API key."
+        ),
+    )
+    judge_p.add_argument(
         "--model",
-        default="gemma4:e4b",
-        help="Ollama model name (default: gemma4:e4b)",
+        default=None,
+        help=(
+            "Model name. Backend-specific defaults: ollama=gemma4:e4b, "
+            "anthropic=claude-sonnet-4-6, openai=gpt-4o-mini, gemini=gemini-1.5-flash."
+        ),
     )
     judge_p.add_argument(
         "--ollama-url",
         default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
         metavar="URL",
-        help="Ollama API base URL",
+        help="Ollama API base URL (used when --backend=ollama; supports remote Ollama)",
+    )
+    judge_p.add_argument(
+        "--api-base",
+        default=None,
+        help="Override the cloud-API base URL (anthropic / openai / gemini)",
+    )
+    judge_p.add_argument(
+        "--api-key",
+        default=None,
+        help="Cloud-API key. Defaults to the provider's conventional env var.",
     )
     judge_p.add_argument(
         "--max-dim",

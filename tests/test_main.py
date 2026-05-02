@@ -46,8 +46,12 @@ class TestBuildParser:
             main(["run"])
 
     def test_run_default_model(self):
+        # The argparse default is now ``None`` so the per-backend default can
+        # apply at runtime (gemma4:e4b for ollama, claude-sonnet-4-6 for
+        # anthropic, etc.). The handler resolves ``None`` to the right model.
         args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
-        assert args.model == "gemma4:e4b"
+        assert args.model is None
+        assert args.backend == "ollama"
 
     def test_run_custom_model(self):
         args = build_parser().parse_args(["run", "--model", "gemma4:e12b", "--input-dir", "/tmp"])
