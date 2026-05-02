@@ -57,7 +57,7 @@ pyimgtag run --write-back
 **Score photos with judge:**
 
 ```bash
-pyimgtag judge --input-dir ~/Pictures --min-score 3.5
+pyimgtag judge --input-dir ~/Pictures --min-score 7
 ```
 
 **Import faces from Apple Photos:**
@@ -169,7 +169,7 @@ pyimgtag run --input-dir ~/Pictures/export --output-json results.json
 **Score photos:**
 
 ```bash
-pyimgtag judge --input-dir ~/Pictures/export --min-score 4.0
+pyimgtag judge --input-dir ~/Pictures/export --min-score 8
 ```
 
 **Write EXIF tags back to files:**
@@ -259,7 +259,7 @@ pyimgtag run --input-dir "C:\Users\YourName\Pictures\Vacation" --output-json res
 **Score photos:**
 
 ```powershell
-pyimgtag judge --input-dir "C:\Users\YourName\Pictures" --min-score 3.5
+pyimgtag judge --input-dir "C:\Users\YourName\Pictures" --min-score 7
 ```
 
 **Output JSON for import into other tools:**

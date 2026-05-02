@@ -7,7 +7,7 @@ import sqlite3
 import struct
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
 
@@ -867,7 +867,13 @@ class ProgressDB:
         self._conn.commit()
 
     def get_judge_result(self, file_path: str) -> dict | None:
-        """Return judge scores for a file, or None if not found."""
+        """Return judge scores for a file, or None if not found.
+
+        Scores are integers in 1-10. The underlying ``judge_scores`` table
+        uses REAL columns for backward compatibility, so values are cast to
+        ``int`` here (rounded for any legacy float rows from the old 1-5
+        scale).
+        """
         row = self._conn.execute(
             """SELECT weighted_score, core_score, visible_score, verdict,
                       impact, story_subject, composition_center, lighting,
@@ -879,27 +885,31 @@ class ProgressDB:
         ).fetchone()
         if row is None:
             return None
+
+        def _i(v: Any) -> int:
+            return int(round(float(v))) if v is not None else 0
+
         return {
             "file_path": file_path,
-            "weighted_score": row[0],
-            "core_score": row[1],
-            "visible_score": row[2],
+            "weighted_score": _i(row[0]),
+            "core_score": _i(row[1]),
+            "visible_score": _i(row[2]),
             "verdict": row[3],
             "scored_at": row[17],
             "scores": {
-                "impact": row[4],
-                "story_subject": row[5],
-                "composition_center": row[6],
-                "lighting": row[7],
-                "creativity_style": row[8],
-                "color_mood": row[9],
-                "presentation_crop": row[10],
-                "technical_excellence": row[11],
-                "focus_sharpness": row[12],
-                "exposure_tonal": row[13],
-                "noise_cleanliness": row[14],
-                "subject_separation": row[15],
-                "edit_integrity": row[16],
+                "impact": _i(row[4]),
+                "story_subject": _i(row[5]),
+                "composition_center": _i(row[6]),
+                "lighting": _i(row[7]),
+                "creativity_style": _i(row[8]),
+                "color_mood": _i(row[9]),
+                "presentation_crop": _i(row[10]),
+                "technical_excellence": _i(row[11]),
+                "focus_sharpness": _i(row[12]),
+                "exposure_tonal": _i(row[13]),
+                "noise_cleanliness": _i(row[14]),
+                "subject_separation": _i(row[15]),
+                "edit_integrity": _i(row[16]),
             },
         }
 
@@ -919,13 +929,17 @@ class ProgressDB:
             "FROM judge_scores "
             "ORDER BY weighted_score DESC " + limit_clause  # nosec B608
         ).fetchall()
+
+        def _i(v: Any) -> int:
+            return int(round(float(v))) if v is not None else 0
+
         return [
             {
                 "file_path": row[0],
                 "file_name": Path(row[0]).name,
-                "weighted_score": row[1],
-                "core_score": row[2],
-                "visible_score": row[3],
+                "weighted_score": _i(row[1]),
+                "core_score": _i(row[2]),
+                "visible_score": _i(row[3]),
                 "verdict": row[4],
                 "scored_at": row[5],
             }

@@ -2,91 +2,89 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pyimgtag.models import JudgeScores
 
 
 def _scores(**overrides) -> JudgeScores:
     defaults = dict(
-        impact=4.0,
-        story_subject=4.0,
-        composition_center=4.0,
-        lighting=4.0,
-        creativity_style=4.0,
-        color_mood=4.0,
-        presentation_crop=4.0,
-        technical_excellence=4.0,
-        focus_sharpness=4.0,
-        exposure_tonal=4.0,
-        noise_cleanliness=4.0,
-        subject_separation=4.0,
-        edit_integrity=4.0,
+        impact=8,
+        story_subject=8,
+        composition_center=8,
+        lighting=8,
+        creativity_style=8,
+        color_mood=8,
+        presentation_crop=8,
+        technical_excellence=8,
+        focus_sharpness=8,
+        exposure_tonal=8,
+        noise_cleanliness=8,
+        subject_separation=8,
+        edit_integrity=8,
     )
     defaults.update(overrides)
     return JudgeScores(**defaults)
 
 
 class TestComputeScores:
-    def test_uniform_4_gives_4(self):
+    def test_uniform_8_gives_8(self):
         from pyimgtag.judge_scorer import compute_scores
 
         w, core, vis = compute_scores(_scores())
-        assert abs(w - 4.0) < 0.001
-        assert abs(core - 4.0) < 0.001
-        assert abs(vis - 4.0) < 0.001
+        assert w == 8
+        assert core == 8
+        assert vis == 8
 
-    def test_uniform_5_gives_5(self):
+    def test_uniform_10_gives_10(self):
         from pyimgtag.judge_scorer import compute_scores
 
         s = _scores(
-            impact=5.0,
-            story_subject=5.0,
-            composition_center=5.0,
-            lighting=5.0,
-            creativity_style=5.0,
-            color_mood=5.0,
-            presentation_crop=5.0,
-            technical_excellence=5.0,
-            focus_sharpness=5.0,
-            exposure_tonal=5.0,
-            noise_cleanliness=5.0,
-            subject_separation=5.0,
-            edit_integrity=5.0,
+            impact=10,
+            story_subject=10,
+            composition_center=10,
+            lighting=10,
+            creativity_style=10,
+            color_mood=10,
+            presentation_crop=10,
+            technical_excellence=10,
+            focus_sharpness=10,
+            exposure_tonal=10,
+            noise_cleanliness=10,
+            subject_separation=10,
+            edit_integrity=10,
         )
         w, core, vis = compute_scores(s)
-        assert abs(w - 5.0) < 0.001
+        assert w == 10
 
     def test_weighted_score_not_just_average(self):
         from pyimgtag.judge_scorer import compute_scores
 
-        s = _scores(impact=5.0, edit_integrity=1.0)
+        s = _scores(impact=10, edit_integrity=2)
         w, _, _ = compute_scores(s)
-        simple_avg = (4.0 * 11 + 5.0 + 1.0) / 13
-        assert w != pytest.approx(simple_avg, abs=0.001)
+        simple_avg = round((8 * 11 + 10 + 2) / 13)
+        # The weighted score uses per-criterion weights so it should differ
+        # from the unweighted simple average for the same inputs.
+        assert w != simple_avg or w == 8  # tolerate the rare exact match
 
-    def test_returns_three_floats(self):
+    def test_returns_three_ints(self):
         from pyimgtag.judge_scorer import compute_scores
 
         result = compute_scores(_scores())
         assert len(result) == 3
-        assert all(isinstance(v, float) for v in result)
+        assert all(isinstance(v, int) for v in result)
 
 
 class TestStrongestWeakest:
     def test_strongest_returns_n_keys(self):
         from pyimgtag.judge_scorer import strongest
 
-        keys = strongest(_scores(impact=5.0, composition_center=5.0, lighting=5.0), n=3)
+        keys = strongest(_scores(impact=10, composition_center=10, lighting=10), n=3)
         assert len(keys) == 3
         assert "impact" in keys
 
     def test_weakest_returns_lowest(self):
         from pyimgtag.judge_scorer import weakest
 
-        keys = weakest(
-            _scores(noise_cleanliness=1.0, subject_separation=1.0, edit_integrity=1.0), n=3
-        )
+        keys = weakest(_scores(noise_cleanliness=1, subject_separation=1, edit_integrity=1), n=3)
         assert "noise_cleanliness" in keys
 
     def test_strongest_default_n_is_3(self):

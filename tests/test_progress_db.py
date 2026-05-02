@@ -1370,36 +1370,36 @@ class TestJudgeScores:
 
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             scores = JudgeScores(
-                impact=4.0,
-                story_subject=3.5,
-                composition_center=4.5,
-                lighting=3.0,
-                creativity_style=2.5,
-                color_mood=4.0,
-                presentation_crop=3.5,
-                technical_excellence=4.0,
-                focus_sharpness=4.5,
-                exposure_tonal=3.5,
-                noise_cleanliness=4.0,
-                subject_separation=3.0,
-                edit_integrity=3.5,
+                impact=8,
+                story_subject=7,
+                composition_center=9,
+                lighting=6,
+                creativity_style=5,
+                color_mood=8,
+                presentation_crop=7,
+                technical_excellence=8,
+                focus_sharpness=9,
+                exposure_tonal=7,
+                noise_cleanliness=8,
+                subject_separation=6,
+                edit_integrity=7,
                 verdict="Strong composition, good light",
             )
             result = JudgeResult(
                 file_path="/photos/img.jpg",
                 file_name="img.jpg",
                 scores=scores,
-                weighted_score=3.73,
-                core_score=3.80,
-                visible_score=3.65,
+                weighted_score=7,
+                core_score=8,
+                visible_score=7,
             )
             db.save_judge_result(result)
             got = db.get_judge_result("/photos/img.jpg")
         assert got is not None
-        assert got["weighted_score"] == pytest.approx(3.73, abs=1e-4)
-        assert got["core_score"] == pytest.approx(3.80, abs=1e-4)
+        assert got["weighted_score"] == 7
+        assert got["core_score"] == 8
         assert got["verdict"] == "Strong composition, good light"
-        assert got["scores"]["impact"] == pytest.approx(4.0)
+        assert got["scores"]["impact"] == 8
 
     def test_get_judge_result_missing_returns_none(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
@@ -1420,10 +1420,10 @@ class TestJudgeScores:
                     visible_score=score,
                 )
 
-            db.save_judge_result(_make_result(3.0))
-            db.save_judge_result(_make_result(4.5))
+            db.save_judge_result(_make_result(6))
+            db.save_judge_result(_make_result(9))
             got = db.get_judge_result("/photos/img.jpg")
-        assert got["weighted_score"] == pytest.approx(4.5, abs=1e-4)
+        assert got["weighted_score"] == 9
 
     def test_migration_v5_applies_to_existing_db(self, tmp_path):
         """Opening a v4 DB should apply v5 migration and create judge_scores."""
