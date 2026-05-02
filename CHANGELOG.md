@@ -5,10 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2026-05-02
 
 ### Added
-- **Pluggable vision backends**: `pyimgtag run` and `pyimgtag judge` accept `--backend ollama|anthropic|openai|gemini`. The default `ollama` backend is unchanged (and still supports remote Ollama via `--ollama-url`); the three new backends call hosted vision APIs. API keys are read from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GOOGLE_API_KEY`/`GEMINI_API_KEY` respectively, or via `--api-key`. `--api-base` overrides the cloud-API base URL for self-hosted gateways. Per-backend default models: `gemma4:e4b` (ollama), `claude-sonnet-4-6` (anthropic), `gpt-4o-mini` (openai), `gemini-1.5-flash` (gemini).
+- **Pluggable vision backends**: `pyimgtag run` and `pyimgtag judge` accept `--backend ollama|anthropic|openai|gemini`. The default `ollama` backend is unchanged (and still supports remote Ollama via `--ollama-url`); the three new backends call hosted vision APIs. API keys are read from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `GOOGLE_API_KEY`/`GEMINI_API_KEY` respectively, or via `--api-key`. `--api-base` overrides the cloud-API base URL for self-hosted gateways. Per-backend default models: `gemma4:e4b` (ollama), `claude-sonnet-4-6` (anthropic), `gpt-4o-mini` (openai), `gemini-1.5-flash` (gemini). (#137)
+- New module `pyimgtag.cloud_clients` exposes `AnthropicClient`, `OpenAIClient`, `GeminiClient`, `make_image_client`, and `CloudClientError` for programmatic use; image preprocessing (HEIC, RAW, resize, JPEG, base64) is now factored into `pyimgtag.ollama_client.prepare_image_b64` and shared across all four clients. (#137)
+- New wiki page **Choosing a Backend** with the provider matrix, request lifecycle, failure modes, and a Mermaid backend-dispatch diagram.
+
+### Fixed
+- `pyimgtag run`, `pyimgtag judge`, and `pyimgtag faces scan` now exit with status `1` after `Ctrl+C`. They previously caught `KeyboardInterrupt`, printed `Interrupted.`, and returned `0`, so user-cancelled runs were indistinguishable from successful ones in CI / scripts. (#136)
 
 ## [0.7.0] - 2026-05-02
 
