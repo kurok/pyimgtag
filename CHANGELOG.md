@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-05-03
+
+### Fixed
+- **Judge dashboard reads the CLI's progress DB** (#155): `pyimgtag judge` now opens a `ProgressDB` even when `--db` is omitted (it used to silently skip writes), and the bundled webapp passes `args.db` through `create_unified_app(db_path=…)` so the dashboard, Query, and Judge pages all read from the same file the CLI is writing to. Fixes the "0 scored" dashboard while a CLI run was actively producing scores.
+- **AppleScript cold-start retry** (#155): `read_keywords_from_photos()` now retries once after a 1.5 s sleep when the Photos.app bridge returns `None`. The first call into a freshly-launched Photos used to fail with "append mode: failed to read existing keywords, write aborted" for one image even when subsequent calls worked.
+- **About page wiki section** (#155): GitHub serves the wiki with `X-Frame-Options: DENY`, so the embedded iframe always rendered as a broken-document icon. Replaced it with a CTA panel that links to the wiki landing page and the use-case diagrams in a new tab.
+
 ## [0.11.1] - 2026-05-03
 
 ### Tests
