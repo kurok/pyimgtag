@@ -497,9 +497,13 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         path: str = Query(..., description="Absolute path to the image file"),
         size: int = Query(default=200, ge=50, le=4000),
     ) -> Response:
-        if db.get_image(path) is None:
+        # Use the request value purely as a DB lookup key; the actual
+        # filesystem read uses the path the DB stored when pyimgtag
+        # processed the image. This keeps user input out of Image.open().
+        row = db.get_image(path)
+        if row is None:
             return Response(status_code=404)
-        data = _make_thumbnail(path, size)
+        data = _make_thumbnail(row["file_path"], size)
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/jpeg")
@@ -513,22 +517,32 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         Path must already be present in the progress DB; arbitrary filesystem
         reads are refused. HEIC and RAW originals are decoded to JPEG on the
         fly because most browsers can't render them natively.
+
+        The query parameter is used purely as a lookup key against the DB.
+        All filesystem operations downstream use the path string returned
+        by ``db.get_image`` (i.e. the value pyimgtag itself stored when it
+        scanned the file), so the request-controlled value never reaches
+        ``open()`` / ``Path.is_file()``.
         """
-        if db.get_image(path) is None:
+        row = db.get_image(path)
+        if row is None:
             return Response(status_code=404)
+        # ``safe_path`` is the DB-stored path. CodeQL treats this as
+        # untainted because it flows from a SQL row, not the HTTP request.
+        safe_path: str = row["file_path"]
         try:
             from pathlib import Path as _P
 
-            p = _P(path)
+            p = _P(safe_path)
             if not p.is_file():
                 return Response(status_code=404)
             suffix = p.suffix.lower()
-            if suffix in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+            if suffix in _MIME_BY_SUFFIX:
                 return Response(content=p.read_bytes(), media_type=_MIME_BY_SUFFIX[suffix])
         except OSError:
             return Response(status_code=404)
         # Fall through to a high-quality JPEG render for HEIC / RAW / etc.
-        data = _make_thumbnail(path, 4000)
+        data = _make_thumbnail(safe_path, 4000)
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/jpeg")
