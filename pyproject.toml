@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyimgtag"
-version = "0.13.0"
+version = "0.13.1"
 description = "Tag macOS Photos library images using local Gemma model for searchable tags"
 readme = "README.md"
 license = {text = "MIT"}
@@ -30,21 +30,25 @@ dependencies = [
 [project.optional-dependencies]
 heic = ["pillow-heif>=0.10.0"]
 photos = ["photoscript>=0.5.3"]
-# face_recognition_models is a runtime dependency of face-recognition that is
-# NOT published to PyPI — it only exists at the upstream git URL below. It must
-# stay in this extras list (and out of the wheel's runtime install_requires)
-# because PyPI rejects published packages that declare direct-URL dependencies
-# in their core metadata. Direct URLs are tolerated for source / editable
-# installs from extras, which is exactly the install path we want for users
-# opting into face features. Do not "tidy up" the URL into a normal version
-# pin — there is no PyPI release to pin against.
+# IMPORTANT: face_recognition_models is a runtime dependency of
+# face-recognition that is NOT published to PyPI — it only exists at the
+# upstream git URL https://github.com/ageitgey/face_recognition_models.
+# We can NOT list it here, even in extras: PyPI rejects published packages
+# whose core metadata declares direct-URL dependencies (returns
+# `400 Can't have direct dependency …`). Users have to install it
+# themselves after installing pyimgtag from PyPI:
+#
+#     pip install 'pyimgtag[face]'
+#     pip install "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"
+#
+# The pre-flight check in src/pyimgtag/_face_dep_check.py prints this
+# command (with `sys.executable -m pip install …`) when the models
+# package is missing, so the user always gets an actionable next step.
+# `setuptools` is kept here so `from pkg_resources import …` (used by
+# face_recognition_models at import time) doesn't trip on Python 3.12+,
+# which no longer bundles setuptools by default.
 face = [
     "face-recognition>=1.3",
-    "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models",
-    # face_recognition_models does ``from pkg_resources import …`` at
-    # import time. ``pkg_resources`` ships with setuptools, which is no
-    # longer bundled by default in Python 3.12+ — pin it here so a fresh
-    # ``pip install '.[face]'`` doesn't trip on a missing pkg_resources.
     "setuptools>=68.0",
     "scikit-learn>=1.3",
 ]
@@ -53,10 +57,9 @@ raw = ["rawpy>=0.18"]
 all = [
     "pillow-heif>=0.10.0",
     "photoscript>=0.5.3",
+    # See note above on [face]: face_recognition_models cannot be listed
+    # here either; it is installed separately from a git URL.
     "face-recognition>=1.3",
-    # See note above on the [face] extra: this direct URL must stay in extras.
-    "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models",
-    # See note in [face]: needed for face_recognition_models' pkg_resources import.
     "setuptools>=68.0",
     "scikit-learn>=1.3",
     "fastapi>=0.100",

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-05-03
+
+### Fixed
+- **PyPI publish blocked by direct-URL dep in `[face]` extras**: v0.13.0's wheel + sdist could not be uploaded — PyPI returned `400 Can't have direct dependency: face_recognition_models @ git+…; extra == "face"` because PEP 503 / core-metadata forbids direct URL deps in *any* metadata field, including extras. Removed the `face_recognition_models @ git+…` line from `[face]` and `[all]`. The pre-flight check in `_face_dep_check.py` (added in 0.13.0) already prints the exact `pip install …` command, so the user gets an actionable error the first time they hit it. README's "Faces" section was rewritten to make the manual install step obvious for both PyPI and source installs.
+
 ## [0.13.0] - 2026-05-03
 
 ### Added
