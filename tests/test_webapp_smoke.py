@@ -339,9 +339,27 @@ class TestApiContracts:
         assert not any(it["judge_score"] == 8 for it in excluded)
 
     def test_query_api_sort_judge_desc_accepted(self, client: TestClient) -> None:
-        for s in ("path_asc", "path_desc", "newest", "oldest", "judge_asc", "judge_desc"):
+        for s in (
+            "path_asc",
+            "path_desc",
+            "newest",
+            "oldest",
+            "judge_asc",
+            "judge_desc",
+            "shot_asc",
+            "shot_desc",
+        ):
             r = client.get("/query/api/images", params={"sort": s})
             assert r.status_code == 200, s
+
+    def test_query_api_image_date_field_present(self, client: TestClient) -> None:
+        """Every Query result row must carry image_date so the JS can
+        render the Date column. The seeded image has no EXIF capture so
+        the field is None — that's the contract: the key is always there
+        and the JS falls back to an em-dash."""
+        d = client.get("/query/api/images").json()
+        assert d, "seeded DB should have at least one image"
+        assert "image_date" in d[0]
 
     def test_query_api_judged_filter(self, client: TestClient) -> None:
         only_judged = client.get("/query/api/images", params={"judged": "true"}).json()
@@ -395,6 +413,53 @@ class TestThumbnailAndOriginal:
         assert r.status_code == 200
         # Seeded JPEG → JPEG bytes.
         assert r.headers["content-type"].startswith("image/")
+
+
+class TestOpenInPhotos:
+    """``POST /review/api/open-in-photos`` looks the path up in the DB and
+    delegates to ``reveal_in_photos``. Unknown paths return ``ok=False``;
+    a successful AppleScript (mocked) returns ``ok=True``; an error from
+    the AppleScript layer is surfaced verbatim so the JS can fall back."""
+
+    def test_open_in_photos_unknown_path(self, client: TestClient) -> None:
+        r = client.post(
+            "/review/api/open-in-photos",
+            params={"path": "/not/in/db.jpg"},
+        )
+        assert r.status_code == 200
+        d = r.json()
+        assert d["ok"] is False
+        assert "not found" in d["error"].lower()
+
+    def test_open_in_photos_success(self, client: TestClient) -> None:
+        from unittest.mock import patch
+
+        with patch(
+            "pyimgtag.applescript_writer.reveal_in_photos",
+            return_value=None,
+        ):
+            r = client.post(
+                "/review/api/open-in-photos",
+                params={"path": client.test_image_path},  # type: ignore[attr-defined]
+            )
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+
+    def test_open_in_photos_propagates_error(self, client: TestClient) -> None:
+        from unittest.mock import patch
+
+        with patch(
+            "pyimgtag.applescript_writer.reveal_in_photos",
+            return_value="osascript timed out while revealing photo",
+        ):
+            r = client.post(
+                "/review/api/open-in-photos",
+                params={"path": client.test_image_path},  # type: ignore[attr-defined]
+            )
+        assert r.status_code == 200
+        d = r.json()
+        assert d["ok"] is False
+        assert "osascript" in d["error"]
 
 
 class TestAboutPage:

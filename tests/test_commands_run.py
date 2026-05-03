@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from pyimgtag.models import ExifData
 from pyimgtag.scanner import scan_directory
 
 
@@ -513,7 +514,7 @@ class TestRunSessionWiring:
             patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
             patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
             patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
-            patch("pyimgtag.commands.run.read_exif"),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
         ):
             ollama = MagicMock()
             ollama.tag_image.return_value = MagicMock(
@@ -597,7 +598,7 @@ class TestRunSessionWiring:
             patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
             patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
             patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
-            patch("pyimgtag.commands.run.read_exif"),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
         ):
             ollama = MagicMock()
             ollama.tag_image.side_effect = fake_tag_image
@@ -733,7 +734,7 @@ class TestSequentialPauseGate:
             patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
             patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
             patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
-            patch("pyimgtag.commands.run.read_exif"),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
             patch("pyimgtag.webapp.bootstrap.start_dashboard_for", return_value=(session, None)),
         ):
             ollama = MagicMock()
@@ -853,7 +854,7 @@ class TestThreadedPauseGate:
             patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
             patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
             patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
-            patch("pyimgtag.commands.run.read_exif"),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
             patch("pyimgtag.webapp.bootstrap.start_dashboard_for", return_value=(session, None)),
         ):
             ollama = MagicMock()

@@ -383,3 +383,68 @@ def write_to_photos(
         if result is None:
             return None
     return _write_via_osascript(file_name, final_tags, summary, title=title)
+
+
+def _build_reveal_applescript(file_name: str) -> str:
+    """Build AppleScript that activates Photos and reveals the matching item."""
+    stem = PurePosixPath(file_name).stem
+    safe_file_name = _escape_applescript_string(file_name)
+
+    if _looks_like_uuid(stem):
+        uuid = _escape_applescript_string(stem)
+        lookup = (
+            "    try\n"
+            f'        set theItem to media item id "{uuid}"\n'
+            "    on error\n"
+            + _filename_scan_block(safe_file_name, indent="        ")
+            + "    end try\n"
+        )
+    else:
+        lookup = _filename_scan_block(safe_file_name)
+
+    return (
+        'tell application "Photos"\n'
+        + "    activate\n"
+        + lookup
+        + "    spotlight theItem\n"
+        + "end tell"
+    )
+
+
+def reveal_in_photos(file_path: str) -> str | None:
+    """Activate Apple Photos and reveal the matching item.
+
+    **macOS only.** Returns ``None`` on success, or an error message string
+    on failure (non-macOS, osascript missing, photo not found, AppleScript
+    error). Photo lookup mirrors the writer path: UUID stems try ``media
+    item id`` first, then fall back to a filename scan; non-UUID stems go
+    straight to the filename scan.
+    """
+    if not _IS_MACOS:
+        return "Apple Photos reveal is only available on macOS"
+    if not is_applescript_available():
+        return "osascript is not available on this system"
+
+    file_name = PurePosixPath(file_path).name
+    script = _build_reveal_applescript(file_name)
+
+    try:
+        proc = subprocess.run(  # noqa: S603
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return "osascript timed out while revealing photo"
+    except OSError as exc:
+        return f"Failed to launch osascript: {exc}"
+
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        return (
+            f"AppleScript error (exit {proc.returncode}): {stderr}"
+            if stderr
+            else f"AppleScript failed with exit code {proc.returncode}"
+        )
+    return None
