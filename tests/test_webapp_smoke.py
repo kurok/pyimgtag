@@ -143,6 +143,7 @@ _JSON_APIS = [
     ("/faces/api/persons", []),
     ("/edit/api/marked", []),
     ("/edit/api/status", []),
+    ("/edit/api/drift", []),
     ("/about/api/version", []),
 ]
 
@@ -970,3 +971,146 @@ class TestEditCategoriseApplescriptError:
         from pyimgtag.webapp.routes_edit import _categorise_applescript_error
 
         assert _categorise_applescript_error("something deeply weird") == "photos_error"
+
+
+# ---------------------------------------------------------------------------
+# Edit page: DB drift cleanup panel.
+#
+# The drift scan is platform-agnostic for the disk-presence check, but the
+# Photos.app probe needs mocking out so CI on Linux runners exercises the
+# same code path as macOS. Each test forces the probe to return ``None``
+# (degraded) so only ``disk_missing`` rows are detected — that's what
+# matters for the API contract anyway.
+# ---------------------------------------------------------------------------
+
+
+def _seed_drift_db(db_path: Path, tmp_path: Path) -> tuple[str, str]:
+    """Insert one ``present`` row and one ``disk_missing`` row.
+
+    Returns (present_path, disk_missing_path) so callers can assert which
+    row was pruned. The ``disk_missing`` file is written then unlinked
+    so the row exists in the DB but the file is gone.
+    """
+    from PIL import Image as _PIL
+
+    present = tmp_path / "drift_present.jpg"
+    _PIL.new("RGB", (8, 8), color=(80, 100, 120)).save(str(present))
+    disk_missing = tmp_path / "drift_gone.jpg"
+    _PIL.new("RGB", (8, 8), color=(120, 100, 80)).save(str(disk_missing))
+
+    with ProgressDB(db_path=db_path) as db:
+        for p in (present, disk_missing):
+            db.mark_done(
+                p,
+                ImageResult(
+                    file_path=str(p),
+                    file_name=p.name,
+                    source_type="directory",
+                    tags=["x"],
+                    scene_summary="seed",
+                    processing_status="ok",
+                ),
+            )
+
+    disk_missing.unlink()
+    return str(present), str(disk_missing)
+
+
+@pytest.fixture()
+def drift_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """Edit fixture seeded with one present + one disk_missing row.
+
+    Mocks the bulk Photos probe to return ``("parse_error")`` so the
+    test runs on every OS and only the disk-presence signal is used.
+    """
+    db_path = tmp_path / "drift.db"
+    present, gone = _seed_drift_db(db_path, tmp_path)
+
+    def _fake_probe() -> tuple[set[str], str | None]:
+        # Empty set + an error string forces the scanner into the
+        # disk-only branch. The on-disk row collapses into ``present``;
+        # the deleted file is still flagged as ``disk_missing``.
+        return set(), "parse_error"
+
+    monkeypatch.setattr("pyimgtag.cleanup_drift.fetch_photos_membership", _fake_probe)
+
+    app = create_unified_app(db_path=db_path)
+    from pyimgtag.webapp import routes_edit
+
+    routes_edit._reset_job_for_tests()
+    with TestClient(app) as c:
+        c.present_path = present  # type: ignore[attr-defined]
+        c.gone_path = gone  # type: ignore[attr-defined]
+        c.db_path = db_path  # type: ignore[attr-defined]
+        yield c
+    routes_edit._reset_job_for_tests()
+
+
+class TestEditDriftPanel:
+    def test_drift_endpoint_shape(self, drift_client: TestClient) -> None:
+        d = drift_client.get("/edit/api/drift").json()
+        for key in ("total", "disk_missing", "photos_missing", "sample"):
+            assert key in d, f"/edit/api/drift response missing {key!r}: {d}"
+        assert d["total"] == 2
+        assert d["disk_missing"] == 1
+        # Probe is forced into the degraded path; ``photos_missing``
+        # cannot be inferred without a usable Photos membership map.
+        assert d["photos_missing"] == 0
+        # The sample lists the dead path so the UI can render a
+        # preview without a second round-trip.
+        assert drift_client.gone_path in d["sample"]  # type: ignore[attr-defined]
+
+    def test_prune_drift_rejects_missing_confirmation(self, drift_client: TestClient) -> None:
+        r = drift_client.post("/edit/api/prune-drift", json={})
+        assert r.status_code == 400
+        assert r.json()["error"] == "confirmation_required"
+
+    def test_prune_drift_happy_path_removes_dead_row(self, drift_client: TestClient) -> None:
+        from pyimgtag.progress_db import ProgressDB
+
+        r = drift_client.post("/edit/api/prune-drift", json={"confirm": True})
+        assert r.status_code == 200, r.text
+        assert r.json()["ok"] is True
+
+        # Wait for the worker to finish.
+        for _ in range(50):
+            d = drift_client.get("/edit/api/status").json()
+            if d["state"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+
+        d = drift_client.get("/edit/api/status").json()
+        assert d["state"] == "done", d
+        assert d["total"] == 1  # exactly one dead row
+        assert d["ok"] == 1
+        assert d["done"] == 1
+
+        with ProgressDB(db_path=drift_client.db_path) as db:  # type: ignore[attr-defined]
+            paths = sorted(db.iter_image_paths())
+            # Only the present row survives.
+            assert paths == [drift_client.present_path]  # type: ignore[attr-defined]
+
+    def test_prune_drift_rejects_overlapping_jobs(self, drift_client: TestClient) -> None:
+        """Prune-drift must respect the same singleton lock as delete-from-Photos."""
+        from pyimgtag.webapp import routes_edit
+
+        routes_edit._JOB = routes_edit._Job(job_id="held", state="running")
+        try:
+            r = drift_client.post("/edit/api/prune-drift", json={"confirm": True})
+            assert r.status_code == 400
+            assert r.json()["error"] == "job_already_running"
+        finally:
+            routes_edit._reset_job_for_tests()
+
+    def test_delete_from_photos_blocks_while_drift_running(self, drift_client: TestClient) -> None:
+        """The two destructive jobs must not run simultaneously."""
+        from pyimgtag.webapp import routes_edit
+
+        # Pretend a drift-prune is in flight.
+        routes_edit._JOB = routes_edit._Job(job_id="drift-held", state="running")
+        try:
+            r = drift_client.post("/edit/api/run", json={"confirm": True})
+            assert r.status_code == 400
+            assert r.json()["error"] == "job_already_running"
+        finally:
+            routes_edit._reset_job_for_tests()

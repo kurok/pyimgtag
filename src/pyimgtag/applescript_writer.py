@@ -450,6 +450,105 @@ def reveal_in_photos(file_path: str) -> str | None:
     return None
 
 
+def _build_membership_applescript() -> str:
+    """Bulk AppleScript that returns the full ``id\\tfilename`` membership map.
+
+    One call dumps every media item in the library so the drift cleanup
+    can decide presence in O(1) Python lookups rather than spawning one
+    osascript per DB row. Each output line is ``<id>\\t<filename>``;
+    callers drop blank lines defensively.
+
+    A per-item ``try`` block keeps a single misbehaving photo (iCloud-
+    only, broken alias, etc.) from killing the whole traversal.
+    """
+    return (
+        'tell application "Photos"\n'
+        '    set out to ""\n'
+        "    set lf to ASCII character 10\n"
+        "    set ht to ASCII character 9\n"
+        "    repeat with p in (get media items)\n"
+        "        try\n"
+        "            set out to out & (id of p) & ht & (filename of p) & lf\n"
+        "        end try\n"
+        "    end repeat\n"
+        "    return out\n"
+        "end tell"
+    )
+
+
+# Cap the bulk membership scan generously — Apple Photos can take many
+# minutes to enumerate a 20k+ library. Aligns with the ceiling used by
+# the faces import flow (see photos_faces_importer).
+_MEMBERSHIP_TIMEOUT_SECONDS = 1800
+
+
+def fetch_photos_membership(
+    timeout: int = _MEMBERSHIP_TIMEOUT_SECONDS,
+) -> tuple[set[str], str | None]:
+    """Return a set of every Photos.app media-item id + filename.
+
+    The set conflates UUIDs with bare filenames so the caller can
+    answer "is this DB row's file known to Photos?" with a single
+    ``in`` test no matter whether the on-disk stem is a UUID
+    (``ABCD-…-EF.jpg``) or a free-form name (``IMG_1234.HEIC``).
+
+    Args:
+        timeout: Subprocess timeout in seconds. Defaults to 30 minutes
+            so very large libraries do not trip a spurious failure.
+
+    Returns:
+        Tuple of ``(membership, error)``. ``membership`` is the union
+        of media-item ids and filenames the script returned. ``error``
+        is ``None`` on success and a short category string on failure
+        — ``"platform_unsupported"`` (non-macOS), ``"osascript_missing"``,
+        ``"timeout"``, ``"parse_error"`` (the ``-2741`` flake), or
+        ``"applescript_failed"`` for any other non-zero exit.
+
+        On any non-``None`` error the membership set is empty and the
+        caller should degrade to the disk-only check.
+    """
+    if not _IS_MACOS:
+        return set(), "platform_unsupported"
+    if not is_applescript_available():
+        return set(), "osascript_missing"
+
+    script = _build_membership_applescript()
+
+    try:
+        proc = subprocess.run(  # noqa: S603
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return set(), "timeout"
+    except OSError:
+        return set(), "osascript_missing"
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        # The ``-2741`` parse flake is the Photos.app dictionary issue
+        # the user has hit before; surface a dedicated category so the
+        # drift command can degrade rather than spinning forever.
+        if "(-2741)" in stderr or "syntax error" in stderr.lower():
+            return set(), "parse_error"
+        return set(), "applescript_failed"
+
+    membership: set[str] = set()
+    for line in (proc.stdout or "").splitlines():
+        if not line or "\t" not in line:
+            continue
+        item_id, filename = line.split("\t", 1)
+        item_id = item_id.strip()
+        filename = filename.strip()
+        if item_id:
+            membership.add(item_id)
+        if filename:
+            membership.add(filename)
+    return membership, None
+
+
 def _build_delete_applescript(file_name: str) -> str:
     """Build AppleScript that deletes the matching media item from Photos.
 

@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     import numpy as np
 
     from pyimgtag.models import JudgeResult
@@ -685,6 +687,48 @@ class ProgressDB:
         )
         self._conn.commit()
         return cur.rowcount > 0
+
+    def iter_image_paths(self, batch_size: int = 1000) -> "Iterator[str]":
+        """Yield every ``file_path`` from ``processed_images`` in batches.
+
+        The drift-cleanup walk runs over a 22 k-row DB on the user's
+        machine; pulling everything into a single Python list pays an
+        unnecessary memory cost. ``LIMIT … OFFSET`` paginates server-side
+        so the generator can be drained lazily.
+        """
+        offset = 0
+        while True:
+            rows = self._conn.execute(
+                "SELECT file_path FROM processed_images ORDER BY file_path LIMIT ? OFFSET ?",
+                (int(batch_size), int(offset)),
+            ).fetchall()
+            if not rows:
+                return
+            for (path,) in rows:
+                yield path
+            if len(rows) < batch_size:
+                return
+            offset += len(rows)
+
+    def delete_image_rows(self, paths: list[str]) -> int:
+        """Bulk-delete rows from ``processed_images`` matching *paths*.
+
+        Uses a single ``executemany`` so pruning thousands of stale rows
+        from the DB drift cleanup is one round-trip per batch rather
+        than one-per-path. Returns the number of rows actually removed
+        (which may be smaller than ``len(paths)`` when some paths were
+        already gone).
+        """
+        if not paths:
+            return 0
+        before = self._conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0]
+        self._conn.executemany(
+            "DELETE FROM processed_images WHERE file_path = ?",
+            [(p,) for p in paths],
+        )
+        self._conn.commit()
+        after = self._conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0]
+        return int(before - after)
 
     @staticmethod
     def _image_row_to_dict(row: tuple) -> dict:
