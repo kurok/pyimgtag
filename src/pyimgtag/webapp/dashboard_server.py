@@ -54,6 +54,7 @@ def _render_html() -> str:
   <span style="flex:1"></span>
   <button id="pauseBtn" class="ctrl-btn">Pause</button>
   <button id="unpauseBtn" class="ctrl-btn" disabled>Unpause</button>
+  <button id="stopBtn" class="ctrl-btn" style="color:var(--danger);border-color:var(--danger)" disabled>Stop</button>
 </div>
 <div id="current">(no active item)</div>
 <div class="dash-grid" id="counters"></div>
@@ -72,6 +73,7 @@ def _render_html() -> str:
   const errorEl = document.getElementById('error');
   const pauseBtn = document.getElementById('pauseBtn');
   const unpauseBtn = document.getElementById('unpauseBtn');
+  const stopBtn = document.getElementById('stopBtn');
 
   async function refresh() {
     try {
@@ -87,6 +89,7 @@ def _render_html() -> str:
         errorEl.textContent = '';
         pauseBtn.disabled = true;
         unpauseBtn.disabled = true;
+        stopBtn.disabled = true;
         return;
       }
       stateEl.textContent = d.state || 'running';
@@ -108,6 +111,7 @@ def _render_html() -> str:
       errorEl.textContent = d.error || '';
       pauseBtn.disabled = d.state !== 'running';
       unpauseBtn.disabled = d.state !== 'paused';
+      stopBtn.disabled = d.state === 'completed' || d.state === 'interrupted' || d.state === 'failed';
       countersEl.innerHTML = '';
       for (const [k, v] of Object.entries(d.counters || {})) {
         const card = document.createElement('div');
@@ -126,13 +130,13 @@ def _render_html() -> str:
       for (const item of (d.recent || [])) {
         const li = document.createElement('li');
         li.className = 'recent-li';
+        li.style.flexWrap = 'wrap';
         const s = document.createElement('span');
         s.className = 'recent-status ' + (item.status || '');
         s.textContent = item.status || '';
         const p = document.createElement('span');
         p.className = 'recent-path';
         if (item.path) {
-          // Click any recent path to jump straight to its review card.
           const a = document.createElement('a');
           a.href = '/review?file=' + encodeURIComponent(item.path);
           a.textContent = item.path;
@@ -141,6 +145,12 @@ def _render_html() -> str:
         }
         li.appendChild(s);
         li.appendChild(p);
+        if (item.detail || item.error) {
+          const d2 = document.createElement('span');
+          d2.style.cssText = 'flex-basis:100%;padding-left:52px;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+          d2.textContent = item.detail || ('error: ' + item.error);
+          li.appendChild(d2);
+        }
         recentEl.appendChild(li);
       }
     } catch (e) { errorEl.textContent = String(e); }
@@ -152,6 +162,11 @@ def _render_html() -> str:
   });
   unpauseBtn.addEventListener('click', async () => {
     await fetch('/api/run/current/unpause', {method: 'POST'});
+    refresh();
+  });
+  stopBtn.addEventListener('click', async () => {
+    if (!confirm('Stop the run after the current image finishes?')) return;
+    await fetch('/api/run/current/stop', {method: 'POST'});
     refresh();
   });
 
@@ -203,6 +218,14 @@ def build_dashboard_router() -> Any:
         if session is None:
             raise HTTPException(status_code=404, detail="no active run")
         session.resume()
+        return session.snapshot()
+
+    @router.post("/api/run/current/stop")
+    async def stop_current() -> dict:
+        session = get_current()
+        if session is None:
+            raise HTTPException(status_code=404, detail="no active run")
+        session.request_stop()
         return session.snapshot()
 
     return router
