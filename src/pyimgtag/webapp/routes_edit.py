@@ -155,9 +155,7 @@ def _run_job(db: ProgressDB, job: _Job) -> None:
                 with _JOB_LOCK:
                     job.failed += 1
                     job.done += 1
-                    job.recent.append(
-                        {"file_name": name, "status": "error", "error": "db_error"}
-                    )
+                    job.recent.append({"file_name": name, "status": "error", "error": "db_error"})
                 continue
             with _JOB_LOCK:
                 job.ok += 1
@@ -170,9 +168,7 @@ def _run_job(db: ProgressDB, job: _Job) -> None:
                 job.failed += 1
                 job.done += 1
                 job.last_error = category
-                job.recent.append(
-                    {"file_name": name, "status": "error", "error": category}
-                )
+                job.recent.append({"file_name": name, "status": "error", "error": category})
 
     with _JOB_LOCK:
         job.state = "done"
