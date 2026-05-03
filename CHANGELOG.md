@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.5] - 2026-05-03
+
+### Added
+- **`pyimgtag cleanup-drift` subcommand + Edit page "DB drift" panel** (#182): scan the progress DB for rows whose files no longer appear in the Apple Photos library, classify them as `missing_file` (file deleted from disk), `removed_from_library` (file exists but Photos no longer indexes it), or `photo_not_indexed` (Photos accessible but membership check returned empty). `--dry-run` prints the report; `--prune` deletes the stale rows. The Edit page gains a "DB / Photos drift" section that calls `GET /edit/api/drift` (scan) and `POST /edit/api/prune-drift` (batch delete) with a live progress bar.
+
+### Fixed
+- **Dashboard Stop button** (#181): a red "Stop" button next to Pause/Unpause sends `POST /api/run/current/stop`; `RunSession.request_stop()` sets a flag and unblocks any paused worker, causing `wait_if_paused()` to raise `KeyboardInterrupt` so the existing graceful-interrupt path fires.
+- **HEIC thumbnails missing in Judge/Review pages when `pillow-heif` is not installed** (#181): `_make_thumbnail` now falls back to `sips -s format jpeg -Z <size>` on macOS when PIL can't decode a `.heic`/`.heif` file, so thumbnails render and "Open original" works without the extra package.
+- **Dashboard recent list shows assigned tags** (#181): each processed item now records its tags as a `detail` string; the dashboard renders them in a smaller muted line below the filename.
+
 ## [0.13.4] - 2026-05-03
 
 ### Fixed
