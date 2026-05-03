@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-05-03
+
+### Added
+- **Judge score on review cards** (#145): `progress_db.get_image[s]` LEFT JOIN `judge_scores` so the weighted score and verdict come back next to each image. The review grid renders a corner badge `N/10` colour-coded by tier (green ≥8, amber ≥6, red below) with the verdict in the tooltip.
+- **`--skip-judged` flag on `pyimgtag judge`** (#145): images already in `judge_scores` are skipped without invoking the model, so a repeat run picks up where the last one left off instead of rescoring from scratch.
+- **End-to-end webapp smoke suite** (#145): 37 in-process FastAPI `TestClient` tests run on every CI matrix entry. They hit every page and JSON endpoint, reject HTML responses with leftover `__FOO__` template tokens, crawl every same-origin link to catch dead routes, and pin API field shapes the JS depends on (the `tags`-as-JSON-string regression that turned every chip into a single character would now fail at PR time).
+- **Parser-error log** (#145): when `_parse_response` / `_parse_judge_response` give up, the full raw model reply is appended to `./pyimgtag-parse-errors.log` (override via `PYIMGTAG_PARSE_ERROR_LOG`) so users can post-mortem the actual text the model returned.
+
+### Security
+- **CodeQL `py/path-injection` (HIGH)** in `/review/thumbnail` and `/review/original` (#146, alerts [142](https://github.com/kurok/pyimgtag/security/code-scanning/142) + [143](https://github.com/kurok/pyimgtag/security/code-scanning/143)): the request `path` query parameter used to flow into `Path.is_file()` / `Path.read_bytes()` / `Image.open()`. Both endpoints now use the request value purely as a SQL lookup key and read the file using the path the DB returned (DB column was set by pyimgtag itself when it scanned the file).
+- **`SECURITY.md` supported-versions table refreshed** to make 0.8.x / 0.9.x the supported line and explicitly mark older lines as superseded.
+
 ## [0.8.3] - 2026-05-03
 
 ### Fixed
