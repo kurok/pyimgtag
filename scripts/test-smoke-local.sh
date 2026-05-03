@@ -101,9 +101,11 @@ done
 [[ -n "$HEALTHY" ]] || { cat "$APP_LOG" || true; fail "/health timeout"; }
 log "  → healthy"
 
-# 4. Unit tests.
+# 4. Unit tests. The default addopts in pyproject.toml ignores
+# tests/e2e/ so this only runs the in-process suite; the e2e step
+# below covers the live-dashboard smoke explicitly.
 log "running unit tests"
-python3 -m pytest tests/ --override-ini='addopts=-n auto --dist=worksteal' -q
+python3 -m pytest tests/ -q
 
 # 5. Playwright smoke.
 log "running Playwright smoke (BASE_URL=$BASE_URL)"
