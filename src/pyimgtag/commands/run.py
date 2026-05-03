@@ -272,10 +272,12 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                         )
                         if session is not None:
                             status = "ok" if result.processing_status == "ok" else "error"
+                            tags = ", ".join(result.tags) if result.tags else None
                             session.record_item(
                                 str(file_path),
                                 status,
                                 error=result.error_message,
+                                detail=tags,
                             )
                             for k, v in stats.items():
                                 session.set_counter(k, v)
@@ -326,10 +328,12 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
                     if session is not None:
                         status = "ok" if result.processing_status == "ok" else "error"
+                        tags = ", ".join(result.tags) if result.tags else None
                         session.record_item(
                             str(file_path),
                             status,
                             error=result.error_message,
+                            detail=tags,
                         )
                         for k, v in stats.items():
                             session.set_counter(k, v)

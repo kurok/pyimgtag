@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 import time
 
+import pytest
+
 from pyimgtag.run_session import RunSession, RunState
 
 
@@ -205,3 +207,54 @@ class TestTerminalGuards:
         snap = s.snapshot()
         assert snap["state"] == "completed"
         assert snap["last_error"] is None
+
+
+class TestStopRequest:
+    def test_request_stop_raises_keyboard_interrupt_on_wait(self):
+        s = RunSession(command="run")
+        s.mark_running()
+        s.request_stop()
+        with pytest.raises(KeyboardInterrupt):
+            s.wait_if_paused()
+
+    def test_request_stop_unblocks_paused_worker(self):
+        import threading
+
+        s = RunSession(command="run")
+        s.mark_running()
+        s.request_pause()
+
+        raised = []
+
+        def worker() -> None:
+            try:
+                s.wait_if_paused()
+            except KeyboardInterrupt:
+                raised.append(True)
+
+        t = threading.Thread(target=worker)
+        t.start()
+        import time
+
+        time.sleep(0.05)
+        s.request_stop()
+        t.join(timeout=2)
+        assert raised == [True]
+
+    def test_is_stop_requested_reflects_flag(self):
+        s = RunSession(command="run")
+        assert not s.is_stop_requested()
+        s.request_stop()
+        assert s.is_stop_requested()
+
+    def test_record_item_with_detail(self):
+        s = RunSession(command="run")
+        s.record_item("/a/b.jpg", "ok", detail="sunset, beach")
+        recent = s.snapshot()["recent"]
+        assert recent[-1]["detail"] == "sunset, beach"
+
+    def test_record_item_detail_omitted_when_none(self):
+        s = RunSession(command="run")
+        s.record_item("/a/b.jpg", "ok")
+        recent = s.snapshot()["recent"]
+        assert "detail" not in recent[-1]

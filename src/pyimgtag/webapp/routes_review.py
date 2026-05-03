@@ -429,6 +429,35 @@ def render_review_html(api_base: str = "") -> str:
     )
 
 
+def _thumb_via_sips(image_path: str, size: int) -> bytes | None:
+    """Render a HEIC/HEIF thumbnail via macOS ``sips`` when PIL can't decode it."""
+    import subprocess
+    import tempfile
+    from pathlib import Path as _P
+
+    if not _P(image_path).is_file():
+        return None
+    try:
+        import shutil
+
+        if not shutil.which("sips"):
+            return None
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp_path = tmp.name
+        proc = subprocess.run(  # noqa: S603
+            ["sips", "-s", "format", "jpeg", "-Z", str(size), image_path, "--out", tmp_path],
+            capture_output=True,
+            timeout=30,
+        )
+        if proc.returncode != 0 or not _P(tmp_path).is_file():
+            return None
+        data = _P(tmp_path).read_bytes()
+        _P(tmp_path).unlink(missing_ok=True)
+        return data if data else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _make_thumbnail(image_path: str, size: int) -> bytes | None:
     """Return cached JPEG thumbnail bytes. Returns None on any failure."""
     try:
@@ -447,6 +476,7 @@ def _make_thumbnail(image_path: str, size: int) -> bytes | None:
     if cache_path.exists():
         return cache_path.read_bytes()
 
+    data: bytes | None = None
     try:
         with Image.open(image_path) as img:
             img.thumbnail((size, size), Image.Resampling.LANCZOS)
@@ -454,13 +484,21 @@ def _make_thumbnail(image_path: str, size: int) -> bytes | None:
             buf = io.BytesIO()
             img_rgb.save(buf, format="JPEG", quality=75)
             data = buf.getvalue()
-        _THUMB_DIR.mkdir(parents=True, exist_ok=True)
-        cache_path.write_bytes(data)
-        return data
     except (OSError, UnidentifiedImageError):
-        return None
+        pass
     except Exception:  # noqa: BLE001 — catch-all for PIL/HEIC decode failures
+        pass
+
+    # PIL failed (likely HEIC without pillow-heif installed) — try macOS sips.
+    if data is None and image_path.lower().endswith((".heic", ".heif")):
+        data = _thumb_via_sips(image_path, size)
+
+    if data is None:
         return None
+
+    _THUMB_DIR.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(data)
+    return data
 
 
 def build_review_router(db: ProgressDB, api_base: str = "") -> Any:

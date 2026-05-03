@@ -63,6 +63,7 @@ class RunSession:
         self._current_item: str | None = None
         self._last_error: str | None = None
         self._recent: deque[dict[str, Any]] = deque(maxlen=_RECENT_CAPACITY)
+        self._stop_requested: bool = False
 
     # -- state transitions -------------------------------------------------
 
@@ -111,23 +112,44 @@ class RunSession:
             self._state = RunState.RUNNING
         self._resume_event.set()
 
+    def request_stop(self) -> None:
+        """Signal workers to stop after the current item finishes.
+
+        Sets the stop flag and unblocks any paused worker so it can see the
+        flag on its next ``wait_if_paused`` call, which will raise
+        ``KeyboardInterrupt`` to trigger the existing graceful-interrupt path.
+        """
+        with self._lock:
+            self._stop_requested = True
+        self._resume_event.set()
+
+    def is_stop_requested(self) -> bool:
+        with self._lock:
+            return self._stop_requested
+
     def wait_if_paused(self, timeout: float | None = None) -> None:
-        """Block while the session is paused.
+        """Block while the session is paused; raise KeyboardInterrupt on stop.
 
         Call before starting any expensive work unit. Returns when the
-        session is running, completed, failed, or interrupted. If ``timeout``
-        is given and expires while paused, returns without changing state so
-        callers can re-check cancellation flags.
+        session is running, completed, failed, or interrupted. Raises
+        ``KeyboardInterrupt`` when a stop has been requested so the existing
+        ``except KeyboardInterrupt`` paths in each command handle clean
+        shutdown. If ``timeout`` is given and expires while paused, returns
+        without changing state so callers can re-check cancellation flags.
         """
         while True:
             with self._lock:
+                if self._stop_requested:
+                    raise KeyboardInterrupt
                 if self._state == RunState.PAUSING:
                     self._state = RunState.PAUSED
                 state = self._state
             if state != RunState.PAUSED:
                 return
-            if self._resume_event.wait(timeout=timeout):
-                return
+            self._resume_event.wait(timeout=timeout)
+            with self._lock:
+                if self._stop_requested:
+                    raise KeyboardInterrupt
             if timeout is not None:
                 return
 
@@ -150,6 +172,7 @@ class RunSession:
         path: str,
         status: str,
         error: str | None = None,
+        detail: str | None = None,
     ) -> None:
         entry: dict[str, Any] = {
             "path": path,
@@ -158,6 +181,8 @@ class RunSession:
         }
         if error:
             entry["error"] = error
+        if detail:
+            entry["detail"] = detail
         with self._lock:
             self._recent.append(entry)
             if error:
