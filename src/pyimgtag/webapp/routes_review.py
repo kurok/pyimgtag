@@ -5,11 +5,14 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pyimgtag.progress_db import ProgressDB
+
+logger = logging.getLogger(__name__)
 
 _THUMB_DIR = Path.home() / ".cache" / "pyimgtag" / "thumbs"
 
@@ -580,16 +583,33 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         to ``reveal_in_photos``. Returns ``{"ok": true}`` on success or
         ``{"ok": false, "error": "..."}`` with HTTP 200 so the JS can
         gracefully fall back to opening the original bytes.
+
+        The detailed error from ``reveal_in_photos`` (which can include
+        an osascript stderr line/column reference) is logged server-side
+        and a stable category string is returned to the client.
         """
         row = db.get_image(path)
         if row is None:
-            return {"ok": False, "error": "Image not found in DB"}
+            return {"ok": False, "error": "image not found"}
         from pyimgtag.applescript_writer import reveal_in_photos
 
         err = reveal_in_photos(row["file_path"])
         if err is None:
             return {"ok": True}
-        return {"ok": False, "error": err}
+        logger.warning("open-in-photos failed for %s: %s", row["file_path"], err)
+        # Map verbose AppleScript errors onto a small set of stable
+        # client-facing categories so a script-level trace never reaches
+        # the browser.
+        low = err.lower()
+        if "macos" in low:
+            category = "platform_unsupported"
+        elif "timed out" in low or "timeout" in low:
+            category = "photos_timeout"
+        elif "osascript" in low or "applescript" in low:
+            category = "photos_unavailable"
+        else:
+            category = "photos_error"
+        return {"ok": False, "error": category}
 
     @router.patch("/api/images/tags")
     async def update_tags(body: _TagsBody = Body(...)) -> dict:

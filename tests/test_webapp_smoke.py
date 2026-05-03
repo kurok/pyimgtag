@@ -419,7 +419,9 @@ class TestOpenInPhotos:
     """``POST /review/api/open-in-photos`` looks the path up in the DB and
     delegates to ``reveal_in_photos``. Unknown paths return ``ok=False``;
     a successful AppleScript (mocked) returns ``ok=True``; an error from
-    the AppleScript layer is surfaced verbatim so the JS can fall back."""
+    the AppleScript layer is mapped to a stable client-facing category
+    (the verbose stderr stays server-side in the log) so the JS can
+    branch on it without leaking osascript line/column references."""
 
     def test_open_in_photos_unknown_path(self, client: TestClient) -> None:
         r = client.post(
@@ -429,7 +431,7 @@ class TestOpenInPhotos:
         assert r.status_code == 200
         d = r.json()
         assert d["ok"] is False
-        assert "not found" in d["error"].lower()
+        assert d["error"] == "image not found"
 
     def test_open_in_photos_success(self, client: TestClient) -> None:
         from unittest.mock import patch
@@ -445,7 +447,9 @@ class TestOpenInPhotos:
         assert r.status_code == 200
         assert r.json() == {"ok": True}
 
-    def test_open_in_photos_propagates_error(self, client: TestClient) -> None:
+    def test_open_in_photos_maps_timeout_to_category(self, client: TestClient) -> None:
+        """A verbose AppleScript error is collapsed onto a stable label
+        — the raw stderr never reaches the browser."""
         from unittest.mock import patch
 
         with patch(
@@ -459,7 +463,36 @@ class TestOpenInPhotos:
         assert r.status_code == 200
         d = r.json()
         assert d["ok"] is False
-        assert "osascript" in d["error"]
+        assert d["error"] == "photos_timeout"
+
+    def test_open_in_photos_maps_macos_message_to_category(self, client: TestClient) -> None:
+        from unittest.mock import patch
+
+        with patch(
+            "pyimgtag.applescript_writer.reveal_in_photos",
+            return_value="Apple Photos reveal is only available on macOS",
+        ):
+            r = client.post(
+                "/review/api/open-in-photos",
+                params={"path": client.test_image_path},  # type: ignore[attr-defined]
+            )
+        assert r.status_code == 200
+        assert r.json()["error"] == "platform_unsupported"
+
+    def test_open_in_photos_unknown_error_falls_back(self, client: TestClient) -> None:
+        from unittest.mock import patch
+
+        with patch(
+            "pyimgtag.applescript_writer.reveal_in_photos",
+            return_value="something deeply weird at line 42 column 17",
+        ):
+            r = client.post(
+                "/review/api/open-in-photos",
+                params={"path": client.test_image_path},  # type: ignore[attr-defined]
+            )
+        assert r.status_code == 200
+        # Stable unknown-error label — no osascript stderr leaks through.
+        assert r.json()["error"] == "photos_error"
 
 
 class TestAboutPage:

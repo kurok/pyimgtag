@@ -156,6 +156,10 @@ def page(context: BrowserContext, request: pytest.FixtureRequest) -> Iterator[Pa
         try:
             p.screenshot(path=str(artefact_dir / "screenshot.png"), full_page=True)
         except Exception:
+            # Best-effort artefact capture: a closed page, a navigation
+            # mid-screenshot, or a Playwright internal exception must
+            # not mask the actual test failure that ``request.node``
+            # already records. Trace.zip is captured separately.
             pass
     p.close()
 
