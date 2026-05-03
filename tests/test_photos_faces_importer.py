@@ -340,6 +340,71 @@ class TestBulkAppleScriptPath:
             labels = sorted(p.label for p in db.get_persons())
             assert labels == ["Alice"]
 
+    def test_app_people_script_walks_application_collection(self):
+        """The third-tier fallback queries Photos' application-level
+        ``people`` collection and emits one ``<uuid>\\t<name>`` row per
+        photo×person. Some macOS Photos.app builds expose persons only
+        at the app level (the user's "People" sidebar shows named
+        items) even though no per-media-item accessor returns them."""
+        from pyimgtag.photos_faces_importer import _bulk_applescript_app_people
+
+        script = _bulk_applescript_app_people()
+        # Walks photos via the persons collection, not the other way.
+        assert "photos of p" in script
+        # Tries each plausible identifier — historic ``every person``
+        # at the app level, the ``persons`` plural property, and the
+        # UI-facing ``people`` term.
+        assert "every person" in script
+        assert "set _people_list to persons" in script
+        assert "set _people_list to people" in script
+        # Per-photo and per-person ``try`` blocks keep one bad row from
+        # killing the whole traversal.
+        assert "try" in script
+
+    def test_app_people_fallback_runs_when_per_photo_path_returns_zero(self, tmp_path):
+        """When the per-media-item scripts execute cleanly but report
+        zero persons across the entire library, the importer must fire
+        the app-level walker before giving up. Otherwise users with
+        Photos.app builds that surface persons only via the application
+        collection silently get 0 imports."""
+        from pyimgtag import photos_faces_importer
+
+        with self._make_db(tmp_path) as db:
+            calls: list[str] = []
+
+            def _fake_run(cmd, **_kw):
+                calls.append(cmd[2])
+                proc = MagicMock()
+                proc.stderr = ""
+                if "every person of p" in cmd[2]:
+                    # Per-photo script ran successfully — but produced
+                    # no ``<uuid>\t<name>`` lines (every row was the
+                    # empty trailing-tab form).
+                    proc.returncode = 0
+                    proc.stdout = "ph1\t\nph2\t\n"
+                elif "photos of p" in cmd[2]:
+                    # App-level walker: one row per (photo, person) pair.
+                    proc.returncode = 0
+                    proc.stdout = "ph1\tAlice\nph2\tAlice\nph2\tBob\n"
+                else:
+                    proc.returncode = 0
+                    proc.stdout = ""
+                return proc
+
+            with (
+                patch.object(photos_faces_importer, "is_applescript_available", new=lambda: True),
+                patch.object(photos_faces_importer.subprocess, "run", side_effect=_fake_run),
+            ):
+                imported, _ = import_photos_persons(db)
+
+            # First call = every-person; second call = app-level walker.
+            assert len(calls) == 2
+            assert "every person of p" in calls[0]
+            assert "photos of p" in calls[1]
+            assert imported == 2  # Alice + Bob materialised
+            labels = sorted(p.label for p in db.get_persons())
+            assert labels == ["Alice", "Bob"]
+
     def test_parses_bulk_output_into_name_to_uuids(self, tmp_path):
         """Happy path: osascript returns multiple rows, all parsed."""
         with self._make_db(tmp_path) as db:
