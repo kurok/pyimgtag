@@ -512,7 +512,7 @@ class TestOpenInPhotos:
         assert r.status_code == 200
         d = r.json()
         assert d["ok"] is False
-        assert d["error"] == "image not found"
+        assert d["error"] == "image_not_found"
 
     def test_open_in_photos_success(self, client: TestClient) -> None:
         from unittest.mock import patch

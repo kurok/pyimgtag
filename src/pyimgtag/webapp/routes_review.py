@@ -586,11 +586,17 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
 
         The detailed error from ``reveal_in_photos`` (which can include
         an osascript stderr line/column reference) is logged server-side
-        and a stable category string is returned to the client.
+        and one of these stable category strings is returned to the
+        client: ``image_not_found`` (DB lookup failed),
+        ``platform_unsupported`` (non-macOS host), ``photos_timeout``
+        (osascript exceeded its window), ``photos_unavailable``
+        (osascript / AppleScript missing), or ``photos_error`` (any
+        other AppleScript failure). Downstream JS branches on the
+        sentinel; the verbose stderr never reaches the browser.
         """
         row = db.get_image(path)
         if row is None:
-            return {"ok": False, "error": "image not found"}
+            return {"ok": False, "error": "image_not_found"}
         from pyimgtag.applescript_writer import reveal_in_photos
 
         err = reveal_in_photos(row["file_path"])
