@@ -615,6 +615,44 @@ python -m bandit -r src/pyimgtag/ -c pyproject.toml
 pre-commit install && pre-commit run --all-files
 ```
 
+### Pre-PR smoke (`tests/e2e/`)
+
+The `pr-tests` GitHub Actions workflow runs unit tests **and** a
+Playwright Chromium smoke that boots the dashboard on every PR. To run
+the same checks locally before pushing:
+
+```bash
+# Installs deps + Chromium, starts the app on :8000, waits for /health,
+# runs unit tests, runs the Playwright smoke, then stops the app cleanly.
+scripts/test-smoke-local.sh
+
+# Custom port / real DB / visible browser:
+PORT=8765 scripts/test-smoke-local.sh
+PYIMGTAG_DB=~/.cache/pyimgtag/progress.db scripts/test-smoke-local.sh
+PYIMGTAG_E2E_HEADLESS=0 scripts/test-smoke-local.sh
+```
+
+The smoke test auto-discovers every link in the top nav, clicks each
+one, and fails the run on **any** of: HTTP 5xx, an uncaught JS error,
+a `console.error`, a blank page, or a heading-less page.
+
+**Inspecting failures.** When a smoke test fails — locally or in CI —
+artefacts land under `tests/e2e/artifacts/<test-id>/`:
+
+| File | What it shows |
+| --- | --- |
+| `screenshot.png` | full-page PNG of the page when the assertion fired |
+| `trace.zip` | Playwright trace — open with `playwright show-trace trace.zip` for DOM, network log, and per-step screenshots |
+| `app.log` (parent dir) | uvicorn access log + tracebacks from the dashboard process |
+
+CI uploads the same `tests/e2e/artifacts/` directory as a workflow
+artifact named `pr-tests-artifacts`. Download it from the failed
+run's "Artifacts" panel on GitHub.
+
+**Required checks.** A PR can merge once the `Unit + E2E smoke` job in
+the `pr-tests` workflow passes (alongside the existing `Python
+package` matrix and CodeQL).
+
 ## Resume and Enrichment
 
 Rerunning `pyimgtag run` on an already-processed library normally skips unchanged files.

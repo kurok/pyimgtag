@@ -1,0 +1,91 @@
+name: PR tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Unit + E2E smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HOST: 127.0.0.1
+      PORT: 8000
+      BASE_URL: http://127.0.0.1:8000
+      PYIMGTAG_NO_UPDATE_CHECK: "1"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          uv pip install -e ".[dev,review,e2e]"
+
+      - name: Install Chromium for Playwright
+        run: |
+          uv run python -m playwright install --with-deps chromium
+
+      - name: Run unit tests
+        run: |
+          uv run pytest tests/ -q
+
+      - name: Start dashboard
+        run: |
+          mkdir -p tests/e2e/artifacts
+          # Use a tmp DB so the smoke runs against a clean schema rather
+          # than whatever the runner happened to inherit.
+          DB="$(mktemp -t pyimgtag-ci.XXXXXX.db)"
+          echo "PYIMGTAG_DB=$DB" >>"$GITHUB_ENV"
+          PYIMGTAG_DB="$DB" \
+            uv run python -m pyimgtag.webapp \
+            >tests/e2e/artifacts/app.log 2>&1 &
+          echo "APP_PID=$!" >>"$GITHUB_ENV"
+
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 1 "$BASE_URL/health" >/dev/null; then
+              echo "  ✔ healthy after ${i}s"
+              exit 0
+            fi
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              echo "uvicorn died before /health came up:"
+              cat tests/e2e/artifacts/app.log
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "/health timeout — app log:"
+          cat tests/e2e/artifacts/app.log
+          exit 1
+
+      - name: Run E2E smoke
+        run: |
+          uv run pytest tests/e2e/ --override-ini='addopts=' -v
+
+      - name: Stop dashboard
+        if: always()
+        run: |
+          if [[ -n "${APP_PID:-}" ]] && kill -0 "$APP_PID" 2>/dev/null; then
+            kill "$APP_PID" || true
+          fi
+
+      - name: Upload failure artefacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: pr-tests-artifacts
+          path: |
+            tests/e2e/artifacts/
+            junit.xml
+          if-no-files-found: ignore
+          retention-days: 7

@@ -51,6 +51,14 @@ security = ["bandit>=1.7", "pip-audit>=2.6"]
 # under tests/local/. After `pip install '.[screenshot]'` run
 # `playwright install chromium` once to fetch the browser binary.
 screenshot = ["playwright>=1.40", "Pillow>=10.0"]
+# End-to-end Playwright smoke (tests/e2e/) used by both the local
+# `scripts/test-smoke-local.sh` runner and the `pr-tests` GH workflow.
+# After `pip install '.[e2e]'` run `playwright install chromium` once.
+e2e = [
+    "playwright>=1.40",
+    "pytest-playwright>=0.4",
+    "requests>=2.31",
+]
 
 [project.scripts]
 pyimgtag = "pyimgtag.main:main"
@@ -60,11 +68,13 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# `tests/local/` holds the Playwright screenshot smoke; it boots a real
-# uvicorn server, opens a sandboxed Chromium, and writes PNGs. Excluded
-# from the default run (and from CI) — invoke it explicitly with
-# `pytest tests/local/ --override-ini='addopts='`.
-addopts = "-n auto --dist=worksteal --ignore=tests/local"
+# Two test directories are kept out of the default run:
+# - tests/local/ — Playwright screenshot smoke; writes PNGs locally.
+# - tests/e2e/   — Playwright smoke that needs the dashboard already
+#                  running (started by scripts/test-smoke-local.sh
+#                  locally or .github/workflows/pr-tests.yml in CI).
+# Invoke either explicitly with `--override-ini='addopts='`.
+addopts = "-n auto --dist=worksteal --ignore=tests/local --ignore=tests/e2e"
 
 [tool.coverage.run]
 branch = false
