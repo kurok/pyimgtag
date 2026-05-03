@@ -128,10 +128,6 @@ _QUERY_DEFAULTS = [
 ]
 
 
-# Tags subparsers each use positional args; only the optional ones matter here.
-_TAGS_SHARED = [("dry_run", False), ("db", None)]
-
-
 class TestRunDefaults:
     @pytest.mark.parametrize("attr,expected", _RUN_DEFAULTS)
     def test_default(self, attr: str, expected) -> None:
@@ -565,17 +561,14 @@ class TestJudgeAlwaysOpensProgressDb:
     must now always receive a real DB instance."""
 
     def test_judge_without_db_flag_still_gets_db(self, tmp_path) -> None:
-        import os
-
         captured: dict = {}
 
         def _record(_args, db_arg):
             captured["db"] = db_arg
             return 0
 
-        # Force the default DB inside tmp_path so we don't touch the
-        # user's real ~/.cache directory.
-        cache_dir = tmp_path / ".cache"
+        # Override HOME so the default ``~/.cache/pyimgtag/progress.db``
+        # path resolves under tmp_path instead of the user's real cache.
         env = {
             "PYIMGTAG_NO_UPDATE_CHECK": "1",
             "HOME": str(tmp_path),
@@ -594,6 +587,3 @@ class TestJudgeAlwaysOpensProgressDb:
         assert isinstance(captured["db"], ProgressDB), (
             "cmd_judge received None — main() failed to open the default DB"
         )
-        # Cleanup: the DB file is closed when ProgressDB.__exit__ runs;
-        # main()'s finally clause already does that.
-        del cache_dir, os  # silence unused-import warnings on minimal envs
