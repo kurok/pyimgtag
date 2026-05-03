@@ -43,8 +43,12 @@ try:
     class _RunBody(_BaseModel):
         confirm: bool = False
 
+    class _PruneBody(_BaseModel):
+        confirm: bool = False
+
 except ImportError:  # pragma: no cover — exercised in minimal envs only
     _RunBody = None  # type: ignore[assignment,misc]
+    _PruneBody = None  # type: ignore[assignment,misc]
 
 
 # How many recent per-photo events to retain for the live status panel.
@@ -198,6 +202,66 @@ def _run_job(db: ProgressDB, job: _Job) -> None:
         job.finished_at = time.time()
 
 
+def _run_drift_prune_job(db: ProgressDB, job: _Job) -> None:
+    """Scan the DB for stale rows and delete the ones with missing files.
+
+    Reuses the same ``_Job`` shape as the delete-from-Photos worker so
+    the existing status poller renders this run with no extra glue —
+    ``total`` is set to the dead-row count, ``done`` increments per
+    deleted batch, and ``recent`` records each batch as a single event.
+
+    Errors from the AppleScript probe are surfaced as a job-level
+    ``last_error`` (categorised by :func:`_categorise_applescript_error`
+    when applicable) but never abort the run: the disk-only fallback
+    still removes every row whose backing file is gone.
+    """
+    from pyimgtag.cleanup_drift import prune_drift, scan_drift
+
+    try:
+        report = scan_drift(db)
+    except Exception as exc:  # noqa: BLE001 — surface to the UI as job error
+        logger.exception("drift job: scan failed")
+        with _JOB_LOCK:
+            job.state = "error"
+            job.last_error = "scan_failed"
+            job.finished_at = time.time()
+        raise RuntimeError("drift scan failed") from exc
+
+    with _JOB_LOCK:
+        job.total = report.dead_count
+        if report.photos_probe_error is not None:
+            # The AppleScript probe degraded — surface the category but
+            # keep going. ``photos_missing`` and ``present`` collapse,
+            # so only ``disk_missing`` rows will actually get pruned.
+            job.last_error = report.photos_probe_error
+
+    if not report.dead_paths:
+        with _JOB_LOCK:
+            job.state = "done"
+            job.finished_at = time.time()
+        return
+
+    try:
+        deleted = prune_drift(db, report.dead_paths)
+    except Exception as exc:  # noqa: BLE001 — propagate as job error
+        logger.exception("drift job: prune failed")
+        with _JOB_LOCK:
+            job.state = "error"
+            job.last_error = "prune_failed"
+            job.finished_at = time.time()
+        raise RuntimeError("drift prune failed") from exc
+
+    with _JOB_LOCK:
+        job.ok = deleted
+        job.done = report.dead_count
+        # Keep the deleted-row sample short so the events panel stays
+        # readable on a 22 k-photo library.
+        for path in report.dead_paths[:_RECENT_LIMIT]:
+            job.recent.append({"file_name": path, "status": "ok"})
+        job.state = "done"
+        job.finished_at = time.time()
+
+
 _HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -300,6 +364,34 @@ __NAV__
   </div>
 
   <div class="edit-card">
+    <h2>DB drift</h2>
+    <p>Compares every row in the progress DB against the file on disk
+       and (on macOS) Apple Photos.app's media-item set. Rows whose
+       backing file is gone become safe to prune.</p>
+    <div class="summary-num zero" id="driftDeadCount">…</div>
+    <p id="driftLabel">stale rows: <span id="driftDiskMissing">0</span> file
+       missing on disk · <span id="driftPhotosMissing">0</span> not in Photos.app
+       (of <span id="driftTotal">0</span> total).</p>
+
+    <ul class="sample-list" id="driftSample"></ul>
+
+    <div class="danger-note">
+       <strong>DB-only delete.</strong> This action only removes rows
+       from <code>processed_images</code>; the photos themselves are
+       already gone (or no longer indexed by Photos.app). A re-scan
+       will re-process anything still present.
+    </div>
+
+    <div class="confirm-row">
+      <input type="checkbox" id="driftConfirmChk" onchange="updatePruneButton()">
+      <label for="driftConfirmChk">I understand and want to prune these rows.</label>
+    </div>
+    <button class="btn btn-danger" id="pruneBtn" disabled onclick="pruneDrift()">
+      Prune <span id="pruneBtnCount">0</span> stale rows
+    </button>
+  </div>
+
+  <div class="edit-card">
     <h2>Status<span class="state-pill" id="statePill">idle</span></h2>
     <div class="progress-row">
       <div class="progress-bar-bg">
@@ -314,6 +406,7 @@ __NAV__
 </div>
 <script>
 let _markedCount = 0;
+let _driftCount = 0;
 let _polling = false;
 let _pollHandle = null;
 
@@ -350,6 +443,67 @@ function updateRunButton() {
   btn.disabled = !(chk.checked && _markedCount > 0 && !_polling);
 }
 
+async function loadDrift() {
+  try {
+    const r = await fetch('__API_BASE__/api/drift');
+    const d = await r.json();
+    _driftCount = d.disk_missing + d.photos_missing;
+    document.getElementById('driftDeadCount').textContent = _driftCount;
+    document.getElementById('driftDiskMissing').textContent = d.disk_missing;
+    document.getElementById('driftPhotosMissing').textContent = d.photos_missing;
+    document.getElementById('driftTotal').textContent = d.total;
+    document.getElementById('pruneBtnCount').textContent = _driftCount;
+    const numEl = document.getElementById('driftDeadCount');
+    if (_driftCount === 0) numEl.classList.add('zero');
+    else numEl.classList.remove('zero');
+    const list = document.getElementById('driftSample');
+    list.innerHTML = '';
+    for (const path of (d.sample || [])) {
+      const li = document.createElement('li');
+      li.textContent = path;
+      list.appendChild(li);
+    }
+    if ((d.sample || []).length < _driftCount) {
+      const li = document.createElement('li');
+      li.style.color = 'var(--muted)';
+      li.textContent = '... and ' + (_driftCount - d.sample.length) + ' more';
+      list.appendChild(li);
+    }
+    updatePruneButton();
+  } catch (e) { /* leave the placeholder */ }
+}
+
+function updatePruneButton() {
+  const btn = document.getElementById('pruneBtn');
+  const chk = document.getElementById('driftConfirmChk');
+  btn.disabled = !(chk.checked && _driftCount > 0 && !_polling);
+}
+
+async function pruneDrift() {
+  const btn = document.getElementById('pruneBtn');
+  btn.disabled = true;
+  document.getElementById('finalSummary').textContent = '';
+  let r;
+  try {
+    r = await fetch('__API_BASE__/api/prune-drift', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({confirm: true}),
+    });
+  } catch (e) {
+    alert('Failed to start: ' + e);
+    updatePruneButton();
+    return;
+  }
+  if (!r.ok) {
+    let err = 'unknown_error';
+    try { err = (await r.json()).error || err; } catch (_) {}
+    alert('Failed to start: ' + err);
+    updatePruneButton();
+    return;
+  }
+  startPolling();
+}
+
 async function runJob() {
   const btn = document.getElementById('runBtn');
   btn.disabled = true;
@@ -378,6 +532,7 @@ async function runJob() {
 function startPolling() {
   _polling = true;
   document.getElementById('confirmChk').checked = false;
+  document.getElementById('driftConfirmChk').checked = false;
   if (_pollHandle) clearInterval(_pollHandle);
   // 1 s cadence — the loop is a thin DB-row-by-row walk and the user
   // wants visible per-photo progress without spamming the server.
@@ -424,10 +579,12 @@ async function pollStatus() {
     document.getElementById('finalSummary').textContent =
       'Finished: ' + (d.ok || 0) + ' deleted, ' + (d.failed || 0) + ' failed.';
     loadMarked();
+    loadDrift();
   }
 }
 
 loadMarked();
+loadDrift();
 // Pick up an in-flight job if the user navigates back mid-run.
 pollStatus();
 </script>
@@ -534,6 +691,67 @@ def build_edit_router(db: ProgressDB, api_base: str = "") -> Any:
         """Return a JSON snapshot of the current (or most recent) job."""
         with _JOB_LOCK:
             return _snapshot(_JOB)
+
+    @router.get("/api/drift")
+    async def get_drift() -> dict:
+        """Summarise stale ``processed_images`` rows for the panel.
+
+        Runs the full drift scan synchronously — the panel pulls counts
+        + a 20-row sample on page load. The bulk Photos.app probe is
+        capped server-side so a single slow library call cannot hang
+        the request indefinitely. ``photos_probe_error`` is forwarded
+        unchanged so the UI can hint when the macOS-only signal
+        degraded.
+        """
+        from pyimgtag.cleanup_drift import DRIFT_SAMPLE_SIZE, scan_drift
+
+        report = scan_drift(db)
+        return {
+            "total": report.total,
+            "disk_missing": report.disk_missing,
+            "photos_missing": report.photos_missing,
+            "sample": report.sample(DRIFT_SAMPLE_SIZE),
+            "photos_probe_error": report.photos_probe_error,
+        }
+
+    @router.post("/api/prune-drift")
+    async def prune_drift_job(body: _PruneBody = Body(...)) -> Any:
+        """Spawn the background drift-prune job. Shares the edit-job lock.
+
+        The drift prune walks the same ``_JOB`` singleton + ``_JOB_LOCK``
+        as the delete-from-Photos worker so the two destructive actions
+        cannot run at the same time. Mirrors the response shape of
+        ``POST /edit/api/run`` for the JS — ``{ok, job_id}`` on success,
+        HTTP 400 + ``error="job_already_running"`` on overlap.
+        """
+        if not body.confirm:
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "confirmation_required"},
+            )
+
+        global _JOB
+        with _JOB_LOCK:
+            if _JOB.state == "running":
+                return JSONResponse(
+                    status_code=400,
+                    content={"ok": False, "error": "job_already_running"},
+                )
+            new_job = _Job(
+                job_id=uuid.uuid4().hex,
+                state="running",
+                started_at=time.time(),
+            )
+            _JOB = new_job
+
+        def _runner() -> None:
+            try:
+                _run_drift_prune_job(db, new_job)
+            except Exception:  # noqa: BLE001 — already logged inside the worker
+                logger.debug("drift job: worker exited with handled exception")
+
+        threading.Thread(target=_runner, name="pyimgtag-drift-prune-job", daemon=True).start()
+        return {"ok": True, "job_id": new_job.job_id}
 
     return router
 

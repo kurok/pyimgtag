@@ -206,6 +206,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also show photos flagged as 'review' (default: delete only)",
     )
 
+    # --- cleanup-drift subcommand ---
+    drift_p = subparsers.add_parser(
+        "cleanup-drift",
+        help=(
+            "Find DB rows whose backing file is gone (and, on macOS, photos that "
+            "Apple Photos no longer indexes). Use --prune to actually delete them."
+        ),
+    )
+    drift_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    # ``--dry-run`` is the default behaviour and is accepted explicitly so
+    # scripts can self-document. ``--prune`` is the destructive opt-in;
+    # the two are mutually exclusive — passing both is a user error.
+    drift_mode = drift_p.add_mutually_exclusive_group()
+    drift_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="List dead rows and exit (default behaviour).",
+    )
+    drift_mode.add_argument(
+        "--prune",
+        action="store_true",
+        default=False,
+        help="Actually delete the dead rows from the DB.",
+    )
+
     # --- review subcommand ---
     review_p = subparsers.add_parser(
         "review", help="Launch the local review UI (requires pyimgtag[review])"
@@ -500,6 +526,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _check_for_update()
 
+    from pyimgtag.commands.cleanup_drift import cmd_cleanup_drift
     from pyimgtag.commands.db import cmd_cleanup, cmd_reprocess, cmd_status
     from pyimgtag.commands.faces import cmd_faces
     from pyimgtag.commands.judge import cmd_judge
@@ -526,6 +553,7 @@ def main(argv: list[str] | None = None) -> int:
         "reprocess": lambda: cmd_reprocess(args),
         "preflight": lambda: cmd_preflight(args),
         "cleanup": lambda: cmd_cleanup(args),
+        "cleanup-drift": lambda: cmd_cleanup_drift(args),
         "review": lambda: cmd_review(args),
         "faces": lambda: cmd_faces(args),
         "query": lambda: cmd_query(args),

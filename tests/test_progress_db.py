@@ -1766,3 +1766,50 @@ class TestResumeDBAPIs:
             result = db.get_cached_result(img)
             assert result is not None
             assert result.scene_category == "outdoor"  # unchanged
+
+
+class TestDriftPrune:
+    """Cover ``iter_image_paths`` + ``delete_image_rows`` used by cleanup-drift."""
+
+    def _seed(self, db: ProgressDB, tmp_path) -> list[str]:
+        paths: list[str] = []
+        for name in ("a.jpg", "b.jpg", "c.jpg", "d.jpg"):
+            img = tmp_path / name
+            img.write_bytes(b"\x00" * 4)
+            db.mark_done(
+                img,
+                ImageResult(file_path=str(img), file_name=name, processing_status="ok"),
+            )
+            paths.append(str(img))
+        return paths
+
+    def test_iter_image_paths_yields_all_rows(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            paths = self._seed(db, tmp_path)
+            collected = list(db.iter_image_paths(batch_size=2))
+            assert sorted(collected) == sorted(paths)
+
+    def test_iter_image_paths_empty_db(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert list(db.iter_image_paths()) == []
+
+    def test_delete_image_rows_returns_deleted_count(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            paths = self._seed(db, tmp_path)
+            removed = db.delete_image_rows([paths[0], paths[1]])
+            assert removed == 2
+            remaining = sorted(db.iter_image_paths())
+            assert remaining == sorted([paths[2], paths[3]])
+
+    def test_delete_image_rows_empty_input_is_noop(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            assert db.delete_image_rows([]) == 0
+            assert db.count_images() == 4
+
+    def test_delete_image_rows_skips_unknown_paths(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            paths = self._seed(db, tmp_path)
+            removed = db.delete_image_rows([paths[0], "/nope/missing.jpg"])
+            assert removed == 1
+            assert db.count_images() == 3
