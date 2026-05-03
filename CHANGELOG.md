@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-05-03
+
+### Fixed
+- **Truncated model JSON no longer turns the whole image into an error row** (#143). The Ollama `num_predict` cap is bumped from 512 → 1024 tokens (the full tag-image schema regularly spans 700–900 tokens once the model adds whitespace and a short `text_summary`), and a new `_repair_truncated_json` walks the candidate prefix tracking string/escape/brace state, trims back to the last completed top-level value, and synthesises the missing closers — partial responses now round-trip through `_parse_response` with every field that was actually emitted. After upgrading, run `pyimgtag reprocess --status error` and re-run the same source to retry rows that previously errored.
+
+### Changed
+- "Could not parse JSON from model response" errors now embed a short prefix of the raw text (#143) so users can tell truncation from prose-only refusals from outright nonsense without opening a debugger.
+
 ## [0.8.2] - 2026-05-03
 
 ### Added
