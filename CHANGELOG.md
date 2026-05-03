@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-05-03
+
+### Fixed
+- **Review grid tag chips** (#139): `progress_db._image_row_to_dict` returned `tags` as the raw JSON string. The review JS iterated `img.tags`, so `for t of '["bird"]'` rendered each character (`[`, `"`, `b`, …) as its own removable chip. `tags` is now the parsed list; `tags_list` is kept as a back-compat alias.
+- **Broken-image grid** (#139): when `/thumbnail` returns 404 (path moved, decode failure), the review grid swaps the broken-image element for a labelled filename placeholder instead of rendering a wall of Chrome icons.
+- **Query "Location" column** (#139): the table read non-existent `city` / `country` keys; uses `nearest_city` / `nearest_country` so geocoded locations actually render.
+
+### Added
+- **Click-to-zoom lightbox** (#139): clicking any thumbnail (real or fallback) opens a fullscreen lightbox; ESC or backdrop closes.
+- **"Open original" link** (#139): each card has a link to a new `GET /review/original?path=<absolute path>` endpoint that streams the actual image bytes (decoding HEIC/RAW to JPEG on the fly).
+- **Sort + per-page selectors** (#139) on the review toolbar: path A–Z / Z–A, name A–Z / Z–A, newest / oldest by `processed_at`; per-page 25 / 50 / 100 / 200. Plumbed through a whitelisted `get_images(sort=…)`.
+- **Top-of-grid pagination bar** (#139) mirroring the bottom bar.
+- **Errors filter** (#139): new "Errors" pill on the review toolbar surfacing `status='error'` rows; each card renders the recorded `error_message`.
+- **Status column on the Query page** (#139) plus inline `error_message` for error rows so failures are actually visible.
+- **Dashboard click-through** (#139): the current-item path and recent-list paths on the live dashboard are now anchor tags pointing at `/review?file=<path>` for instant drill-down to the worker's output for that file.
+- **Single-image deep link** (#139): `GET /review/api/images?file=<absolute path>` returns just that one row (or empty) for the dashboard click-through and any other consumer.
+
 ## [0.8.0] - 2026-05-02
 
 ### Added
