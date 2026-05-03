@@ -290,7 +290,7 @@ class ProgressDB:
         query = (  # nosec B608
             "SELECT file_path, tags, scene_summary, processed_at, status, "
             "cleanup_class, scene_category, emotional_tone, event_hint, significance, "
-            "nearest_city, nearest_region, nearest_country "
+            "nearest_city, nearest_region, nearest_country, error_message "
             "FROM processed_images "
             + where  # nosec B608
             + " ORDER BY file_path "
@@ -301,7 +301,7 @@ class ProgressDB:
 
     @staticmethod
     def _query_row_to_dict(row: tuple) -> dict:
-        """Convert a query_images SELECT row (13 cols) to a metadata dict."""
+        """Convert a query_images SELECT row to a metadata dict."""
         file_path: str = row[0]
         tags_raw: str | None = row[1]
         try:
@@ -323,6 +323,7 @@ class ProgressDB:
             "nearest_city": row[10],
             "nearest_region": row[11],
             "nearest_country": row[12],
+            "error_message": row[13] if len(row) > 13 else None,
         }
 
     def get_tag_counts(self) -> list[tuple[str, int]]:
@@ -501,12 +502,22 @@ class ProgressDB:
 
     # --- review UI query/update methods ---
 
+    _GET_IMAGES_SORTS: dict[str, str] = {
+        "path_asc": "file_path ASC",
+        "path_desc": "file_path DESC",
+        "newest": "processed_at DESC, file_path ASC",
+        "oldest": "processed_at ASC, file_path ASC",
+        "name_asc": "LOWER(file_path) ASC",
+        "name_desc": "LOWER(file_path) DESC",
+    }
+
     def get_images(
         self,
         limit: int = 50,
         offset: int = 0,
         status: str | None = None,
         cleanup_class: str | None = None,
+        sort: str = "path_asc",
     ) -> list[dict]:
         """Return paginated image records with all metadata.
 
@@ -515,6 +526,8 @@ class ProgressDB:
             offset: Row offset for pagination.
             status: Optional filter by status ('ok', 'error').
             cleanup_class: Optional filter by cleanup_class ('delete', 'review').
+            sort: One of ``path_asc`` (default), ``path_desc``, ``newest``,
+                ``oldest``, ``name_asc``, ``name_desc``.
 
         Returns:
             List of image metadata dicts.
@@ -528,12 +541,14 @@ class ProgressDB:
             conditions.append("cleanup_class = ?")
             params.append(cleanup_class)
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        order_clause = self._GET_IMAGES_SORTS.get(sort, self._GET_IMAGES_SORTS["path_asc"])
         query = (  # nosec B608
             "SELECT file_path, tags, scene_summary, processed_at, status, "
-            "cleanup_class, scene_category, emotional_tone, event_hint, significance "
+            "cleanup_class, scene_category, emotional_tone, event_hint, "
+            "significance, error_message "
             "FROM processed_images "
             + where  # nosec B608
-            + " ORDER BY file_path LIMIT ? OFFSET ?"
+            + f" ORDER BY {order_clause} LIMIT ? OFFSET ?"  # nosec B608
         )
         params.extend([limit, offset])
         rows = self._conn.execute(query, params).fetchall()
@@ -561,7 +576,8 @@ class ProgressDB:
         """Return metadata for a single image, or None if not found."""
         row = self._conn.execute(
             "SELECT file_path, tags, scene_summary, processed_at, status, "
-            "cleanup_class, scene_category, emotional_tone, event_hint, significance "
+            "cleanup_class, scene_category, emotional_tone, event_hint, "
+            "significance, error_message "
             "FROM processed_images WHERE file_path = ?",
             (file_path,),
         ).fetchone()
@@ -587,7 +603,13 @@ class ProgressDB:
 
     @staticmethod
     def _image_row_to_dict(row: tuple) -> dict:
-        """Convert a processed_images SELECT row to a metadata dict."""
+        """Convert a processed_images SELECT row to a metadata dict.
+
+        ``tags`` is returned as a parsed list of strings; iterating it as
+        ``for t in row['tags']`` yields tag values, not characters. The
+        legacy ``tags_list`` alias is kept for any callers that already
+        depend on it.
+        """
         file_path: str = row[0]
         tags_raw: str | None = row[1]
         try:
@@ -597,7 +619,7 @@ class ProgressDB:
         return {
             "file_path": file_path,
             "file_name": Path(file_path).name,
-            "tags": tags_raw,
+            "tags": tags_list,
             "tags_list": tags_list,
             "scene_summary": row[2],
             "processed_at": row[3],
@@ -607,6 +629,7 @@ class ProgressDB:
             "emotional_tone": row[7],
             "event_hint": row[8],
             "significance": row[9],
+            "error_message": row[10] if len(row) > 10 else None,
         }
 
     # --- face pipeline methods ---

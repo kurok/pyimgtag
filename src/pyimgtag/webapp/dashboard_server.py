@@ -36,6 +36,8 @@ def _render_html() -> str:
              white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
 #current{font-family:ui-monospace,'SF Mono',monospace;font-size:13px;color:var(--muted);
          padding:12px 32px 0;word-break:break-all}
+#current a,.recent-path a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted)}
+#current a:hover,.recent-path a:hover{color:var(--accent);border-bottom-color:var(--accent)}
 #error{color:var(--danger);font-size:13px;padding:8px 32px 0}
 .ctrl-btn{padding:6px 14px;border-radius:var(--radius-sm);font-size:12px;font-weight:500;
           border:1px solid var(--border);background:var(--surface);color:var(--text);
@@ -90,7 +92,19 @@ def _render_html() -> str:
       stateEl.textContent = d.state || 'running';
       stateEl.className = 'pill-state ' + (d.state || 'running');
       cmdEl.textContent = d.command || '';
-      currentEl.textContent = d.current_file || '';
+      currentEl.innerHTML = '';
+      if (d.current_file) {
+        // Click-through into the review page filtered to this single image
+        // so the user can inspect the model's output for the file currently
+        // being processed.
+        const a = document.createElement('a');
+        a.href = '/review?file=' + encodeURIComponent(d.current_file);
+        a.textContent = d.current_file;
+        a.title = 'View result for this image';
+        currentEl.appendChild(a);
+      } else {
+        currentEl.textContent = '(no active item)';
+      }
       errorEl.textContent = d.error || '';
       pauseBtn.disabled = d.state !== 'running';
       unpauseBtn.disabled = d.state !== 'paused';
@@ -117,7 +131,14 @@ def _render_html() -> str:
         s.textContent = item.status || '';
         const p = document.createElement('span');
         p.className = 'recent-path';
-        p.textContent = item.path || '';
+        if (item.path) {
+          // Click any recent path to jump straight to its review card.
+          const a = document.createElement('a');
+          a.href = '/review?file=' + encodeURIComponent(item.path);
+          a.textContent = item.path;
+          a.title = 'View result for this image';
+          p.appendChild(a);
+        }
         li.appendChild(s);
         li.appendChild(p);
         recentEl.appendChild(li);

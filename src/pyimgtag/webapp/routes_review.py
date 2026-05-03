@@ -13,6 +13,14 @@ if TYPE_CHECKING:
 
 _THUMB_DIR = Path.home() / ".cache" / "pyimgtag" / "thumbs"
 
+_MIME_BY_SUFFIX = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
 try:
     from pydantic import BaseModel as _BaseModel
 
@@ -57,6 +65,27 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
                        background:var(--surface);color:var(--text);cursor:pointer}
     .pagination button:disabled{opacity:.4;cursor:not-allowed}
     .pagination span{font-size:13px;color:var(--muted)}
+    .img-thumb-fallback{display:flex;align-items:center;justify-content:center;
+                         padding:14px 10px;text-align:center;
+                         font-family:ui-monospace,'SF Mono',monospace;font-size:11px;
+                         color:var(--muted);background:#f0f0f5;border-radius:6px;
+                         min-height:120px;word-break:break-all;line-height:1.35}
+    .ctrl-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;
+                color:var(--muted)}
+    .ctrl-label select{padding:4px 8px;border-radius:6px;
+                        border:1px solid var(--border);background:var(--surface);
+                        color:var(--text);font-size:12px}
+    .img-thumb{cursor:zoom-in}
+    .img-source{display:inline-block;margin-top:4px;font-size:11px;
+                 color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--muted)}
+    .img-source:hover{color:var(--accent);border-bottom-color:var(--accent)}
+    .img-error-msg{font-size:11px;color:var(--danger);margin-top:4px;line-height:1.3}
+    .lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);
+               z-index:1000;align-items:center;justify-content:center;cursor:zoom-out}
+    .lightbox.open{display:flex}
+    .lightbox img{max-width:95vw;max-height:95vh;object-fit:contain;cursor:default}
+    .lightbox-close{position:fixed;top:16px;right:24px;color:#fff;font-size:32px;
+                     cursor:pointer;line-height:1;user-select:none}
   </style>
 </head>
 <body>
@@ -66,9 +95,33 @@ __NAV__
     <button class="pill on" onclick="setFilter(null,this)">All</button>
     <button class="pill" onclick="setFilter('delete',this)">Delete</button>
     <button class="pill" onclick="setFilter('review',this)">Review</button>
+    <button class="pill" onclick="setStatusFilter('error',this)">Errors</button>
   </div>
+  <label class="ctrl-label">Sort
+    <select id="sortSel" onchange="setSort(this.value)">
+      <option value="path_asc">Path (A→Z)</option>
+      <option value="path_desc">Path (Z→A)</option>
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+      <option value="name_asc">Name (A→Z)</option>
+      <option value="name_desc">Name (Z→A)</option>
+    </select>
+  </label>
+  <label class="ctrl-label">Per page
+    <select id="pageSel" onchange="setPageSize(parseInt(this.value,10))">
+      <option value="25">25</option>
+      <option value="50" selected>50</option>
+      <option value="100">100</option>
+      <option value="200">200</option>
+    </select>
+  </label>
   <span id="stats"></span>
   <span id="count"></span>
+</div>
+<div class="pagination top">
+  <button id="prevBtnTop" onclick="prevPage()" disabled>&#8592; Prev</button>
+  <span id="pageInfoTop"></span>
+  <button id="nextBtnTop" onclick="nextPage()">Next &#8594;</button>
 </div>
 <div id="grid"></div>
 <div class="pagination">
@@ -76,9 +129,15 @@ __NAV__
   <span id="pageInfo"></span>
   <button id="nextBtn" onclick="nextPage()">Next &#8594;</button>
 </div>
+
+<div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
+  <img id="lightboxImg" alt="" />
+  <span class="lightbox-close" onclick="closeLightbox(event)">&times;</span>
+</div>
 <script>
-let _offset = 0, _total = 0, _cleanup = null;
-const PAGE = 50;
+let _offset = 0, _total = 0, _cleanup = null, _status = null;
+let _sort = 'path_asc';
+let PAGE = 50;
 
 async function loadStats() {
   const r = await fetch('__API_BASE__/api/stats');
@@ -87,30 +146,77 @@ async function loadStats() {
     d.total + ' images \u00b7 ' + d.error + ' errors';
 }
 
+// If the page was opened with ?file=<path> (typically from the dashboard
+// click-through) zoom in on that single image: hide pagination, ignore the
+// cleanup pills, and only fetch that one record.
+const _singleFile = (() => {
+  const p = new URLSearchParams(window.location.search).get('file');
+  return p && p.length ? p : null;
+})();
+
 async function load() {
-  const qs = '?limit=' + PAGE + '&offset=' + _offset +
-             (_cleanup ? '&cleanup=' + _cleanup : '');
+  let qs;
+  if (_singleFile) {
+    qs = '?file=' + encodeURIComponent(_singleFile);
+  } else {
+    qs = '?limit=' + PAGE + '&offset=' + _offset + '&sort=' + encodeURIComponent(_sort) +
+         (_cleanup ? '&cleanup=' + _cleanup : '') +
+         (_status ? '&status=' + _status : '');
+  }
   const r = await fetch('__API_BASE__/api/images' + qs);
   const d = await r.json();
   _total = d.total;
   document.getElementById('count').textContent = _total + ' shown';
-  document.getElementById('pageInfo').textContent =
-    'Page ' + (Math.floor(_offset / PAGE) + 1) + ' of ' +
-    Math.max(1, Math.ceil(_total / PAGE));
-  document.getElementById('prevBtn').disabled = _offset === 0;
-  document.getElementById('nextBtn').disabled = _offset + PAGE >= _total;
+  const pageText = _singleFile
+    ? 'Showing 1 image'
+    : 'Page ' + (Math.floor(_offset / PAGE) + 1) + ' of ' +
+      Math.max(1, Math.ceil(_total / PAGE));
+  document.getElementById('pageInfo').textContent = pageText;
+  document.getElementById('pageInfoTop').textContent = pageText;
+  const atFirst = _singleFile || _offset === 0;
+  const atLast = _singleFile || _offset + PAGE >= _total;
+  document.getElementById('prevBtn').disabled = atFirst;
+  document.getElementById('prevBtnTop').disabled = atFirst;
+  document.getElementById('nextBtn').disabled = atLast;
+  document.getElementById('nextBtnTop').disabled = atLast;
   renderGrid(d.items || []);
 }
 
 function setFilter(val, btn) {
-  _cleanup = val; _offset = 0;
+  _cleanup = val; _status = null; _offset = 0;
   document.querySelectorAll('.pill').forEach(b => b.classList.remove('on'));
   btn.classList.add('on');
   load();
 }
 
+function setStatusFilter(val, btn) {
+  _status = val; _cleanup = null; _offset = 0;
+  document.querySelectorAll('.pill').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  load();
+}
+
+function setSort(val) { _sort = val; _offset = 0; load(); }
+function setPageSize(n) { PAGE = n; _offset = 0; load(); }
+
 function prevPage() { _offset = Math.max(0, _offset - PAGE); load(); }
 function nextPage() { _offset += PAGE; load(); }
+
+function openLightbox(path) {
+  const lb = document.getElementById('lightbox');
+  const img = document.getElementById('lightboxImg');
+  img.src = '__API_BASE__/original?path=' + encodeURIComponent(path);
+  lb.classList.add('open');
+}
+function closeLightbox(e) {
+  // Only close on clicks on the backdrop or the close glyph, not on the image.
+  if (e && e.target && e.target.tagName === 'IMG') return;
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('lightboxImg').removeAttribute('src');
+}
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeLightbox();
+});
 
 function renderGrid(items) {
   const grid = document.getElementById('grid');
@@ -124,10 +230,21 @@ function renderGrid(items) {
     const thumbEl = document.createElement('img');
     thumbEl.className = 'img-thumb';
     thumbEl.loading = 'lazy';
+    thumbEl.alt = img.file_name || '';
     thumbEl.src = '__API_BASE__/thumbnail?path=' +
                   encodeURIComponent(img.file_path) + '&size=400';
-    thumbEl.onerror = () => { thumbEl.style.background = '#e5e5ea';
-                              thumbEl.removeAttribute('src'); };
+    thumbEl.addEventListener('click', () => openLightbox(img.file_path));
+    // When the thumbnail endpoint can't read the file (path moved, decode
+    // error, etc.) replace the broken-image icon with a labelled placeholder
+    // so the grid stays readable instead of showing a wall of broken icons.
+    thumbEl.onerror = () => {
+      const ph = document.createElement('div');
+      ph.className = 'img-thumb-fallback';
+      ph.title = img.file_path || '';
+      ph.textContent = img.file_name || 'thumbnail unavailable';
+      ph.addEventListener('click', () => openLightbox(img.file_path));
+      if (thumbEl.parentNode) thumbEl.parentNode.replaceChild(ph, thumbEl);
+    };
     thumbWrap.appendChild(thumbEl);
     if (img.cleanup_class === 'delete' || img.cleanup_class === 'review') {
       const badge = document.createElement('span');
@@ -145,10 +262,24 @@ function renderGrid(items) {
     nameEl.title = img.file_path;
     nameEl.textContent = img.file_name;
     body.appendChild(nameEl);
+    // "Open source" link — fetches the original bytes from the local server.
+    const srcLink = document.createElement('a');
+    srcLink.className = 'img-source';
+    srcLink.href = '__API_BASE__/original?path=' + encodeURIComponent(img.file_path);
+    srcLink.target = '_blank';
+    srcLink.rel = 'noopener';
+    srcLink.textContent = 'Open original';
+    body.appendChild(srcLink);
     const sceneEl = document.createElement('div');
     sceneEl.className = 'img-scene';
     sceneEl.textContent = img.scene_summary || '';
     body.appendChild(sceneEl);
+    if (img.status === 'error') {
+      const errEl = document.createElement('div');
+      errEl.className = 'img-error-msg';
+      errEl.textContent = 'Error: ' + (img.error_message || 'unknown');
+      body.appendChild(errEl);
+    }
     const tagsEl = document.createElement('div');
     tagsEl.className = 'img-tags';
     renderTags(tagsEl, img);
@@ -314,19 +445,59 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         offset: int = Query(default=0, ge=0),
         cleanup: str | None = Query(default=None),
         status: str | None = Query(default=None),
+        sort: str = Query(default="path_asc"),
+        file: str | None = Query(default=None, description="Single absolute path"),
     ) -> dict:
-        items = db.get_images(limit=limit, offset=offset, status=status, cleanup_class=cleanup)
+        # ``?file=<path>`` is used by the dashboard click-through to deep-link
+        # into a single record; bypass pagination + cleanup filters in that
+        # case and return either one item or an empty list.
+        if file is not None:
+            row = db.get_image(file)
+            items = [row] if row is not None else []
+            return {"items": items, "total": len(items), "limit": 1, "offset": 0}
+        items = db.get_images(
+            limit=limit, offset=offset, status=status, cleanup_class=cleanup, sort=sort
+        )
         total = db.count_images(status=status, cleanup_class=cleanup)
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     @router.get("/thumbnail")
     async def get_thumbnail(
         path: str = Query(..., description="Absolute path to the image file"),
-        size: int = Query(default=200, ge=50, le=800),
+        size: int = Query(default=200, ge=50, le=4000),
     ) -> Response:
         if db.get_image(path) is None:
             return Response(status_code=404)
         data = _make_thumbnail(path, size)
+        if data is None:
+            return Response(status_code=404)
+        return Response(content=data, media_type="image/jpeg")
+
+    @router.get("/original")
+    async def get_original(
+        path: str = Query(..., description="Absolute path to the image file"),
+    ) -> Response:
+        """Stream the original image bytes for the lightbox / "view source" link.
+
+        Path must already be present in the progress DB; arbitrary filesystem
+        reads are refused. HEIC and RAW originals are decoded to JPEG on the
+        fly because most browsers can't render them natively.
+        """
+        if db.get_image(path) is None:
+            return Response(status_code=404)
+        try:
+            from pathlib import Path as _P
+
+            p = _P(path)
+            if not p.is_file():
+                return Response(status_code=404)
+            suffix = p.suffix.lower()
+            if suffix in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+                return Response(content=p.read_bytes(), media_type=_MIME_BY_SUFFIX[suffix])
+        except OSError:
+            return Response(status_code=404)
+        # Fall through to a high-quality JPEG render for HEIC / RAW / etc.
+        data = _make_thumbnail(path, 4000)
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/jpeg")
