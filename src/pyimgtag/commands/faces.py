@@ -240,7 +240,19 @@ def _handle_faces_apply(args: argparse.Namespace) -> int:
 
 
 def _handle_faces_import_photos(args: argparse.Namespace) -> int:
-    """Import named persons from Apple Photos into the faces DB."""
+    """Import named persons from Apple Photos into the faces DB.
+
+    A library-wide enumeration on a 20k+ photo library can take many
+    minutes. Two UX guards live here:
+
+    - The startup banner and periodic counter are *always* emitted
+      (regardless of ``--verbose``) so the user can tell the command is
+      working rather than hung — silence-by-default was the original
+      bug.
+    - ``KeyboardInterrupt`` is caught and turned into a single
+      ``Aborted…`` message + non-zero exit, replacing the noisy
+      photoscript / AppleScript traceback.
+    """
     try:
         from pyimgtag.photos_faces_importer import import_photos_persons
     except ImportError as exc:
@@ -253,6 +265,9 @@ def _handle_faces_import_photos(args: argparse.Namespace) -> int:
         except RuntimeError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
+        except KeyboardInterrupt:
+            print("\nAborted by user before import completed.", file=sys.stderr)
+            return 130
 
     print(f"Imported {imported} person(s) from Apple Photos.", file=sys.stderr)
     if skipped:
