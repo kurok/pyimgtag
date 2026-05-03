@@ -31,7 +31,12 @@ with contextlib.suppress(ImportError):
     pillow_heif.register_heif_opener()
 
 _MODEL_TEMPERATURE: float = 0.3
-_MODEL_MAX_TOKENS: int = 512
+# Bumped from 512: smaller models hitting the cap mid-JSON were the most
+# common source of "Could not parse JSON from model response" — the full
+# rich response (tags + summary + 7 enum-ish fields) often spans 700–900
+# tokens once the model includes whitespace and short text_summary
+# strings.
+_MODEL_MAX_TOKENS: int = 1024
 
 
 _PROMPT_FIELDS = """\
@@ -283,7 +288,14 @@ def _parse_response(text: str) -> TagResult:
     if parsed is None:
         parsed = _extract_first_json_object(raw)
     if parsed is None:
-        return TagResult(raw_response=raw, error="Could not parse JSON from model response")
+        # Include a short prefix of the model's actual reply so the user can
+        # tell whether it was truncated, prose, or a refusal — much more
+        # diagnostic than the bare "Could not parse JSON" alone.
+        snippet = raw[:160] + ("…" if len(raw) > 160 else "")
+        return TagResult(
+            raw_response=raw,
+            error=f"Could not parse JSON from model response: {snippet!r}",
+        )
 
     raw_tags = parsed.get("tags", [])
     if not isinstance(raw_tags, list):
@@ -366,6 +378,8 @@ def _extract_first_json_object(text: str) -> dict | None:
 
     Handles model responses that include {word} placeholders, thinking tokens, or other
     prose before the actual JSON — cases where a greedy regex would capture too much.
+    Also retries with :func:`_repair_truncated_json` if the response was cut off
+    mid-value (a frequent failure mode when the model hits ``num_predict``).
     """
     decoder = json.JSONDecoder()
     i = 0
@@ -376,6 +390,63 @@ def _extract_first_json_object(text: str) -> dict | None:
                 if isinstance(obj, dict):
                     return obj
             except (json.JSONDecodeError, ValueError):
-                pass  # not valid JSON at this position; try the next {
+                # Try to repair from this opening brace through end-of-text.
+                repaired = _repair_truncated_json(text[i:])
+                if repaired is not None:
+                    return repaired
         i += 1
     return None
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """Best-effort recovery for JSON that was cut off mid-value.
+
+    Walks the prefix ``text`` honouring strings and escapes, tracking brace
+    and bracket depth. When the input ends mid-key/value, trims back to the
+    last successfully-closed item and synthesises the missing closing
+    brackets so the prefix becomes valid JSON. Returns ``None`` if nothing
+    parseable can be salvaged.
+    """
+    in_string = False
+    escape = False
+    stack: list[str] = []
+    last_safe = -1  # position right after the last completed value at depth 1
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch == "}" or ch == "]":
+            if stack and stack[-1] == ch:
+                stack.pop()
+                if len(stack) == 0:
+                    # Whole object closed cleanly — return whatever the
+                    # standard decoder gives us; if that fails we fall
+                    # through to the truncation path.
+                    try:
+                        return json.loads(text[: i + 1])
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+        elif ch == "," and len(stack) == 1:
+            last_safe = i  # one past the value we just finished
+
+    if last_safe < 0 or not stack:
+        return None
+    # Trim the trailing garbage and synthesise the closers.
+    candidate = text[:last_safe] + "".join(reversed(stack))
+    try:
+        obj = json.loads(candidate)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return obj if isinstance(obj, dict) else None

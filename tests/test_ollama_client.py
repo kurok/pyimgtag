@@ -22,6 +22,39 @@ class TestParseResponse:
         assert r.summary is None
         assert r.error is None
 
+    def test_truncated_json_recovered(self):
+        """Regression: hitting num_predict mid-value would leave a truncated
+        JSON object the regex/extractor couldn't parse, producing an "error"
+        row even though the first 80% of the response was perfectly valid.
+        The repair pass should now recover the completed fields."""
+        text = (
+            '{"tags": ["bird", "sky", "rocks"], '
+            '"summary": "A black bird perched on rocks against a clear blue sky.", '
+            '"scene_category": "outdoor_leisure", '
+            '"emotional_tone": "neutral", '
+            '"cleanup_class": "keep", '
+            '"has_text": false, '
+            '"text_summary": null, '
+            '"event_hint": "outing", '
+            '"signif'  # cut off mid-key
+        )
+        r = _parse_response(text)
+        assert r.error is None
+        assert r.tags == ["bird", "sky", "rocks"]
+        assert r.summary == "A black bird perched on rocks against a clear blue sky."
+        assert r.scene_category == "outdoor_leisure"
+        # The unfinished field is just dropped — its enum stays None.
+        assert r.significance is None
+
+    def test_unparseable_response_includes_snippet(self):
+        """The "Could not parse JSON" error now embeds a prefix of the raw
+        response so a user staring at error rows in the review UI can tell
+        truncation from prose-only refusals from outright nonsense."""
+        r = _parse_response("I cannot process this image because of safety policy.")
+        assert r.error is not None
+        assert "Could not parse JSON" in r.error
+        assert "safety policy" in r.error
+
     def test_markdown_fenced(self):
         text = '```json\n{"tags":["dog","park"]}\n```'
         r = _parse_response(text)
