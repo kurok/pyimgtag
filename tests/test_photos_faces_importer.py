@@ -261,6 +261,29 @@ class TestBulkAppleScriptPath:
 
         return ProgressDB(db_path=tmp_path / "test.db")
 
+    def test_bulk_script_uses_every_person_form(self):
+        """Pin the AppleScript shape — Photos.app has no plural ``persons``
+        property on a media item; the working form is
+        ``name of every person of p``. Earlier versions used
+        ``persons of p`` and silently returned zero persons across an
+        entire library because the surrounding ``try`` swallowed the
+        AppleScript error. A future revert to ``persons of p`` would
+        ship the same silent-zero bug — fail loudly here instead."""
+        from pyimgtag.photos_faces_importer import _bulk_applescript
+
+        script = _bulk_applescript()
+        # The working form must be present.
+        assert "name of every person of p" in script
+        # The broken form must NOT come back. ``every person`` would
+        # contain ``person`` so we only flag the bare plural-property
+        # access; ``every person`` itself is fine.
+        assert "(persons of p)" not in script
+        assert "persons of p\n" not in script
+        # An ``on error`` branch sets an empty name list per problem
+        # photo so a single bad row doesn't kill the whole traversal.
+        assert "on error" in script
+        assert "set name_list to {}" in script
+
     def test_parses_bulk_output_into_name_to_uuids(self, tmp_path):
         """Happy path: osascript returns multiple rows, all parsed."""
         with self._make_db(tmp_path) as db:
