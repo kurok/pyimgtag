@@ -103,6 +103,16 @@ def _categorise_applescript_error(err: str) -> str:
     # mention of accessibility.
     if "(-1719)" in err or "(-25204)" in err or "assistive access" in low or "accessibility" in low:
         return "accessibility_denied"
+    # Photo not in Photos.app even though the file sits on disk inside
+    # the Photos library bundle (deleted from Photos manually, orphaned
+    # original, etc.). ``applescript_writer._filename_scan_block``
+    # raises ``error "Photo not found: <name>"`` (-2700). Surface that
+    # as its own category so the dashboard can render "Photos.app
+    # doesn't have this image" rather than the misleading
+    # ``photos_unavailable``. Checked before the generic ``applescript``
+    # branch because the stderr begins with ``AppleScript error …``.
+    if "photo not found" in low or "(-2700)" in err:
+        return "photo_not_in_library"
     if "osascript" in low or "applescript" in low:
         return "photos_unavailable"
     return "photos_error"

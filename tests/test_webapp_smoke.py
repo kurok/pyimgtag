@@ -938,6 +938,26 @@ class TestEditCategoriseApplescriptError:
         assert _categorise_applescript_error(e2) == "accessibility_denied"
         assert _categorise_applescript_error(e3) == "accessibility_denied"
 
+    def test_photo_not_found_routes_to_photo_not_in_library(self) -> None:
+        """Photo file sits on disk inside the Photos library bundle but
+        Photos.app no longer indexes it (deleted from Photos manually,
+        orphaned original, etc.). Our own filename-scan AppleScript
+        raises ``error "Photo not found: <name>"`` (-2700) in that
+        case; surface a dedicated category so the dashboard renders
+        the right next-step rather than the misleading
+        ``photos_unavailable``."""
+        from pyimgtag.webapp.routes_edit import _categorise_applescript_error
+
+        e1 = (
+            "AppleScript error (exit 1): 298:357: execution error: "
+            "Photo not found: 0110B5A5-C112-4F30-A21D-CBB99BBA3985.png (-2700)"
+        )
+        e2 = "AppleScript error (exit 1): Photo not found: weird.jpg"
+        e3 = "AppleScript error: (-2700)"
+        assert _categorise_applescript_error(e1) == "photo_not_in_library"
+        assert _categorise_applescript_error(e2) == "photo_not_in_library"
+        assert _categorise_applescript_error(e3) == "photo_not_in_library"
+
     def test_generic_applescript_error_routes_to_photos_unavailable(self) -> None:
         from pyimgtag.webapp.routes_edit import _categorise_applescript_error
 

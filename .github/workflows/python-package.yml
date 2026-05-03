@@ -54,6 +54,21 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13"]
+        # Trim the matrix from 9 cells to 5. Removed cells:
+        #   - macos-latest / 3.11
+        #   - windows-latest / 3.11
+        #   - windows-latest / 3.12
+        # Linux still covers all three minors; macOS keeps 3.12 + 3.13
+        # for the AppleScript / Photos-bridge stack; Windows keeps 3.13
+        # which already exercised the Starlette TestClient socket path
+        # that the older minors duplicated.
+        exclude:
+          - os: macos-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.12"
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
     - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
