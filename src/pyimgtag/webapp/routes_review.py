@@ -485,9 +485,9 @@ def _make_thumbnail(image_path: str, size: int) -> bytes | None:
             img_rgb.save(buf, format="JPEG", quality=75)
             data = buf.getvalue()
     except (OSError, UnidentifiedImageError):
-        pass
+        pass  # nosec B110 — fall through to sips fallback below
     except Exception:  # noqa: BLE001 — catch-all for PIL/HEIC decode failures
-        pass
+        pass  # nosec B110
 
     # PIL failed (likely HEIC without pillow-heif installed) — try macOS sips.
     if data is None and image_path.lower().endswith((".heic", ".heif")):
