@@ -45,19 +45,28 @@ _MODELS_INSTALL_HINT = (
 )
 
 # face_recognition_models does ``from pkg_resources import resource_filename``
-# at import time. ``pkg_resources`` ships with ``setuptools``, which is no
-# longer bundled with Python 3.12+ in many distributions, so the package
-# install can succeed yet the import raises ``ModuleNotFoundError: No
-# module named 'pkg_resources'``. Detect that specific failure and ask the
-# user to install setuptools instead of re-installing the models package.
+# at import time. There are two ways this can fail:
+#
+# 1. ``setuptools`` itself is missing — Python 3.12+ no longer bundles it.
+# 2. ``setuptools`` is installed at version 81.0.0 or newer, but
+#    setuptools 81 *removed* the bundled ``pkg_resources`` module while
+#    leaving the install metadata intact. So ``pip show setuptools``
+#    succeeds yet ``import pkg_resources`` still raises
+#    ``ModuleNotFoundError: No module named 'pkg_resources'``.
+#
+# Both surface the same exception, so this hint covers both — the
+# ``setuptools<81`` pin is the load-bearing detail.
 _PKG_RESOURCES_HINT = (
     "face_recognition_models is installed but cannot be imported because\n"
-    "``pkg_resources`` (part of setuptools) is missing from this Python\n"
-    "environment. setuptools is no longer bundled with Python 3.12+ but\n"
-    "face_recognition_models still uses ``pkg_resources`` at import time.\n"
-    "Install setuptools into THIS Python environment:\n"
+    "``pkg_resources`` is not available in this Python environment.\n"
+    "``pkg_resources`` used to ship with setuptools, but setuptools\n"
+    "**81.0.0 removed it** from the package while leaving the install\n"
+    "metadata intact — so ``pip show setuptools`` succeeds yet\n"
+    "``import pkg_resources`` raises ``ModuleNotFoundError``. Pin\n"
+    "setuptools below 81 to bring ``pkg_resources`` back (the same\n"
+    "command installs setuptools if it was missing entirely):\n"
     "\n"
-    "    {python} -m pip install setuptools\n"
+    "    {python} -m pip install 'setuptools<81'\n"
     "\n"
     "Then re-run your pyimgtag faces command."
 )

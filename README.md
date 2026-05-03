@@ -183,11 +183,22 @@ python -m pip show face_recognition_models
 ```
 
 If `pip show` says it's installed but pyimgtag still complains, the
-likely culprit is a missing `pkg_resources` (Python 3.12+ no longer
-bundles setuptools by default and `face_recognition_models` imports
-`pkg_resources` at load time). The pyimgtag `[face]` extra pins
-`setuptools>=68.0` to cover this; if you installed without the extra,
-run `python -m pip install setuptools`.
+likely culprit is a missing `pkg_resources`. There are two ways this
+shows up:
+
+1. Python 3.12+ no longer bundles setuptools by default, so
+   `pkg_resources` is just absent.
+2. **setuptools 81 removed `pkg_resources` from the package**, so you
+   can have setuptools 81+ installed and `pip show` happy, yet
+   `import pkg_resources` raises `ModuleNotFoundError`.
+
+Pinning setuptools below 81 fixes both — the `[face]` and `[all]`
+extras pin `setuptools>=68.0,<81` automatically. If you installed
+without the extra (or your env already had setuptools 81+), run:
+
+```bash
+python -m pip install 'setuptools<81'
+```
 
 ### Linux Setup
 
