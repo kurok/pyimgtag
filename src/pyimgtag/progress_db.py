@@ -540,15 +540,26 @@ class ProgressDB:
         if cleanup_class is not None:
             conditions.append("cleanup_class = ?")
             params.append(cleanup_class)
-        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         order_clause = self._GET_IMAGES_SORTS.get(sort, self._GET_IMAGES_SORTS["path_asc"])
+        # All filter columns live on ``processed_images`` and the join key
+        # ``file_path`` is the only column that collides with judge_scores,
+        # so qualify each predicate with the ``pi.`` alias.
+        joined_where = "WHERE " + " AND ".join(f"pi.{c}" for c in conditions) if conditions else ""
+        # Sort clauses reference unambiguous columns (file_path resolves to
+        # processed_images via the alias, processed_at and the LOWER()
+        # variants only exist on processed_images).
+        order_qualified = order_clause.replace("file_path", "pi.file_path").replace(
+            "processed_at", "pi.processed_at"
+        )
         query = (  # nosec B608
-            "SELECT file_path, tags, scene_summary, processed_at, status, "
-            "cleanup_class, scene_category, emotional_tone, event_hint, "
-            "significance, error_message "
-            "FROM processed_images "
-            + where  # nosec B608
-            + f" ORDER BY {order_clause} LIMIT ? OFFSET ?"  # nosec B608
+            "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, "
+            "pi.status, pi.cleanup_class, pi.scene_category, pi.emotional_tone, "
+            "pi.event_hint, pi.significance, pi.error_message, "
+            "js.weighted_score, js.verdict "
+            "FROM processed_images pi "
+            "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
+            + joined_where  # nosec B608
+            + f" ORDER BY {order_qualified} LIMIT ? OFFSET ?"  # nosec B608
         )
         params.extend([limit, offset])
         rows = self._conn.execute(query, params).fetchall()
@@ -573,12 +584,20 @@ class ProgressDB:
         return self._conn.execute(query, params).fetchone()[0]
 
     def get_image(self, file_path: str) -> dict | None:
-        """Return metadata for a single image, or None if not found."""
+        """Return metadata for a single image, or None if not found.
+
+        The join with ``judge_scores`` brings the weighted-judge score and
+        verdict back so the review UI and dashboard click-through can show
+        them on the per-image card without a follow-up request.
+        """
         row = self._conn.execute(
-            "SELECT file_path, tags, scene_summary, processed_at, status, "
-            "cleanup_class, scene_category, emotional_tone, event_hint, "
-            "significance, error_message "
-            "FROM processed_images WHERE file_path = ?",
+            "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, "
+            "pi.status, pi.cleanup_class, pi.scene_category, pi.emotional_tone, "
+            "pi.event_hint, pi.significance, pi.error_message, "
+            "js.weighted_score, js.verdict "
+            "FROM processed_images pi "
+            "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
+            "WHERE pi.file_path = ?",
             (file_path,),
         ).fetchone()
         if row is None:
@@ -616,6 +635,7 @@ class ProgressDB:
             tags_list: list[str] = json.loads(tags_raw) if tags_raw else []
         except (json.JSONDecodeError, TypeError):
             tags_list = []
+        weighted_raw = row[11] if len(row) > 11 else None
         return {
             "file_path": file_path,
             "file_name": Path(file_path).name,
@@ -630,6 +650,10 @@ class ProgressDB:
             "event_hint": row[8],
             "significance": row[9],
             "error_message": row[10] if len(row) > 10 else None,
+            # Pulled from the optional LEFT JOIN with judge_scores. These
+            # are ``None`` for any image that has not been judged yet.
+            "judge_score": int(round(float(weighted_raw))) if weighted_raw is not None else None,
+            "judge_verdict": row[12] if len(row) > 12 else None,
         }
 
     # --- face pipeline methods ---

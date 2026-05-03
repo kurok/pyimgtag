@@ -92,6 +92,37 @@ class TestScoreLabel:
         assert _score_label(1) == "weak"
 
 
+class TestCmdJudgeSkipJudged:
+    def test_skip_judged_skips_already_scored(self, tmp_path: Path) -> None:
+        """``--skip-judged`` must cause images already in judge_scores to be
+        skipped without invoking the model again — the resume-from-DB
+        equivalent for repeated judge runs over the same source."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        (tmp_path / "scored.jpg").write_bytes(b"x")
+        (tmp_path / "fresh.jpg").write_bytes(b"x")
+        args = _make_args(tmp_path)
+        args.skip_judged = True
+
+        db = MagicMock()
+        # Already-scored image returns a dict; fresh image returns None.
+        db.get_judge_result.side_effect = lambda p: {"weighted_score": 7} if "scored" in p else None
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.judge_image.return_value = _make_scores()
+            mock_cls.return_value = mock_client
+            cmd_judge(args, db)
+
+        # Only the fresh image is judged; the model is invoked exactly once.
+        assert mock_client.judge_image.call_count == 1
+        # And only that one judge_result is saved.
+        assert db.save_judge_result.call_count == 1
+
+
 class TestCmdJudgeBasic:
     def test_returns_0_on_success(self, tmp_path: Path) -> None:
         from pyimgtag.commands.judge import cmd_judge

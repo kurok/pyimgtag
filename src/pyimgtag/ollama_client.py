@@ -38,6 +38,12 @@ _MODEL_TEMPERATURE: float = 0.3
 # strings.
 _MODEL_MAX_TOKENS: int = 1024
 
+# Append-only log file for unparseable model responses. Set the env var
+# ``PYIMGTAG_PARSE_ERROR_LOG`` to override the location; defaults to
+# ``./pyimgtag-parse-errors.log`` in the current working directory so
+# the file lands in the same folder the user invoked pyimgtag from.
+_DEFAULT_PARSE_ERROR_LOG = "pyimgtag-parse-errors.log"
+
 
 _PROMPT_FIELDS = """\
 Reply with ONLY a valid JSON object — no markdown, no explanation. Required fields:
@@ -292,6 +298,7 @@ def _parse_response(text: str) -> TagResult:
         # tell whether it was truncated, prose, or a refusal — much more
         # diagnostic than the bare "Could not parse JSON" alone.
         snippet = raw[:160] + ("…" if len(raw) > 160 else "")
+        _log_parse_error(raw, kind="tag")
         return TagResult(
             raw_response=raw,
             error=f"Could not parse JSON from model response: {snippet!r}",
@@ -346,6 +353,7 @@ def _parse_judge_response(text: str) -> JudgeScores | None:
     if parsed is None:
         parsed = _extract_first_json_object(raw)
     if parsed is None:
+        _log_parse_error(raw, kind="judge")
         return None
 
     def _score(key: str) -> int:
@@ -371,6 +379,28 @@ def _try_json(text: str) -> dict | None:
         return obj if isinstance(obj, dict) else None
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+def _log_parse_error(raw: str, *, kind: str) -> None:
+    """Append the raw model reply to the local parse-error log.
+
+    Lets users post-mortem the full text the model returned (truncation,
+    refusal, or noise) instead of relying on the 160-char snippet shown
+    in the review UI. Best-effort: a write failure must never bubble up
+    into the run / judge path, so all OS errors are swallowed.
+    """
+    import contextlib
+    import os as _os
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    target = _os.environ.get("PYIMGTAG_PARSE_ERROR_LOG", _DEFAULT_PARSE_ERROR_LOG)
+    line = (
+        f"--- {_dt.now(_tz.utc).isoformat(timespec='seconds')} kind={kind} len={len(raw)}\n{raw}\n"
+    )
+    with contextlib.suppress(OSError):
+        with open(target, "a", encoding="utf-8") as f:
+            f.write(line)
 
 
 def _extract_first_json_object(text: str) -> dict | None:
