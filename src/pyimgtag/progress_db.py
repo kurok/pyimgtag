@@ -87,6 +87,9 @@ class ProgressDB:
         # 0.10.0: simple-prompt judge stores the model's natural-language
         # justification next to the integer score.
         (7, "ALTER TABLE judge_scores ADD COLUMN reason TEXT"),
+        # 0.12.0: persist the photo's EXIF capture timestamp so the Query
+        # page can show "when the photo was taken" without re-reading EXIF.
+        (8, "ALTER TABLE processed_images ADD COLUMN image_date TEXT"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -179,8 +182,8 @@ class ProgressDB:
                  processed_at, status, error_message,
                  scene_category, emotional_tone, cleanup_class, has_text,
                  text_summary, event_hint, significance,
-                 nearest_city, nearest_region, nearest_country)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 nearest_city, nearest_region, nearest_country, image_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(file_path),
@@ -201,6 +204,7 @@ class ProgressDB:
                 result.nearest_city,
                 result.nearest_region,
                 result.nearest_country,
+                result.image_date,
             ),
         )
         self._conn.commit()
@@ -241,6 +245,8 @@ class ProgressDB:
         "oldest": "pi.processed_at ASC, pi.file_path ASC",
         "judge_desc": "js.weighted_score DESC NULLS LAST, pi.file_path ASC",
         "judge_asc": "js.weighted_score ASC NULLS LAST, pi.file_path ASC",
+        "shot_desc": "pi.image_date DESC NULLS LAST, pi.file_path ASC",
+        "shot_asc": "pi.image_date ASC NULLS LAST, pi.file_path ASC",
     }
 
     def query_images(
@@ -324,7 +330,7 @@ class ProgressDB:
             "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, pi.status, "
             "pi.cleanup_class, pi.scene_category, pi.emotional_tone, pi.event_hint, "
             "pi.significance, pi.nearest_city, pi.nearest_region, pi.nearest_country, "
-            "pi.error_message, js.weighted_score, js.reason, js.verdict "
+            "pi.error_message, js.weighted_score, js.reason, js.verdict, pi.image_date "
             "FROM processed_images pi "
             "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
             + where  # nosec B608
@@ -368,6 +374,7 @@ class ProgressDB:
             "judge_score": int(round(float(weighted_raw))) if weighted_raw is not None else None,
             "judge_reason": row[15] if len(row) > 15 else None,
             "judge_verdict": row[16] if len(row) > 16 else None,
+            "image_date": row[17] if len(row) > 17 else None,
         }
 
     def get_tag_counts(self) -> list[tuple[str, int]]:

@@ -287,13 +287,32 @@ function renderGrid(items) {
     nameEl.title = img.file_path;
     nameEl.textContent = img.file_name;
     body.appendChild(nameEl);
-    // "Open source" link — fetches the original bytes from the local server.
+    // "Open original" — when the host is macOS we ask the backend to
+    // activate Photos.app and spotlight this media item; otherwise (or
+    // when the photo isn't in the library) we fall back to streaming the
+    // original bytes via /original. Built as a real link so right-click
+    // / cmd-click still opens the bytes in a new tab.
     const srcLink = document.createElement('a');
     srcLink.className = 'img-source';
     srcLink.href = '__API_BASE__/original?path=' + encodeURIComponent(img.file_path);
     srcLink.target = '_blank';
     srcLink.rel = 'noopener';
     srcLink.textContent = 'Open original';
+    srcLink.title = 'Reveal in Photos.app — falls back to opening the file';
+    srcLink.addEventListener('click', async (e) => {
+      // Modifier-clicks / right-clicks bypass the Photos hop so power
+      // users can still grab the raw bytes when they want them.
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      try {
+        const r = await fetch(
+          '__API_BASE__/api/open-in-photos?path=' + encodeURIComponent(img.file_path),
+          { method: 'POST' });
+        const d = await r.json();
+        if (d && d.ok) return;
+      } catch (_) { /* swallow — fall back below */ }
+      window.open(srcLink.href, '_blank', 'noopener');
+    });
     body.appendChild(srcLink);
     const sceneEl = document.createElement('div');
     sceneEl.className = 'img-scene';
@@ -549,6 +568,28 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/jpeg")
+
+    @router.post("/api/open-in-photos")
+    async def open_in_photos(
+        path: str = Query(..., description="Absolute path to the image file"),
+    ) -> dict:
+        """Activate Apple Photos and reveal the matching item.
+
+        Looks the path up in the progress DB so the request value never
+        reaches the AppleScript layer; only the DB-stored path is passed
+        to ``reveal_in_photos``. Returns ``{"ok": true}`` on success or
+        ``{"ok": false, "error": "..."}`` with HTTP 200 so the JS can
+        gracefully fall back to opening the original bytes.
+        """
+        row = db.get_image(path)
+        if row is None:
+            return {"ok": False, "error": "Image not found in DB"}
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        err = reveal_in_photos(row["file_path"])
+        if err is None:
+            return {"ok": True}
+        return {"ok": False, "error": err}
 
     @router.patch("/api/images/tags")
     async def update_tags(body: _TagsBody = Body(...)) -> dict:

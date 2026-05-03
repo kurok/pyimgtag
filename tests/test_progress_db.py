@@ -218,7 +218,7 @@ class TestSchemaVersioning:
     def test_fresh_db_is_at_version_3(self, tmp_path):
         """A brand-new database must be fully migrated to the latest version."""
         with ProgressDB(db_path=tmp_path / "v3.db") as db:
-            assert self._user_version(db._conn) == 7
+            assert self._user_version(db._conn) == 8
 
     def test_fresh_db_has_all_new_columns(self, tmp_path):
         """All version-2 columns must be present in a fresh database."""
@@ -269,7 +269,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 7
+            assert self._user_version(db._conn) == 8
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db._conn))
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
@@ -294,7 +294,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 7
+            assert self._user_version(db._conn) == 8
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
 
@@ -325,7 +325,7 @@ class TestSchemaVersioning:
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute("PRAGMA user_version").fetchone()[0] == 7
+            assert raw.execute("PRAGMA user_version").fetchone()[0] == 8
         finally:
             raw.close()
 
@@ -336,7 +336,7 @@ class TestSchemaVersioning:
             pass
 
         with ProgressDB(db_path=db_path) as db2:
-            assert self._user_version(db2._conn) == 7
+            assert self._user_version(db2._conn) == 8
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db2._conn))
             assert self._table_exists(db2._conn, "faces")
             assert self._table_exists(db2._conn, "persons")
@@ -715,7 +715,7 @@ class TestMigrationV4:
     def test_fresh_db_is_at_version_4(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 7
+            assert ver == 8
 
     def test_fresh_db_has_location_columns(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
@@ -786,7 +786,7 @@ class TestMigrationV4:
 
         with ProgressDB(db_path=db_path) as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 7
+            assert ver == 8
             cols = {
                 row[1] for row in db._conn.execute("PRAGMA table_info(processed_images)").fetchall()
             }
@@ -963,6 +963,62 @@ class TestQueryImages:
             rows = db.query_images()
             bad = next(r for r in rows if r["file_path"] == "/bad/tags.jpg")
             assert bad["tags_list"] == []
+
+    def test_query_returns_image_date(self, tmp_path):
+        """`image_date` from EXIF round-trips through mark_done → query."""
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            img = _make_image(tmp_path, "shot.jpg")
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name="shot.jpg",
+                    tags=[],
+                    image_date="2025-09-12T08:30:00",
+                    processing_status="ok",
+                ),
+            )
+            rows = db.query_images()
+            assert len(rows) == 1
+            assert rows[0]["image_date"] == "2025-09-12T08:30:00"
+
+    def test_query_image_date_none_when_not_set(self, tmp_path):
+        """Rows from before migration v8 surface image_date=None, never KeyError."""
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            img = _make_image(tmp_path, "no-exif.jpg")
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name="no-exif.jpg",
+                    tags=[],
+                    processing_status="ok",
+                ),
+            )
+            rows = db.query_images()
+            assert rows[0]["image_date"] is None
+
+    def test_query_sort_shot_desc_orders_by_capture(self, tmp_path):
+        """`sort=shot_desc` orders by image_date DESC, NULLs last."""
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            for name, date in [
+                ("old.jpg", "2020-01-01T00:00:00"),
+                ("new.jpg", "2025-06-15T12:00:00"),
+                ("missing.jpg", None),
+            ]:
+                img = _make_image(tmp_path, name)
+                db.mark_done(
+                    img,
+                    ImageResult(
+                        file_path=str(img),
+                        file_name=name,
+                        tags=[],
+                        image_date=date,
+                        processing_status="ok",
+                    ),
+                )
+            rows = db.query_images(sort="shot_desc")
+            assert [r["file_name"] for r in rows] == ["new.jpg", "old.jpg", "missing.jpg"]
 
 
 class TestGetImagesFilters:

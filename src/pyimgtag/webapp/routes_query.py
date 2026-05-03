@@ -39,6 +39,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .status-error{color:var(--danger);font-size:11px;font-weight:600}
     .err-msg{font-size:11px;color:var(--danger);margin-top:3px;
              font-family:ui-monospace,'SF Mono',monospace;word-break:break-word}
+    .date-cell{font-size:12px;color:var(--muted);white-space:nowrap;
+               font-variant-numeric:tabular-nums}
     .judge-cell{font-weight:700;font-size:12px;color:var(--text);
                 white-space:nowrap}
     .judge-high{color:#16a34a}
@@ -105,8 +107,10 @@ __NAV__
       <select id="f_sort">
         <option value="path_asc">Path (A→Z)</option>
         <option value="path_desc">Path (Z→A)</option>
-        <option value="newest">Newest first</option>
-        <option value="oldest">Oldest first</option>
+        <option value="newest">Newest processed</option>
+        <option value="oldest">Oldest processed</option>
+        <option value="shot_desc">Newest taken</option>
+        <option value="shot_asc">Oldest taken</option>
         <option value="judge_desc">Judge score (high→low)</option>
         <option value="judge_asc">Judge score (low→high)</option>
       </select></div>
@@ -148,7 +152,7 @@ async function search() {
   const tbl = document.createElement('table');
   tbl.className = 'tbl';
   const hdr = document.createElement('tr');
-  for (const h of ['File','Status','Judge','Tags','Category','Cleanup','Location']) {
+  for (const h of ['File','Date','Status','Judge','Tags','Category','Cleanup','Location']) {
     const th = document.createElement('th');
     th.textContent = h;
     hdr.appendChild(th);
@@ -173,6 +177,11 @@ async function search() {
     fileLink.textContent = row.file_name;
     fileLink.style.color = 'inherit';
     tdFile.appendChild(fileLink);
+
+    const tdDate = document.createElement('td');
+    tdDate.className = 'date-cell';
+    tdDate.textContent = formatPhotoDate(row.image_date);
+    if (row.image_date) tdDate.title = row.image_date;
 
     const tdStatus = document.createElement('td');
     const statusEl = document.createElement('span');
@@ -235,7 +244,8 @@ async function search() {
     const tdLoc = document.createElement('td');
     tdLoc.textContent = [row.nearest_city, row.nearest_country].filter(Boolean).join(', ');
 
-    for (const td of [tdFile, tdStatus, tdJudge, tdTags, tdCat, tdClean, tdLoc]) tr.appendChild(td);
+    const cells = [tdFile, tdDate, tdStatus, tdJudge, tdTags, tdCat, tdClean, tdLoc];
+    for (const td of cells) tr.appendChild(td);
     tbl.appendChild(tr);
   }
   wrap.appendChild(tbl);
@@ -245,6 +255,20 @@ function judgeColour(score) {
   if (score >= 8) return 'judge-high';
   if (score >= 6) return 'judge-mid';
   return 'judge-low';
+}
+
+// Render the EXIF capture timestamp. The DB stores either an ISO 8601
+// string (Pillow path) or the raw "YYYY:MM:DD HH:MM:SS" exiftool form;
+// both should render as a short human date. Falls back to em-dash when
+// the field is missing (older rows from before migration v8).
+function formatPhotoDate(raw) {
+  if (!raw) return '—';
+  // exiftool keeps colons in the date portion; ISO 8601 uses dashes.
+  const iso = String(raw).replace(/^(\\d{4}):(\\d{2}):(\\d{2})/, '$1-$2-$3');
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(raw).slice(0, 10);
+  return d.toLocaleDateString(undefined,
+    {year:'numeric', month:'short', day:'2-digit'});
 }
 
 // --- Hover thumbnail ---------------------------------------------------------
