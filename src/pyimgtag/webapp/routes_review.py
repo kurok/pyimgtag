@@ -269,10 +269,13 @@ function renderGrid(items) {
     }
     if (typeof img.judge_score === 'number') {
       // Show the judge weighted score (1–10 integer) as a corner badge.
+      // Tooltip prefers the simple-prompt ``reason`` and falls back to
+      // the legacy ``verdict`` so older judged rows still show context.
       const judge = document.createElement('span');
       judge.className = 'img-judge ' + judgeClass(img.judge_score);
       judge.textContent = img.judge_score + '/10';
-      if (img.judge_verdict) judge.title = img.judge_verdict;
+      const tip = img.judge_reason || img.judge_verdict;
+      if (tip) judge.title = tip;
       thumbWrap.appendChild(judge);
     }
     wrap.appendChild(thumbWrap);

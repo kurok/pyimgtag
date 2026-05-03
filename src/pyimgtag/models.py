@@ -166,7 +166,19 @@ class PersonCluster:
 
 @dataclass
 class JudgeScores:
-    """Rubric scores from the photo-judge prompt (integer 1-10 each)."""
+    """Rubric scores from the photo-judge prompt (integer 1-10 each).
+
+    The current prompt asks the model for a single integer score plus a
+    short reason. The 13 per-criterion fields below are kept for
+    backward compatibility with previously-stored DB rows from older
+    multi-criterion prompts; the simple-prompt path fills every
+    criterion field with the same overall score so weighted/core/visible
+    averages still work.
+
+    ``reason`` carries the natural-language justification the new prompt
+    returns. It is shown in ``--verbose`` CLI output and on the web UI,
+    but never written to image tags or EXIF metadata.
+    """
 
     impact: int = 0
     story_subject: int = 0
@@ -182,6 +194,7 @@ class JudgeScores:
     subject_separation: int = 0
     edit_integrity: int = 0
     verdict: str = ""
+    reason: str = ""
 
 
 @dataclass

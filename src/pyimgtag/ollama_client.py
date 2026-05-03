@@ -60,28 +60,28 @@ Reply with ONLY a valid JSON object — no markdown, no explanation. Required fi
 _PROMPT_BASE = "Tag this image for a photo gallery.\n\n" + _PROMPT_FIELDS
 
 _JUDGE_PROMPT = """\
-You are a professional photo judge. Score this photograph on each criterion \
-as a whole integer from 1 to 10, where 1=poor, 5=acceptable/competent, \
-8=strong, 10=exceptional. Use whole numbers only — no decimals.
+You are a professional photography judge. Evaluate the provided image and \
+assign a single integer score from 1 to 10.
 
-Respond with ONLY a valid JSON object. Required fields:
-- impact: 1-10  (emotional pull, memorability)
-- story_subject: 1-10  (clear subject and meaning)
-- composition_center: 1-10  (visual flow, balance, center of interest)
-- lighting: 1-10  (quality, control, mood support)
-- creativity_style: 1-10  (originality of treatment)
-- color_mood: 1-10  (color balance and mood fit)
-- presentation_crop: 1-10  (crop, framing, aspect ratio)
-- technical_excellence: 1-10  (exposure, retouching, overall finish)
-- focus_sharpness: 1-10  (critical detail is sharp; blur is intentional)
-- exposure_tonal: 1-10  (highlights and shadows under control)
-- noise_cleanliness: 1-10  (clean detail, no distracting grain)
-- subject_separation: 1-10  (subject stands out from background)
-- edit_integrity: 1-10  (no halos, overprocessing, or clone artefacts)
-- verdict: one sentence naming the key strength and key weakness
+Evaluation criteria (internal use only):
+- Impact / Creativity / Storytelling (emotional effect, originality, narrative)
+- Technical Quality (focus, sharpness, exposure, lighting, color, editing)
+- Composition (framing, balance, subject placement, visual structure)
 
-Score honestly. A 5 means competent and deliverable. A 10 means exceptional. \
-Output integers only — no fractional values like 7.5."""
+Scoring scale:
+1–3 = poor (major technical flaws, no clear idea)
+4–6 = average (some strengths but noticeable issues)
+7–8 = strong (good quality and composition)
+9 = excellent (near professional level)
+10 = outstanding (competition-level, no obvious flaws)
+
+Output format (STRICT):
+Return ONLY valid JSON. No extra text.
+
+{
+  "score": <integer from 1 to 10>,
+  "reason": "<2–4 concise sentences explaining the score>"
+}"""
 
 _JUDGE_SCORE_FIELDS: tuple[str, ...] = (
     "impact",
@@ -344,6 +344,17 @@ def _parse_response(text: str) -> TagResult:
 
 
 def _parse_judge_response(text: str) -> JudgeScores | None:
+    """Parse a judge model reply.
+
+    The current prompt asks for ``{"score": int, "reason": str}``. To stay
+    compatible with rows produced by the previous 13-criterion prompt
+    (and any older deployment that still issues it) we also accept the
+    legacy shape and copy the per-criterion values over.
+
+    For new-style responses every per-criterion field is filled with the
+    same overall ``score`` so existing weighted/core/visible computations
+    keep returning the same integer the model picked.
+    """
     raw = text.strip()
     parsed = _try_json(raw)
     if parsed is None:
@@ -356,20 +367,34 @@ def _parse_judge_response(text: str) -> JudgeScores | None:
         _log_parse_error(raw, kind="judge")
         return None
 
-    def _score(key: str) -> int:
-        val = parsed.get(key, 5)
+    def _clamp_score(val: object, default: int = 5) -> int:
         try:
-            return int(round(max(1.0, min(10.0, float(val)))))
+            return int(round(max(1.0, min(10.0, float(val)))))  # type: ignore[arg-type]
         except (TypeError, ValueError):
-            return 5
+            return default
 
-    verdict = parsed.get("verdict", "")
-    if not isinstance(verdict, str):
-        verdict = ""
+    reason_raw = parsed.get("reason", "")
+    reason = reason_raw if isinstance(reason_raw, str) else ""
+    verdict_raw = parsed.get("verdict", "")
+    verdict = verdict_raw if isinstance(verdict_raw, str) else ""
 
+    if "score" in parsed:
+        # New simple-prompt shape. Spread the same value across the legacy
+        # per-criterion fields so the rest of the pipeline (weighted_score
+        # average, top/bottom criterion picks) is mathematically a no-op
+        # but doesn't crash on missing fields.
+        score = _clamp_score(parsed.get("score"))
+        return JudgeScores(
+            **{k: score for k in _JUDGE_SCORE_FIELDS},
+            verdict=verdict,
+            reason=reason,
+        )
+
+    # Legacy 13-criterion shape.
     return JudgeScores(
-        **{k: _score(k) for k in _JUDGE_SCORE_FIELDS},
+        **{k: _clamp_score(parsed.get(k)) for k in _JUDGE_SCORE_FIELDS},
         verdict=verdict,
+        reason=reason,
     )
 
 

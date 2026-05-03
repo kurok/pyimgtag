@@ -46,6 +46,35 @@ class TestParseResponse:
         # The unfinished field is just dropped — its enum stays None.
         assert r.significance is None
 
+    def test_parse_judge_simple_prompt_score_and_reason(self):
+        """The current prompt asks for ``{score, reason}``. The parser must
+        accept it, fan the score out across the legacy per-criterion fields
+        so weighted/core/visible all match, and surface the natural-language
+        reason without leaking it into ``verdict``."""
+        from pyimgtag.ollama_client import _parse_judge_response
+
+        text = (
+            '{"score": 7, "reason": "Strong subject and balanced light. '
+            'Slight chromatic aberration in the highlights drops it from an 8."}'
+        )
+        scores = _parse_judge_response(text)
+        assert scores is not None
+        assert scores.impact == 7
+        assert scores.composition_center == 7
+        assert scores.edit_integrity == 7
+        assert scores.reason.startswith("Strong subject")
+        # The simple prompt does not produce ``verdict`` — that field is for
+        # legacy 13-criterion rows only.
+        assert scores.verdict == ""
+
+    def test_parse_judge_simple_prompt_clamps_score(self):
+        from pyimgtag.ollama_client import _parse_judge_response
+
+        scores = _parse_judge_response('{"score": 42, "reason": "out of range"}')
+        assert scores is not None
+        assert scores.impact == 10
+        assert scores.reason == "out of range"
+
     def test_unparseable_response_includes_snippet(self):
         """The "Could not parse JSON" error now embeds a prefix of the raw
         response so a user staring at error rows in the review UI can tell

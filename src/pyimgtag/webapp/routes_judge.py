@@ -81,18 +81,21 @@ async function load() {
     tierEl.textContent = label;
     card.appendChild(tierEl);
 
-    const sub = document.createElement('div');
-    sub.className = 'score-sub';
-    sub.textContent = 'core\u00a0' + Math.round(s.core_score || 0) +
-                      '\u00a0\u00b7\u00a0visible\u00a0' +
-                      Math.round(s.visible_score || 0);
-    card.appendChild(sub);
+    if (s.scored_at) {
+      const sub = document.createElement('div');
+      sub.className = 'score-sub';
+      sub.textContent = 'scored ' + s.scored_at;
+      card.appendChild(sub);
+    }
 
-    if (s.verdict) {
+    // Prefer the natural-language reason from the simple-prompt path;
+    // fall back to the older verdict field on legacy DB rows.
+    const explanation = s.reason || s.verdict;
+    if (explanation) {
       const verdict = document.createElement('div');
       verdict.className = 'score-verdict';
-      verdict.title = s.verdict;
-      verdict.textContent = s.verdict;
+      verdict.title = explanation;
+      verdict.textContent = explanation;
       card.appendChild(verdict);
     }
     grid.appendChild(card);

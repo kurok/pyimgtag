@@ -218,7 +218,7 @@ class TestSchemaVersioning:
     def test_fresh_db_is_at_version_3(self, tmp_path):
         """A brand-new database must be fully migrated to the latest version."""
         with ProgressDB(db_path=tmp_path / "v3.db") as db:
-            assert self._user_version(db._conn) == 6
+            assert self._user_version(db._conn) == 7
 
     def test_fresh_db_has_all_new_columns(self, tmp_path):
         """All version-2 columns must be present in a fresh database."""
@@ -269,7 +269,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 6
+            assert self._user_version(db._conn) == 7
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db._conn))
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
@@ -294,7 +294,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 6
+            assert self._user_version(db._conn) == 7
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
 
@@ -325,7 +325,7 @@ class TestSchemaVersioning:
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute("PRAGMA user_version").fetchone()[0] == 6
+            assert raw.execute("PRAGMA user_version").fetchone()[0] == 7
         finally:
             raw.close()
 
@@ -336,7 +336,7 @@ class TestSchemaVersioning:
             pass
 
         with ProgressDB(db_path=db_path) as db2:
-            assert self._user_version(db2._conn) == 6
+            assert self._user_version(db2._conn) == 7
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db2._conn))
             assert self._table_exists(db2._conn, "faces")
             assert self._table_exists(db2._conn, "persons")
@@ -715,7 +715,7 @@ class TestMigrationV4:
     def test_fresh_db_is_at_version_4(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 6
+            assert ver == 7
 
     def test_fresh_db_has_location_columns(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
@@ -786,7 +786,7 @@ class TestMigrationV4:
 
         with ProgressDB(db_path=db_path) as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 6
+            assert ver == 7
             cols = {
                 row[1] for row in db._conn.execute("PRAGMA table_info(processed_images)").fetchall()
             }
