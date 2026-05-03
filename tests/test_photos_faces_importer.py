@@ -261,28 +261,84 @@ class TestBulkAppleScriptPath:
 
         return ProgressDB(db_path=tmp_path / "test.db")
 
-    def test_bulk_script_uses_every_person_form(self):
-        """Pin the AppleScript shape — Photos.app has no plural ``persons``
-        property on a media item; the working form is
-        ``name of every person of p``. Earlier versions used
-        ``persons of p`` and silently returned zero persons across an
-        entire library because the surrounding ``try`` swallowed the
-        AppleScript error. A future revert to ``persons of p`` would
-        ship the same silent-zero bug — fail loudly here instead."""
-        from pyimgtag.photos_faces_importer import _bulk_applescript
+    def test_bulk_script_every_person_form(self):
+        """Default bulk script uses ``name of every person of p``.
 
-        script = _bulk_applescript()
-        # The working form must be present.
+        That's the photoscript-canonical form and works on the vast
+        majority of macOS Photos.app builds. The older ``persons of p``
+        form silently returned zero persons across whole libraries.
+        """
+        from pyimgtag.photos_faces_importer import _bulk_applescript_every_person
+
+        script = _bulk_applescript_every_person()
         assert "name of every person of p" in script
-        # The broken form must NOT come back. ``every person`` would
-        # contain ``person`` so we only flag the bare plural-property
-        # access; ``every person`` itself is fine.
-        assert "(persons of p)" not in script
-        assert "persons of p\n" not in script
-        # An ``on error`` branch sets an empty name list per problem
-        # photo so a single bad row doesn't kill the whole traversal.
+        # Per-photo ``on error`` keeps a single bad row from killing the
+        # whole traversal.
         assert "on error" in script
         assert "set name_list to {}" in script
+
+    def test_bulk_script_persons_property_fallback_avoids_class_identifier(self):
+        """The fallback script must NOT name ``person`` as a class.
+
+        On Photos.app builds where ``person`` isn't terminologised as a
+        class (osascript ``-2741: Expected class name but found
+        identifier``), the entire script fails to compile. The fallback
+        uses only the ``persons`` *property* and indexes into it via
+        ``item i of _persons``; ``name of <ref>`` works on any object,
+        so the class identifier is never required.
+        """
+        from pyimgtag.photos_faces_importer import _bulk_applescript_persons_property
+
+        script = _bulk_applescript_persons_property()
+        assert "persons of p" in script
+        # Index iteration — no ``every person`` anywhere.
+        assert "every person" not in script
+        assert "item i of _persons" in script
+        assert "count of _persons" in script
+
+    def test_bulk_runs_fallback_on_parse_error(self, tmp_path):
+        """When osascript returns ``-2741`` for the first script, the
+        importer must invoke a SECOND osascript call with the
+        property-based script — the user's ``person``-class-less
+        Photos.app keeps producing 0 persons otherwise."""
+        from pyimgtag import photos_faces_importer
+
+        with self._make_db(tmp_path) as db:
+            calls: list[str] = []
+
+            def _fake_run(cmd, **_kw):
+                # cmd[2] is the AppleScript source.
+                calls.append(cmd[2])
+                proc = MagicMock()
+                if "every person of p" in cmd[2]:
+                    # First script: simulate the -2741 parse failure.
+                    proc.returncode = 1
+                    proc.stdout = ""
+                    proc.stderr = (
+                        "osascript: 225:231: syntax error: Expected class "
+                        "name but found identifier. (-2741)"
+                    )
+                else:
+                    # Fallback script succeeds and returns a real row.
+                    proc.returncode = 0
+                    proc.stdout = "abc123\tAlice|\n"
+                    proc.stderr = ""
+                return proc
+
+            with (
+                patch.object(photos_faces_importer, "is_applescript_available", new=lambda: True),
+                patch.object(photos_faces_importer.subprocess, "run", side_effect=_fake_run),
+            ):
+                imported, _ = import_photos_persons(db)
+
+            assert len(calls) == 2, "fallback must trigger one extra osascript call"
+            assert "every person of p" in calls[0]
+            assert "every person" not in calls[1], (
+                "fallback script must avoid the 'person' class identifier"
+            )
+            assert imported == 1
+            labels = sorted(p.label for p in db.get_persons())
+            assert labels == ["Alice"]
 
     def test_parses_bulk_output_into_name_to_uuids(self, tmp_path):
         """Happy path: osascript returns multiple rows, all parsed."""
