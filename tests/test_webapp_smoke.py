@@ -183,6 +183,31 @@ class TestNoUnreplacedPlaceholders:
             f"{path} returned HTML with unreplaced template tokens: {set(leftovers)}"
         )
 
+    def test_judge_html_has_review_style_toolbar(self, client: TestClient) -> None:
+        """The Judge page is rebuilt as a Review-style grid + pager. The
+        toolbar IDs (``minRating`` / ``maxRating`` / ``sortSel`` /
+        ``pageSel``) and the ``#grid`` container are load-bearing for the
+        JS — pin them so a future refactor that drops one of them blows
+        up here instead of silently rendering a blank page."""
+        r = client.get("/judge/")
+        assert r.status_code == 200
+        for token in (
+            'id="minRating"',
+            'id="maxRating"',
+            'id="sortSel"',
+            'id="pageSel"',
+            'id="grid"',
+            'id="prevBtn"',
+            'id="nextBtn"',
+            'id="pageInfo"',
+            'id="lightbox"',
+            "rating_desc",
+            "rating_asc",
+            "path_asc",
+            "shot_desc",
+        ):
+            assert token in r.text, f"judge HTML missing {token!r}"
+
 
 # ---------------------------------------------------------------------------
 # Dead-link detection: every same-origin href / src on every page must
@@ -372,14 +397,66 @@ class TestApiContracts:
         assert all(it["judge_score"] is None for it in not_judged)
 
     def test_judge_api_scores_shape(self, client: TestClient) -> None:
+        # 0.13.0 contract: paginated ``{items, total}`` so the Judge UI
+        # can render Prev / Next + a live count, mirroring the Review API.
         d = client.get("/judge/api/scores").json()
-        assert isinstance(d, list)
-        assert d
-        score = d[0]
-        for key in ("file_path", "file_name", "weighted_score", "core_score", "visible_score"):
+        assert isinstance(d, dict)
+        assert "items" in d and "total" in d
+        assert isinstance(d["items"], list)
+        assert isinstance(d["total"], int)
+        assert d["items"], "seeded DB should have at least one judged image"
+        score = d["items"][0]
+        for key in (
+            "file_path",
+            "file_name",
+            "weighted_score",
+            "reason",
+            "verdict",
+            "image_date",
+            "scene_summary",
+            "nearest_city",
+            "nearest_country",
+            "cleanup_class",
+        ):
             assert key in score, f"judge item missing {key}"
         # 0.8.0 contract: integer scale.
         assert isinstance(score["weighted_score"], int)
+
+    def test_judge_api_scores_pagination(self, client: TestClient) -> None:
+        """``offset`` / ``limit`` paginate the result; total stays stable."""
+        full = client.get("/judge/api/scores").json()
+        windowed = client.get("/judge/api/scores", params={"offset": 0, "limit": 1}).json()
+        assert windowed["total"] == full["total"]
+        assert len(windowed["items"]) <= 1
+        # ``limit`` is capped at 200.
+        too_big = client.get("/judge/api/scores", params={"limit": 999})
+        assert too_big.status_code == 422
+
+    def test_judge_api_scores_sort_options(self, client: TestClient) -> None:
+        """Every Sort dropdown value must be accepted by the backend."""
+        for s in ("rating_desc", "rating_asc", "path_asc", "path_desc", "shot_desc", "shot_asc"):
+            r = client.get("/judge/api/scores", params={"sort": s})
+            assert r.status_code == 200, s
+            d = r.json()
+            assert "items" in d and "total" in d, s
+
+    def test_judge_api_scores_min_rating_filters(self, client: TestClient) -> None:
+        """The seeded image is rated 8 — ``min_rating=9`` excludes it,
+        ``min_rating=8`` keeps it. Out-of-range values clamp silently."""
+        kept = client.get("/judge/api/scores", params={"min_rating": 8}).json()
+        assert kept["total"] >= 1
+        excluded = client.get("/judge/api/scores", params={"min_rating": 9}).json()
+        assert excluded["total"] == 0
+        # Out-of-range values clamp rather than 4xx — ``min_rating=99``
+        # collapses to ``10`` which excludes the seeded 8/10 row.
+        clamped = client.get("/judge/api/scores", params={"min_rating": 99}).json()
+        assert clamped["total"] == 0
+
+    def test_judge_api_scores_max_rating_filters(self, client: TestClient) -> None:
+        kept = client.get("/judge/api/scores", params={"max_rating": 8}).json()
+        assert kept["total"] >= 1
+        excluded = client.get("/judge/api/scores", params={"max_rating": 7}).json()
+        assert excluded["total"] == 0
 
     def test_tags_api_returns_list(self, client: TestClient) -> None:
         d = client.get("/tags/api/tags").json()

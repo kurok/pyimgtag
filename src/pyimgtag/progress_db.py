@@ -1066,6 +1066,101 @@ class ProgressDB:
             for row in rows
         ]
 
+    # Whitelisted ORDER BY clauses for query_judge_results. Keeping the
+    # rating_* keys distinct from the legacy ``judge_*`` clauses on
+    # ``query_images`` keeps the Judge UI's API surface independent.
+    _JUDGE_QUERY_SORTS: dict[str, str] = {
+        "rating_desc": "js.weighted_score DESC NULLS LAST, pi.file_path ASC",
+        "rating_asc": "js.weighted_score ASC NULLS LAST, pi.file_path ASC",
+        "path_asc": "pi.file_path ASC",
+        "path_desc": "pi.file_path DESC",
+        "shot_desc": "pi.image_date DESC NULLS LAST, pi.file_path ASC",
+        "shot_asc": "pi.image_date ASC NULLS LAST, pi.file_path ASC",
+    }
+
+    def query_judge_results(
+        self,
+        offset: int = 0,
+        limit: int = 50,
+        sort: str = "rating_desc",
+        min_rating: int | None = None,
+        max_rating: int | None = None,
+    ) -> dict:
+        """Return paginated judged images joined with their image metadata.
+
+        The Judge page wants every record that has a ``judge_scores`` row
+        plus the matching ``processed_images`` columns it renders next to
+        the rating (file_name, scene_summary, image_date, location,
+        cleanup_class). Caller-supplied rating bounds are clamped to
+        ``[1, 10]`` rather than rejected, so the JS can pass the raw input
+        without pre-validating.
+
+        Args:
+            offset: Row offset for pagination.
+            limit: Max rows to return.
+            sort: One of ``rating_desc`` (default), ``rating_asc``,
+                ``path_asc``, ``path_desc``, ``shot_desc``, ``shot_asc``.
+            min_rating: Inclusive lower bound on weighted_score (1-10).
+            max_rating: Inclusive upper bound on weighted_score (1-10).
+
+        Returns:
+            ``{"items": [...], "total": <int>}``. Each item carries the
+            keys consumed by the Judge UI: file_path, file_name,
+            weighted_score, reason, verdict, image_date, scene_summary,
+            nearest_city, nearest_country, cleanup_class.
+        """
+        conditions: list[str] = []
+        params: list[object] = []
+        if min_rating is not None:
+            clamped_min = max(1, min(10, int(min_rating)))
+            conditions.append("js.weighted_score >= ?")
+            params.append(clamped_min)
+        if max_rating is not None:
+            clamped_max = max(1, min(10, int(max_rating)))
+            conditions.append("js.weighted_score <= ?")
+            params.append(clamped_max)
+        where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        order_clause = self._JUDGE_QUERY_SORTS.get(sort, self._JUDGE_QUERY_SORTS["rating_desc"])
+
+        count_query = (  # nosec B608
+            "SELECT COUNT(*) FROM judge_scores js "
+            "LEFT JOIN processed_images pi ON pi.file_path = js.file_path " + where
+        )
+        total = self._conn.execute(count_query, params).fetchone()[0]
+
+        list_query = (  # nosec B608
+            "SELECT js.file_path, js.weighted_score, js.reason, js.verdict, "
+            "pi.scene_summary, pi.nearest_city, pi.nearest_country, "
+            "pi.cleanup_class, pi.image_date, js.scored_at "
+            "FROM judge_scores js "
+            "LEFT JOIN processed_images pi ON pi.file_path = js.file_path "
+            + where  # nosec B608
+            + f" ORDER BY {order_clause} LIMIT ? OFFSET ?"  # nosec B608
+        )
+        params_list = [*params, int(limit), int(offset)]
+        rows = self._conn.execute(list_query, params_list).fetchall()
+
+        def _i(v: Any) -> int | None:
+            return int(round(float(v))) if v is not None else None
+
+        items = [
+            {
+                "file_path": row[0],
+                "file_name": Path(row[0]).name,
+                "weighted_score": _i(row[1]),
+                "reason": row[2],
+                "verdict": row[3],
+                "scene_summary": row[4],
+                "nearest_city": row[5],
+                "nearest_country": row[6],
+                "cleanup_class": row[7],
+                "image_date": row[8],
+                "scored_at": row[9],
+            }
+            for row in rows
+        ]
+        return {"items": items, "total": int(total)}
+
     def is_fresh(self, file_path: Path) -> bool:
         """Return True if DB has a row for this file and size/mtime still match."""
         row = self._conn.execute(
