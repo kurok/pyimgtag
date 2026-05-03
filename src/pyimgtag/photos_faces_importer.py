@@ -142,24 +142,25 @@ class _BulkAppleScriptUnavailable(Exception):
     """Raised when the bulk AppleScript path can't run; caller falls back."""
 
 
-def _bulk_applescript() -> str:
-    """The single AppleScript that returns ``<uuid>\\t<persons>\\n`` per photo.
+def _bulk_applescript_every_person() -> str:
+    """Bulk AppleScript using the ``every person of p`` element traversal.
 
-    Persons are joined by ``|`` (a character that does not occur in
-    Photos UUIDs and is rare in real names). Photos with no persons
-    still emit a row — the trailing field is empty — so the parser can
-    skip them with a single check.
+    Returns ``<uuid>\\t<persons>\\n`` rows. Persons are joined by ``|``
+    (a character that does not occur in Photos UUIDs and is rare in
+    real names). Photos with no persons still emit a row so the parser
+    can skip them with a single check.
 
-    The script uses ``name of every person of p`` rather than
-    ``persons of p``: Apple Photos.app does NOT expose a plural
-    ``persons`` property on a media item. The dictionary only exposes
-    the ``person`` element class, traversed with ``every person of p``.
-    The previous form (``persons of p``) raised an AppleScript error
-    on every photo — the surrounding ``try`` swallowed it silently and
-    every row came back with zero attached persons even on libraries
-    with thousands of named faces. ``photoscript`` uses the same
-    ``name of every person of theItem`` form internally for exactly
-    this reason.
+    Uses the photoscript-canonical ``name of every person of p`` form.
+    Apple Photos.app's AppleScript dictionary exposes ``person`` as an
+    element class on a media item, so ``every person of p`` works on
+    all macOS versions that ship with the documented dictionary.
+
+    On *some* Photos.app builds (locale variants, betas, particular
+    macOS releases) the dictionary does **not** terminologise
+    ``person`` as a class — osascript then refuses to compile the
+    script with ``-2741: Expected class name but found identifier``.
+    The caller falls back to :func:`_bulk_applescript_persons_property`
+    in that case.
     """
     return (
         'tell application "Photos"\n'
@@ -189,20 +190,65 @@ def _bulk_applescript() -> str:
     )
 
 
-def _collect_via_bulk_applescript(emit: Callable[[str], None]) -> dict[str, list[str]]:
-    """Run one osascript call, parse the output, and group by name.
+def _bulk_applescript_persons_property() -> str:
+    """Bulk AppleScript fallback that avoids the ``person`` class identifier.
 
-    Raises :class:`_BulkAppleScriptUnavailable` (caller falls back) when
-    the subprocess can't be launched, times out, or returns a non-zero
-    status. A successful run with empty output is *not* an error — the
-    library may simply have no photos.
+    Same row format as :func:`_bulk_applescript_every_person` but uses
+    only the ``persons`` *property* on a media item plus index-based
+    access. AppleScript treats ``persons`` as a plain identifier, so
+    the script compiles even when Photos.app's dictionary doesn't
+    terminologise ``person`` as a class (see ``-2741`` from osascript
+    on some installs). ``name of <ref>`` works on any object, so we
+    can read each person's name without naming the class anywhere.
     """
-    emit("Asking Photos for the full id→persons map (one AppleScript call)…")
+    return (
+        'tell application "Photos"\n'
+        '    set out to ""\n'
+        "    set lf to ASCII character 10\n"
+        "    set ht to ASCII character 9\n"
+        "    repeat with p in (get media items)\n"
+        '        set ks to ""\n'
+        "        try\n"
+        "            set _persons to persons of p\n"
+        "            repeat with i from 1 to count of _persons\n"
+        "                try\n"
+        "                    set _nm to name of (item i of _persons)\n"
+        f'                    set ks to ks & _nm & "{_PERSON_NAME_SEPARATOR}"\n'
+        "                end try\n"
+        "            end repeat\n"
+        "        end try\n"
+        "        try\n"
+        "            set out to out & (id of p) & ht & ks & lf\n"
+        "        end try\n"
+        "    end repeat\n"
+        "    return out\n"
+        "end tell"
+    )
 
-    started = time.monotonic()
+
+# Back-compat alias — older tests import the original name directly.
+def _bulk_applescript() -> str:
+    """Default bulk script (``every person`` form)."""
+    return _bulk_applescript_every_person()
+
+
+# osascript exit-code that means "the script could not be parsed"; used to
+# detect the ``-2741`` "Expected class name but found identifier" failure
+# without string-matching the entire stderr.
+_PARSE_ERROR_MARKERS = ("(-2741)", "syntax error", "Expected class name")
+
+
+def _run_bulk_osascript(script: str) -> "subprocess.CompletedProcess[str]":
+    """Invoke osascript with ``script`` and return the completed process.
+
+    Raises :class:`_BulkAppleScriptUnavailable` for failures the caller
+    can't act on (timeout, missing binary). Non-zero exits are returned
+    so the caller can inspect stderr and decide whether to retry with
+    an alternate script.
+    """
     try:
-        proc = subprocess.run(  # noqa: S603
-            ["/usr/bin/osascript", "-e", _bulk_applescript()],
+        return subprocess.run(  # noqa: S603
+            ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,
             timeout=_BULK_APPLESCRIPT_TIMEOUT_SECONDS,
@@ -213,6 +259,41 @@ def _collect_via_bulk_applescript(emit: Callable[[str], None]) -> dict[str, list
         ) from exc
     except OSError as exc:
         raise _BulkAppleScriptUnavailable(f"failed to launch osascript: {exc}") from exc
+
+
+def _collect_via_bulk_applescript(emit: Callable[[str], None]) -> dict[str, list[str]]:
+    """Run one osascript call, parse the output, and group by name.
+
+    Tries the ``every person of p`` form first (works on most macOS
+    Photos.app builds). On the ``-2741`` "Expected class name but
+    found identifier" parse failure — Photos.app on this install
+    doesn't terminologise ``person`` as a class — falls back to the
+    ``persons`` property + index-iteration form, which compiles
+    without naming the class anywhere.
+
+    Raises :class:`_BulkAppleScriptUnavailable` (caller falls back to
+    photoscript) when the subprocess can't be launched, times out, or
+    both scripts fail. A successful run with empty output is *not* an
+    error — the library may simply have no photos.
+    """
+    emit("Asking Photos for the full id→persons map (one AppleScript call)…")
+
+    started = time.monotonic()
+
+    proc = _run_bulk_osascript(_bulk_applescript_every_person())
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        if any(marker in stderr for marker in _PARSE_ERROR_MARKERS):
+            emit(
+                "Photos.app does not expose 'person' as a scriptable class on "
+                "this install (osascript -2741); retrying with 'persons' property…"
+            )
+            logger.warning(
+                "bulk AppleScript 'every person' failed to compile; retrying "
+                "via 'persons' property: %s",
+                stderr,
+            )
+            proc = _run_bulk_osascript(_bulk_applescript_persons_property())
 
     if proc.returncode != 0:
         stderr = (proc.stderr or "").strip()
