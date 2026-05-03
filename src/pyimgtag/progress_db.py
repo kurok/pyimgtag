@@ -1124,7 +1124,7 @@ class ProgressDB:
 
         count_query = (  # nosec B608
             "SELECT COUNT(*) FROM judge_scores js "
-            "LEFT JOIN processed_images pi ON pi.file_path = js.file_path " + where
+            "LEFT JOIN processed_images pi ON pi.file_path = js.file_path " + where  # nosec B608
         )
         total = self._conn.execute(count_query, params).fetchone()[0]
 
