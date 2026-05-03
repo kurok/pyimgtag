@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.3] - 2026-05-03
+
+### Fixed
+- **`pyimgtag faces import-photos` couldn't compile its bulk AppleScript on every Photos.app build** (#175): on at least one user install, osascript refused the bulk script with `-2741: Expected class name but found identifier` because Photos.app's dictionary did not terminologise `person` as a scriptable class — `every person of p` then parses as "every <unknown identifier>". Split the bulk script into two variants and drive a fallback at the call site: `_bulk_applescript_every_person()` (default, photoscript-canonical) and `_bulk_applescript_persons_property()` (uses only the `persons` property + `name of (item i of _persons)` index iteration, never naming the class). When osascript returns `-2741`, the importer logs a clear "Photos.app does not expose 'person' as a scriptable class on this install (osascript -2741); retrying with 'persons' property…" line and re-runs with the property-only script before falling back to photoscript.
+- **Edit page distinguishes "photo not indexed by Photos.app"** (#176): `delete_from_photos` now reports `photo_not_in_library` (instead of the misleading `photos_unavailable`) when the AppleScript filename-scan raises `Photo not found: <name>` (-2700). This happens when the file sits on disk inside the Photos library bundle but Photos.app no longer indexes it as a media item — orphaned originals after a manual delete in Photos. The category is checked before the generic `applescript`/`osascript` branch because the stderr begins with `AppleScript error …`.
+
+### CI
+- **Trim the test matrix from 9 → 5 cells** (#176): drop `macos-latest / 3.11`, `windows-latest / 3.11`, and `windows-latest / 3.12`. Linux still spans all three minors; macOS keeps 3.12 + 3.13 for the AppleScript / Photos-bridge stack; Windows keeps 3.13, which already exercises the Starlette TestClient socket path the dropped cells duplicated.
+
 ## [0.13.2] - 2026-05-03
 
 ### Fixed
