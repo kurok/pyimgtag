@@ -83,13 +83,26 @@ def _categorise_applescript_error(err: str) -> str:
 
     Mirrors :func:`pyimgtag.webapp.routes_review.open_in_photos` so the
     browser only ever sees a small fixed set of labels and the
-    ``osascript`` line/column references stay server-side.
+    ``osascript`` line/column references stay server-side. The
+    UI-scripting path that performs the actual delete (System Events
+    keystroke into Photos.app) introduces a new failure mode the
+    reveal/write paths don't see: Accessibility permission denied —
+    surfaced as ``-1719`` / ``-25204`` from System Events.
     """
     low = err.lower()
     if "macos" in low:
         return "platform_unsupported"
     if "timed out" in low or "timeout" in low:
         return "photos_timeout"
+    # System Events accessibility-denied must be checked BEFORE the
+    # generic ``applescript``/``osascript`` mention because the
+    # accessibility-denied stderr always begins with
+    # ``AppleScript error …``. Markers we accept: literal AppleEvent
+    # codes ``(-1719)`` / ``(-25204)``, the substring "assistive
+    # access" (used by System Events' own message), or any explicit
+    # mention of accessibility.
+    if "(-1719)" in err or "(-25204)" in err or "assistive access" in low or "accessibility" in low:
+        return "accessibility_denied"
     if "osascript" in low or "applescript" in low:
         return "photos_unavailable"
     return "photos_error"

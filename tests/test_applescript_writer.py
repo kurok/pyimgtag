@@ -981,12 +981,29 @@ class TestBuildDeleteApplescript:
         assert 'filename = "IMG_1234.jpg"' in script
 
     def test_script_invokes_delete_on_photos(self):
-        """The script must ask Photos.app to delete the resolved item."""
+        """The script must use the UI-scripting path: spotlight in Photos
+        then send Cmd+Delete via System Events.
+
+        Photos.app's native ``delete`` AppleScript verb has been broken
+        since Catalina (returns ``-10000 AppleEvent handler failed``);
+        the working approach is selecting the item and sending the UI
+        keyboard shortcut. The script must NOT use the bare
+        ``delete theItem`` form, must spotlight the item first, and
+        must keystroke into the Photos process with the command
+        modifier.
+        """
         from pyimgtag.applescript_writer import _build_delete_applescript
 
         script = _build_delete_applescript("vacation.jpg")
         assert 'tell application "Photos"' in script
-        assert "delete theItem" in script
+        # The bare ``delete`` verb is broken — must not be used.
+        assert "delete theItem" not in script
+        # Selection happens via ``spotlight``; the keystroke goes
+        # through System Events into the Photos process with Cmd held.
+        assert "spotlight theItem" in script
+        assert 'tell application "System Events"' in script
+        assert 'tell process "Photos"' in script
+        assert "using command down" in script
         # We deliberately rely on Photos' Recently Deleted bin for the
         # 30-day undo window; the script must NOT empty that bin.
         assert "empty" not in script.lower()
@@ -1100,4 +1117,9 @@ class TestDeleteFromPhotos:
         # "vacation" is not UUID-format — lookup goes via filename scan.
         assert "media item id" not in script
         assert 'filename = "vacation.jpg"' in script
-        assert "delete theItem" in script
+        # The UI-scripting delete path spotlights the item then sends
+        # Cmd+Delete via System Events — ``delete theItem`` is the
+        # broken native verb and must NOT appear.
+        assert "spotlight theItem" in script
+        assert "delete theItem" not in script
+        assert 'tell application "System Events"' in script

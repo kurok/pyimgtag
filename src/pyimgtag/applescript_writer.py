@@ -453,9 +453,23 @@ def reveal_in_photos(file_path: str) -> str | None:
 def _build_delete_applescript(file_name: str) -> str:
     """Build AppleScript that deletes the matching media item from Photos.
 
-    Photos.app moves the item to *Recently Deleted* automatically. The
-    script never empties that bin — the 30-day undo window is the whole
-    safety story for this destructive action.
+    Apple Photos.app's ``delete`` AppleScript verb is declared in the
+    dictionary but has been broken since Catalina — it consistently
+    returns ``-10000 AppleEvent handler failed``. The reliable
+    workaround is UI scripting: spotlight the item, then send
+    ``Cmd+Delete`` via System Events so the Photos UI itself performs
+    the deletion. The item then routes through Photos' standard flow
+    into the *Recently Deleted* album (30-day undo).
+
+    Requirements for the UI-scripting path:
+      - The terminal/IDE running pyimgtag needs Accessibility
+        permission (System Settings → Privacy & Security →
+        Accessibility). Without it, ``System Events`` keystroke
+        delivery fails silently.
+      - Photos → Settings → "Show Deletion Confirmation" should be
+        OFF for unattended bulk deletes; otherwise each photo
+        triggers a confirmation dialog. The script tries to dismiss
+        any prompt by pressing Return, but this is best-effort.
     """
     stem = PurePosixPath(file_name).stem
     safe_file_name = _escape_applescript_string(file_name)
@@ -472,7 +486,36 @@ def _build_delete_applescript(file_name: str) -> str:
     else:
         lookup = _filename_scan_block(safe_file_name)
 
-    return 'tell application "Photos"\n' + lookup + "    delete theItem\n" + "end tell"
+    return (
+        # 1. Resolve theItem and ask Photos to spotlight it (selects in UI).
+        'tell application "Photos"\n'
+        "    activate\n"
+        + lookup
+        + "    spotlight theItem\n"
+        + "end tell\n"
+        # 2. Tiny delay so Photos' selection settles before we keystroke.
+        + "delay 0.25\n"
+        # 3. Cmd+Delete via System Events (the UI shortcut for "move
+        #    to Recently Deleted"). ASCII 127 = Forward Delete; with
+        #    `command down` Photos accepts it as the Delete shortcut.
+        + 'tell application "System Events"\n'
+        + '    tell process "Photos"\n'
+        + "        keystroke (ASCII character 127) using command down\n"
+        + "    end tell\n"
+        + "end tell\n"
+        # 4. Best-effort confirm-dialog dismiss. Photos shows a
+        #    confirmation dialog when "Show Deletion Confirmation" is
+        #    on; pressing Return clicks the default "Delete" button.
+        #    Wrapped in `try` so a missing dialog doesn't fail the run.
+        + "delay 0.15\n"
+        + 'tell application "System Events"\n'
+        + '    tell process "Photos"\n'
+        + "        try\n"
+        + "            key code 36\n"  # 36 = Return
+        + "        end try\n"
+        + "    end tell\n"
+        + "end tell"
+    )
 
 
 def delete_from_photos(file_path: str) -> str | None:
@@ -502,11 +545,15 @@ def delete_from_photos(file_path: str) -> str | None:
     script = _build_delete_applescript(file_name)
 
     try:
+        # The UI-scripting path includes two short ``delay`` calls
+        # plus two System Events keystrokes; budget conservatively so
+        # a slow Photos.app launch (cold start, big library) doesn't
+        # trip a spurious timeout.
         proc = subprocess.run(  # noqa: S603
             ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=45,
         )
     except subprocess.TimeoutExpired:
         return "osascript timed out while deleting photo"
