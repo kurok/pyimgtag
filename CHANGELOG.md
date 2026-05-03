@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.4] - 2026-05-03
+
+### Fixed
+- **`pyimgtag faces import-photos` returned 0 persons on installs where Photos.app exposes persons only at the application level** (#179): on some Photos.app builds, `every person of p` and the `persons` property fallback both return empty — persons are only accessible by walking the application-level `people`/`persons`/`every person` collection and querying `photos of p` per person. Added a third-tier bulk AppleScript (`_bulk_applescript_app_people`) that enumerates the application-level people list, walks `photos of p` for each named person, and emits `<uuid>\t<name>` rows. The collect path fires this walker when the first two per-photo approaches return zero persons, then falls back to photoscript as before. An emitted row per `(photo, person)` pair (rather than per photo) means `_parse_bulk_output` now handles both row formats.
+
+### Docs
+- **README refreshed for v0.13.3** (#178): subcommands table, extras and install instructions, webapp page descriptions, environment variables, and Apple Photos access notes updated to reflect current behaviour.
+
 ## [0.13.3] - 2026-05-03
 
 ### Fixed
