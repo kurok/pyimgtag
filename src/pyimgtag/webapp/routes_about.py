@@ -2,10 +2,11 @@
 
 Exposes:
 
-- ``GET  /about``       — HTML page with the running version, links to
-                          the README / wiki, and an inline iframe that
-                          embeds the wiki landing page so the user can
-                          browse without leaving the app.
+- ``GET  /about``       — HTML page with the running version, curated
+                          repo + wiki links, and a CTA panel pointing
+                          at the GitHub wiki in a new tab. (GitHub
+                          serves the wiki with ``X-Frame-Options: DENY``
+                          so it cannot be iframed.)
 - ``GET  /about/api/version`` — JSON ``{installed, latest, update}`` for
                           the small badge in the nav. ``latest`` is the
                           current PyPI release; ``update`` is True iff
