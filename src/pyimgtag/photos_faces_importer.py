@@ -149,6 +149,17 @@ def _bulk_applescript() -> str:
     Photos UUIDs and is rare in real names). Photos with no persons
     still emit a row — the trailing field is empty — so the parser can
     skip them with a single check.
+
+    The script uses ``name of every person of p`` rather than
+    ``persons of p``: Apple Photos.app does NOT expose a plural
+    ``persons`` property on a media item. The dictionary only exposes
+    the ``person`` element class, traversed with ``every person of p``.
+    The previous form (``persons of p``) raised an AppleScript error
+    on every photo — the surrounding ``try`` swallowed it silently and
+    every row came back with zero attached persons even on libraries
+    with thousands of named faces. ``photoscript`` uses the same
+    ``name of every person of theItem`` form internally for exactly
+    this reason.
     """
     return (
         'tell application "Photos"\n'
@@ -157,11 +168,18 @@ def _bulk_applescript() -> str:
         "    set ht to ASCII character 9\n"
         "    repeat with p in (get media items)\n"
         '        set ks to ""\n'
+        # Per-photo ``try`` / ``on error`` keeps a single problem item
+        # from killing the whole bulk traversal (iCloud-only photos
+        # and AppleScript-broken rows are real). On error we set an
+        # empty name list — the photo still produces a row in ``out``.
         "        try\n"
-        "            repeat with pers in (persons of p)\n"
-        f'                set ks to ks & (name of pers) & "{_PERSON_NAME_SEPARATOR}"\n'
-        "            end repeat\n"
+        "            set name_list to (name of every person of p)\n"
+        "        on error\n"
+        "            set name_list to {}\n"
         "        end try\n"
+        "        repeat with nm in name_list\n"
+        f'            set ks to ks & nm & "{_PERSON_NAME_SEPARATOR}"\n'
+        "        end repeat\n"
         "        try\n"
         "            set out to out & (id of p) & ht & ks & lf\n"
         "        end try\n"
