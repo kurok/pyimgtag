@@ -104,8 +104,17 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .meta-card .val{font-size:15px;font-weight:600;margin-top:2px;
                     font-family:ui-monospace,'SF Mono',monospace}
     .meta-card.update .val{color:var(--accent)}
-    .wiki-frame{width:100%;height:520px;border:1px solid var(--border);
-                border-radius:8px;background:#fff}
+    .wiki-cta{display:flex;flex-wrap:wrap;align-items:center;gap:18px;
+              padding:18px 22px;border:1px solid var(--border);border-radius:8px;
+              background:var(--surface)}
+    .wiki-cta p{margin:0;font-size:13px;color:var(--text);flex:1;min-width:240px}
+    .wiki-cta .btn-row{display:flex;gap:10px;flex-wrap:wrap}
+    .wiki-btn{display:inline-block;padding:8px 16px;border-radius:6px;
+              background:var(--accent);color:#fff;text-decoration:none;
+              font-size:13px;font-weight:500}
+    .wiki-btn:hover{filter:brightness(1.08);text-decoration:none}
+    .wiki-btn.secondary{background:transparent;color:var(--accent);
+                         border:1px solid var(--accent)}
   </style>
 </head>
 <body>
@@ -148,11 +157,20 @@ __NAV__
            target="_blank" rel="noopener">All releases</a></li>
   </ul>
 
-  <h2>Wiki preview</h2>
-  <p style="color:var(--muted);font-size:12px">If the embed below is blank,
-  GitHub may be blocking iframes — open the wiki link above in a new tab.</p>
-  <iframe class="wiki-frame" src="https://github.com/kurok/pyimgtag/wiki"
-          loading="lazy" referrerpolicy="no-referrer"></iframe>
+  <h2>Wiki</h2>
+  <div class="wiki-cta">
+    <p>The full documentation lives in the GitHub wiki — guides, mermaid
+    use-case diagrams, and the backend chooser. GitHub blocks the wiki
+    from being embedded in an iframe, so it opens in a new tab.</p>
+    <div class="btn-row">
+      <a class="wiki-btn"
+         href="https://github.com/kurok/pyimgtag/wiki"
+         target="_blank" rel="noopener">Open wiki ↗</a>
+      <a class="wiki-btn secondary"
+         href="https://github.com/kurok/pyimgtag/wiki/Use-Case-Diagrams"
+         target="_blank" rel="noopener">Use-case diagrams ↗</a>
+    </div>
+  </div>
 </div>
 <script>
 async function checkVersion() {

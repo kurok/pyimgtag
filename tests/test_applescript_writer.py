@@ -628,6 +628,42 @@ class TestReadKeywordsFromPhotos:
             result = read_keywords_from_photos("/any/path.jpg")
         assert result is None
 
+    def test_cold_start_retry_recovers(self):
+        """Regression: the first call into Photos.app's AppleScript bridge
+        often returns None because Photos is still launching. The wrapper
+        must retry once after a brief sleep so the very first append-mode
+        write doesn't abort with "failed to read existing keywords"."""
+        # First attempt → None (cold start), second → real keyword list.
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._use_photoscript", new=lambda: False),
+            patch(
+                "pyimgtag.applescript_writer._read_via_osascript",
+                side_effect=[None, ["sunset"]],
+            ) as mock_read,
+            patch("pyimgtag.applescript_writer.time.sleep"),  # don't really sleep
+        ):
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result == ["sunset"]
+        assert mock_read.call_count == 2
+
+    def test_cold_start_retry_gives_up_after_two(self):
+        """If the bridge is genuinely broken (Photos refuses to launch),
+        the wrapper must not loop forever — the retry budget caps at one
+        retry."""
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._use_photoscript", new=lambda: False),
+            patch(
+                "pyimgtag.applescript_writer._read_via_osascript",
+                return_value=None,
+            ) as mock_read,
+            patch("pyimgtag.applescript_writer.time.sleep"),
+        ):
+            result = read_keywords_from_photos("/Library/Photos/img.jpg")
+        assert result is None
+        assert mock_read.call_count == 2  # initial + one retry
+
     def test_returns_none_on_osascript_error(self):
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),

@@ -443,6 +443,78 @@ class TestAboutPage:
         assert d["update"] is True
 
 
+class TestDashboardSharesCliDb:
+    """Regression: ``start_dashboard_for`` used to instantiate the unified
+    webapp without a ``db_path``, so the dashboard opened the default
+    ``~/.cache/pyimgtag/progress.db`` while the CLI worker may have been
+    writing to a different DB. Users saw "0 scored" on /judge while the
+    CLI was happily printing scores. The dashboard must thread
+    ``args.db`` through to ``create_unified_app`` so worker and webapp
+    share the same SQLite."""
+
+    def test_create_unified_app_accepts_db_path(self, tmp_path) -> None:
+        from pyimgtag.webapp.unified_app import create_unified_app
+
+        db = tmp_path / "shared.db"
+        # Constructing the app should create the DB file as a side
+        # effect — proving the supplied path actually wins over the
+        # default location.
+        create_unified_app(db_path=db)
+        assert db.exists()
+
+    def test_start_dashboard_for_passes_db(self, tmp_path) -> None:
+        """``start_dashboard_for`` must hand the namespace's ``db`` value
+        to ``create_unified_app``."""
+        import argparse
+        from unittest.mock import patch
+
+        from pyimgtag.webapp import bootstrap
+
+        db = tmp_path / "from-cli.db"
+        ns = argparse.Namespace(
+            db=str(db),
+            web=False,
+            no_web=False,
+            web_host="127.0.0.1",
+            web_port=8770,
+            no_browser=True,
+        )
+
+        captured: dict = {}
+
+        def _fake_app(*, db_path):
+            captured["db_path"] = db_path
+            # Touch the file so the assertion below holds independent of
+            # the patch behaviour.
+            from pathlib import Path as _P
+
+            _P(db_path).parent.mkdir(parents=True, exist_ok=True)
+            _P(db_path).touch()
+
+            class _StubApp:  # uvicorn.Server is never started in this test
+                pass
+
+            return _StubApp()
+
+        class _StubServer:
+            def __init__(self, *_a, **_kw) -> None:
+                self.url = "http://localhost:0"
+
+            def start(self) -> bool:
+                return True
+
+        with (
+            patch("pyimgtag.webapp.unified_app.create_unified_app", new=_fake_app),
+            patch("pyimgtag.webapp.server_thread.DashboardServer", new=_StubServer),
+        ):
+            session, dashboard = bootstrap.start_dashboard_for(ns, command="judge")
+
+        assert captured["db_path"] == str(db), (
+            "start_dashboard_for must hand args.db through to the webapp"
+        )
+        assert session is not None and dashboard is not None
+
+
 class TestVersionParse:
     def test_parse_basic_versions(self) -> None:
         from pyimgtag.webapp.routes_about import _is_newer, _parse_version

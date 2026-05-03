@@ -556,3 +556,44 @@ class TestNoSubcommandPrintsHelp:
     def test_no_subcommand_returns_1(self) -> None:
         with patch.dict("os.environ", {"PYIMGTAG_NO_UPDATE_CHECK": "1"}):
             assert main([]) == 1
+
+
+class TestJudgeAlwaysOpensProgressDb:
+    """Regression: ``main()`` used to skip opening ``progress_db`` for the
+    ``judge`` subcommand whenever ``--db`` was omitted, so every score
+    was silently dropped before reaching the database. ``cmd_judge``
+    must now always receive a real DB instance."""
+
+    def test_judge_without_db_flag_still_gets_db(self, tmp_path) -> None:
+        import os
+
+        captured: dict = {}
+
+        def _record(_args, db_arg):
+            captured["db"] = db_arg
+            return 0
+
+        # Force the default DB inside tmp_path so we don't touch the
+        # user's real ~/.cache directory.
+        cache_dir = tmp_path / ".cache"
+        env = {
+            "PYIMGTAG_NO_UPDATE_CHECK": "1",
+            "HOME": str(tmp_path),
+            "PYIMGTAG_NO_WEB": "1",  # don't try to start the web server
+        }
+        with (
+            patch.dict("os.environ", env, clear=False),
+            patch("pyimgtag.commands.judge.cmd_judge", side_effect=_record),
+        ):
+            rc = main(["judge", "--input-dir", str(tmp_path)])
+
+        assert rc == 0
+        # Must be a ProgressDB instance, not None.
+        from pyimgtag.progress_db import ProgressDB
+
+        assert isinstance(captured["db"], ProgressDB), (
+            "cmd_judge received None — main() failed to open the default DB"
+        )
+        # Cleanup: the DB file is closed when ProgressDB.__exit__ runs;
+        # main()'s finally clause already does that.
+        del cache_dir, os  # silence unused-import warnings on minimal envs

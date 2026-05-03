@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from functools import lru_cache
 from pathlib import PurePosixPath
 
@@ -291,11 +292,27 @@ def _read_via_osascript(file_name: str) -> list[str] | None:
     return [k.strip() for k in raw.split("\n") if k.strip()]
 
 
+# Cold-start retry policy for the very first AppleScript / photoscript
+# call into Photos.app: the bridge returns None until Photos finishes
+# launching, so a one-shot retry after a short sleep turns "append mode:
+# failed to read existing keywords" on the first image into a successful
+# read for everything that follows.
+_READ_RETRY_DELAY_SECONDS = 1.5
+_READ_RETRY_ATTEMPTS = 2  # initial call + one retry
+
+
 def read_keywords_from_photos(file_path: str) -> list[str] | None:
     """Read the current keyword list for a photo from Apple Photos.
 
     **macOS only.** Returns ``None`` on non-macOS or on any error.
     Returns ``[]`` when the photo exists but has no keywords.
+
+    The first call into the Photos AppleScript bridge often fails on
+    a cold-started Photos.app — append-mode write-back used to print
+    "failed to read existing keywords, write aborted" for the very
+    first image even when subsequent calls worked. This wrapper
+    retries once after a short sleep so the cold-start failure no
+    longer aborts the first write.
 
     Args:
         file_path: Full path to the image (only the basename is used for lookup).
@@ -306,9 +323,18 @@ def read_keywords_from_photos(file_path: str) -> list[str] | None:
     if not _IS_MACOS:
         return None
     file_name = PurePosixPath(file_path).name
-    if _use_photoscript():
-        return _read_via_photoscript(file_name)
-    return _read_via_osascript(file_name)
+    reader = _read_via_photoscript if _use_photoscript() else _read_via_osascript
+
+    last: list[str] | None = None
+    for attempt in range(_READ_RETRY_ATTEMPTS):
+        last = reader(file_name)
+        if last is not None:
+            return last
+        # The first call hit Photos before it was ready; pause briefly
+        # before retrying. Skip the sleep on the final attempt.
+        if attempt < _READ_RETRY_ATTEMPTS - 1:
+            time.sleep(_READ_RETRY_DELAY_SECONDS)
+    return last
 
 
 def write_to_photos(
