@@ -35,6 +35,10 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
                  border-radius:5px;font-size:11px;font-weight:600}
     .cleanup-rev{background:rgba(255,159,10,.1);color:var(--warn);padding:2px 7px;
                  border-radius:5px;font-size:11px;font-weight:600}
+    .status-ok{color:var(--ok,#16a34a);font-size:11px;font-weight:600}
+    .status-error{color:var(--danger);font-size:11px;font-weight:600}
+    .err-msg{font-size:11px;color:var(--danger);margin-top:3px;
+             font-family:ui-monospace,'SF Mono',monospace;word-break:break-word}
   </style>
 </head>
 <body>
@@ -104,7 +108,7 @@ async function search() {
   const tbl = document.createElement('table');
   tbl.className = 'tbl';
   const hdr = document.createElement('tr');
-  for (const h of ['File','Tags','Category','Cleanup','Location']) {
+  for (const h of ['File','Status','Tags','Category','Cleanup','Location']) {
     const th = document.createElement('th');
     th.textContent = h;
     hdr.appendChild(th);
@@ -116,15 +120,40 @@ async function search() {
     const tdFile = document.createElement('td');
     tdFile.className = 'fname';
     tdFile.title = row.file_path;
-    tdFile.textContent = row.file_name;
+    // Click-through: open the review page for this single file in a new tab.
+    const fileLink = document.createElement('a');
+    fileLink.href = '/review?file=' + encodeURIComponent(row.file_path);
+    fileLink.target = '_blank';
+    fileLink.rel = 'noopener';
+    fileLink.textContent = row.file_name;
+    fileLink.style.color = 'inherit';
+    tdFile.appendChild(fileLink);
+
+    const tdStatus = document.createElement('td');
+    const statusEl = document.createElement('span');
+    if (row.status === 'error') {
+      statusEl.className = 'status-error';
+      statusEl.textContent = 'error';
+    } else {
+      statusEl.className = 'status-ok';
+      statusEl.textContent = row.status || 'ok';
+    }
+    tdStatus.appendChild(statusEl);
 
     const tdTags = document.createElement('td');
-    for (const t of (row.tags_list || [])) {
-      const chip = document.createElement('span');
-      chip.className = 'tag-chip';
-      chip.style.marginRight = '3px';
-      chip.textContent = t;
-      tdTags.appendChild(chip);
+    if (row.status === 'error' && row.error_message) {
+      const em = document.createElement('div');
+      em.className = 'err-msg';
+      em.textContent = row.error_message;
+      tdTags.appendChild(em);
+    } else {
+      for (const t of (row.tags_list || [])) {
+        const chip = document.createElement('span');
+        chip.className = 'tag-chip';
+        chip.style.marginRight = '3px';
+        chip.textContent = t;
+        tdTags.appendChild(chip);
+      }
     }
 
     const tdCat = document.createElement('td');
@@ -141,9 +170,9 @@ async function search() {
     }
 
     const tdLoc = document.createElement('td');
-    tdLoc.textContent = [row.city, row.country].filter(Boolean).join(', ');
+    tdLoc.textContent = [row.nearest_city, row.nearest_country].filter(Boolean).join(', ');
 
-    for (const td of [tdFile, tdTags, tdCat, tdClean, tdLoc]) tr.appendChild(td);
+    for (const td of [tdFile, tdStatus, tdTags, tdCat, tdClean, tdLoc]) tr.appendChild(td);
     tbl.appendChild(tr);
   }
   wrap.appendChild(tbl);

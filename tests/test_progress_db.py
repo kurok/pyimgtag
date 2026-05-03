@@ -538,6 +538,12 @@ class TestReviewMethods:
             for row in rows:
                 assert "tags_list" in row
                 assert isinstance(row["tags_list"], list)
+                # Regression: ``tags`` used to be the raw JSON string, which
+                # the review UI iterated character-by-character and rendered
+                # each character as its own chip. It must now be a parsed
+                # list, equal to ``tags_list``.
+                assert isinstance(row["tags"], list)
+                assert row["tags"] == row["tags_list"]
 
     def test_count_images_total(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
