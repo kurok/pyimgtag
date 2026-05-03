@@ -35,30 +35,28 @@ def _score_label(score: int) -> str:
 
 
 def _print_brief(result: JudgeResult, idx: int, total: int) -> None:
-    top = strongest(result.scores, 2)
-    bot = weakest(result.scores, 2)
+    """Single line per image. The model's natural-language ``reason`` is
+    intentionally NOT printed here — it's only for ``--verbose`` and the
+    web UI, never tags or EXIF."""
     label = _score_label(result.weighted_score)
-    print(
-        f"[{idx}/{total}] {result.file_name} → "
-        f"{result.weighted_score}/10 {label} | "
-        f"+ {', '.join(top)} | - {', '.join(bot)}"
-    )
-    if result.scores.verdict:
-        print(f"  {result.scores.verdict}")
+    print(f"[{idx}/{total}] {result.file_name} → {result.weighted_score}/10 {label}")
 
 
 def _print_verbose(result: JudgeResult, idx: int, total: int) -> None:
     print(f"[{idx}/{total}] {result.file_name}")
-    print(
-        f"  Score:   {result.weighted_score}/10  "
-        f"(core: {result.core_score}, visible: {result.visible_score})"
-    )
-    top = strongest(result.scores, 3)
-    bot = weakest(result.scores, 3)
-    print(f"  Best:    {', '.join(f'{k}={getattr(result.scores, k)}' for k in top)}")
-    print(f"  Weakest: {', '.join(f'{k}={getattr(result.scores, k)}' for k in bot)}")
-    if result.scores.verdict:
+    print(f"  Score:   {result.weighted_score}/10")
+    # The reason is the natural-language justification the simple-prompt
+    # model returns. Verbose / debug is the only CLI surface that shows
+    # it; tags and EXIF never see this string.
+    if result.scores.reason:
+        print(f"  Reason:  {result.scores.reason}")
+    elif result.scores.verdict:
+        # Legacy 13-criterion rows still in the DB from older runs.
         print(f"  Verdict: {result.scores.verdict}")
+        top = strongest(result.scores, 3)
+        bot = weakest(result.scores, 3)
+        print(f"  Best:    {', '.join(f'{k}={getattr(result.scores, k)}' for k in top)}")
+        print(f"  Weakest: {', '.join(f'{k}={getattr(result.scores, k)}' for k in bot)}")
 
 
 def _result_to_dict(result: JudgeResult) -> dict[str, Any]:
@@ -70,6 +68,7 @@ def _result_to_dict(result: JudgeResult) -> dict[str, Any]:
         "core_score": result.core_score,
         "visible_score": result.visible_score,
         "verdict": scores.verdict,
+        "reason": scores.reason,
         "scores": {
             "impact": scores.impact,
             "story_subject": scores.story_subject,

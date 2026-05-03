@@ -84,6 +84,9 @@ class ProgressDB:
         ),
         (6, "ALTER TABLE persons ADD COLUMN source TEXT NOT NULL DEFAULT 'auto'"),
         (6, "ALTER TABLE persons ADD COLUMN trusted INTEGER NOT NULL DEFAULT 0"),
+        # 0.10.0: simple-prompt judge stores the model's natural-language
+        # justification next to the integer score.
+        (7, "ALTER TABLE judge_scores ADD COLUMN reason TEXT"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -555,7 +558,7 @@ class ProgressDB:
             "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, "
             "pi.status, pi.cleanup_class, pi.scene_category, pi.emotional_tone, "
             "pi.event_hint, pi.significance, pi.error_message, "
-            "js.weighted_score, js.verdict "
+            "js.weighted_score, js.verdict, js.reason "
             "FROM processed_images pi "
             "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
             + joined_where  # nosec B608
@@ -594,7 +597,7 @@ class ProgressDB:
             "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, "
             "pi.status, pi.cleanup_class, pi.scene_category, pi.emotional_tone, "
             "pi.event_hint, pi.significance, pi.error_message, "
-            "js.weighted_score, js.verdict "
+            "js.weighted_score, js.verdict, js.reason "
             "FROM processed_images pi "
             "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
             "WHERE pi.file_path = ?",
@@ -654,6 +657,7 @@ class ProgressDB:
             # are ``None`` for any image that has not been judged yet.
             "judge_score": int(round(float(weighted_raw))) if weighted_raw is not None else None,
             "judge_verdict": row[12] if len(row) > 12 else None,
+            "judge_reason": row[13] if len(row) > 13 else None,
         }
 
     # --- face pipeline methods ---
@@ -886,8 +890,9 @@ class ProgressDB:
                 (file_path, scored_at, weighted_score, core_score, visible_score, verdict,
                  impact, story_subject, composition_center, lighting, creativity_style,
                  color_mood, presentation_crop, technical_excellence, focus_sharpness,
-                 exposure_tonal, noise_cleanliness, subject_separation, edit_integrity)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 exposure_tonal, noise_cleanliness, subject_separation, edit_integrity,
+                 reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 result.file_path,
@@ -909,6 +914,7 @@ class ProgressDB:
                 s.noise_cleanliness,
                 s.subject_separation,
                 s.edit_integrity,
+                s.reason,
             ),
         )
         self._conn.commit()
@@ -926,7 +932,8 @@ class ProgressDB:
                       impact, story_subject, composition_center, lighting,
                       creativity_style, color_mood, presentation_crop,
                       technical_excellence, focus_sharpness, exposure_tonal,
-                      noise_cleanliness, subject_separation, edit_integrity, scored_at
+                      noise_cleanliness, subject_separation, edit_integrity,
+                      scored_at, reason
                FROM judge_scores WHERE file_path = ?""",
             (file_path,),
         ).fetchone()
@@ -943,6 +950,7 @@ class ProgressDB:
             "visible_score": _i(row[2]),
             "verdict": row[3],
             "scored_at": row[17],
+            "reason": row[18] if len(row) > 18 else None,
             "scores": {
                 "impact": _i(row[4]),
                 "story_subject": _i(row[5]),
@@ -972,7 +980,8 @@ class ProgressDB:
         """
         limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
         rows = self._conn.execute(
-            "SELECT file_path, weighted_score, core_score, visible_score, verdict, scored_at "
+            "SELECT file_path, weighted_score, core_score, visible_score, verdict, "
+            "scored_at, reason "
             "FROM judge_scores "
             "ORDER BY weighted_score DESC " + limit_clause  # nosec B608
         ).fetchall()
@@ -989,6 +998,7 @@ class ProgressDB:
                 "visible_score": _i(row[3]),
                 "verdict": row[4],
                 "scored_at": row[5],
+                "reason": row[6] if len(row) > 6 else None,
             }
             for row in rows
         ]
