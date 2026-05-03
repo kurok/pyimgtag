@@ -7,11 +7,11 @@ releases stop receiving security updates as soon as a newer minor lands.
 
 | Version  | Supported |
 |----------|-----------|
-| 0.10.x   | ✅ — current release line, all fixes land here |
-| 0.9.x    | ❌ — superseded by 0.10.0 |
-| ≤ 0.8.x  | ❌ — superseded |
+| 0.11.x   | ✅ — current release line, all fixes land here |
+| 0.10.x   | ❌ — superseded by 0.11.0 |
+| ≤ 0.9.x  | ❌ — superseded |
 
-The current latest release is **0.10.0** ([release notes](https://github.com/kurok/pyimgtag/releases/tag/v0.10.0)).
+The current latest release is **0.11.0** ([release notes](https://github.com/kurok/pyimgtag/releases/tag/v0.11.0)).
 
 ## Reporting a Vulnerability
 
