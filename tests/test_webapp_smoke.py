@@ -21,6 +21,7 @@ rows so the page handlers all hit a "happy" path with data to render.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -128,6 +129,7 @@ _PAGES = [
     "/tags/",
     "/query/",
     "/judge/",
+    "/edit/",
     "/about/",
 ]
 
@@ -139,6 +141,8 @@ _JSON_APIS = [
     ("/query/api/images", []),
     ("/judge/api/scores", []),
     ("/faces/api/persons", []),
+    ("/edit/api/marked", []),
+    ("/edit/api/status", []),
     ("/about/api/version", []),
 ]
 
@@ -632,3 +636,163 @@ class TestVersionParse:
         # than crashing the compare.
         assert _parse_version("1.2.3rc1") == (1, 2, 3)
         assert _is_newer("1.2.3rc1", "1.2.3") is False
+
+
+# ---------------------------------------------------------------------------
+# Edit page: nav, marked-count, confirmation, job lifecycle, error mapping.
+# Each test that pokes the run job singleton resets it explicitly so a flake
+# in one case can't leak "running" state into the next.
+# ---------------------------------------------------------------------------
+
+
+def _seed_edit_db(db_path: Path, tmp_path: Path) -> tuple[str, str, str]:
+    """Seed three rows: two delete-marked, one untouched. Returns the paths."""
+    from PIL import Image as _PIL
+
+    paths: list[str] = []
+    for i, name in enumerate(["delete_a.jpg", "delete_b.jpg", "keep.jpg"]):
+        p = tmp_path / name
+        _PIL.new("RGB", (8, 8), color=(i * 30, 64, 64)).save(str(p))
+        paths.append(str(p))
+    cleanups = ["delete", "delete", None]
+    with ProgressDB(db_path=db_path) as db:
+        for path, cleanup in zip(paths, cleanups, strict=True):
+            db.mark_done(
+                Path(path),
+                ImageResult(
+                    file_path=path,
+                    file_name=Path(path).name,
+                    source_type="directory",
+                    tags=["x"],
+                    scene_summary="seed",
+                    cleanup_class=cleanup,
+                    processing_status="ok",
+                ),
+            )
+    return paths[0], paths[1], paths[2]
+
+
+@pytest.fixture()
+def edit_client(tmp_path: Path) -> Iterator[TestClient]:
+    """Dedicated client fixture seeded with two delete-marked + one keep row.
+
+    The Edit job is a process-wide singleton — reset its state on
+    fixture teardown so back-to-back tests don't observe leaked
+    ``running`` state.
+    """
+    db_path = tmp_path / "edit.db"
+    a, b, k = _seed_edit_db(db_path, tmp_path)
+    app = create_unified_app(db_path=db_path)
+    from pyimgtag.webapp import routes_edit
+
+    routes_edit._reset_job_for_tests()
+    with TestClient(app) as c:
+        c.delete_paths = [a, b]  # type: ignore[attr-defined]
+        c.keep_path = k  # type: ignore[attr-defined]
+        c.db_path = db_path  # type: ignore[attr-defined]
+        yield c
+    routes_edit._reset_job_for_tests()
+
+
+class TestEditPage:
+    def test_nav_has_edit_entry_pointing_at_edit(self, client: TestClient) -> None:
+        """Every page must surface the new Edit link in the top nav."""
+        r = client.get("/")
+        assert r.status_code == 200
+        assert 'href="/edit"' in r.text, "nav must include /edit link"
+
+    def test_edit_page_renders(self, edit_client: TestClient) -> None:
+        r = edit_client.get("/edit/")
+        assert r.status_code == 200
+        # The placeholder substitution is exercised by
+        # TestNoUnreplacedPlaceholders, but spot-check that the page
+        # mentions the destructive action and the recovery window.
+        assert "Recently Deleted" in r.text
+        assert "cleanup" in r.text.lower()
+
+    def test_marked_endpoint_counts_delete_rows(self, edit_client: TestClient) -> None:
+        """The seeded DB has two delete-marked rows + one keep row."""
+        d = edit_client.get("/edit/api/marked").json()
+        assert d["count"] == 2
+        sample_names = set(d["sample"])
+        assert sample_names == {"delete_a.jpg", "delete_b.jpg"}
+
+    def test_run_rejects_missing_confirmation(self, edit_client: TestClient) -> None:
+        r = edit_client.post("/edit/api/run", json={})
+        assert r.status_code == 400
+        assert r.json()["error"] == "confirmation_required"
+
+    def test_run_rejects_explicit_false(self, edit_client: TestClient) -> None:
+        r = edit_client.post("/edit/api/run", json={"confirm": False})
+        assert r.status_code == 400
+        assert r.json()["error"] == "confirmation_required"
+
+    def test_run_completes_and_maps_errors_to_categories(self, edit_client: TestClient) -> None:
+        """One success + one mocked AppleScript failure.
+
+        Asserts the final job state is ``done`` with ``ok=1`` /
+        ``failed=1`` and that the failed event's ``error`` field is the
+        stable category string (not the verbose AppleScript stderr).
+        Also verifies a successful Photos delete removes the row from
+        the progress DB so a re-scan won't re-process the now-trashed
+        image.
+        """
+        from unittest.mock import patch
+
+        from pyimgtag.progress_db import ProgressDB
+
+        delete_paths = edit_client.delete_paths  # type: ignore[attr-defined]
+
+        # First call returns success (None), second call returns a verbose
+        # AppleScript-style error so we can prove the category mapping.
+        side_effects = iter([None, "AppleScript error (exit 1): osascript reported a glitch"])
+
+        def _fake_delete(_path: str) -> str | None:
+            return next(side_effects)
+
+        with patch("pyimgtag.applescript_writer.delete_from_photos", side_effect=_fake_delete):
+            r = edit_client.post("/edit/api/run", json={"confirm": True})
+            assert r.status_code == 200, r.text
+            assert r.json()["ok"] is True
+
+            # Wait for the worker thread to finish — keep the budget
+            # generous but bounded so a hung job fails the test cleanly.
+            for _ in range(50):
+                d = edit_client.get("/edit/api/status").json()
+                if d["state"] in ("done", "error"):
+                    break
+                time.sleep(0.05)
+
+        d = edit_client.get("/edit/api/status").json()
+        assert d["state"] == "done", d
+        assert d["total"] == 2
+        assert d["done"] == 2
+        assert d["ok"] == 1
+        assert d["failed"] == 1
+        # Every event must carry a stable category, never the raw stderr.
+        errored = [e for e in d["recent"] if e["status"] == "error"]
+        assert len(errored) == 1
+        assert errored[0]["error"] == "photos_unavailable"
+        assert "osascript" not in errored[0]["error"]
+
+        # The successful row must have been removed from the DB.
+        with ProgressDB(db_path=edit_client.db_path) as db:  # type: ignore[attr-defined]
+            assert db.get_image(delete_paths[0]) is None
+            # The failed row stays put so the user can retry.
+            assert db.get_image(delete_paths[1]) is not None
+            # The keep row was never a target.
+            assert db.get_image(edit_client.keep_path) is not None  # type: ignore[attr-defined]
+
+    def test_run_rejects_overlapping_jobs(self, edit_client: TestClient) -> None:
+        """Force a ``running`` singleton and assert the second POST 400s."""
+        from pyimgtag.webapp import routes_edit
+
+        # Synthesise a fake "in flight" job — we never start the real
+        # worker, so the test is fast and deterministic.
+        routes_edit._JOB = routes_edit._Job(job_id="held", state="running")
+        try:
+            r = edit_client.post("/edit/api/run", json={"confirm": True})
+            assert r.status_code == 400
+            assert r.json()["error"] == "job_already_running"
+        finally:
+            routes_edit._reset_job_for_tests()

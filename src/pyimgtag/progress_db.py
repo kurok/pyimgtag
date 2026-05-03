@@ -671,6 +671,21 @@ class ProgressDB:
         )
         self._conn.commit()
 
+    def delete_image(self, file_path: str) -> bool:
+        """Delete a single row from ``processed_images`` by file_path.
+
+        Used by the Edit page after successfully removing the photo from
+        Apple Photos so a re-scan does not re-process the now-trashed
+        image. Returns True if a row was deleted, False if the path was
+        not present.
+        """
+        cur = self._conn.execute(
+            "DELETE FROM processed_images WHERE file_path = ?",
+            (file_path,),
+        )
+        self._conn.commit()
+        return cur.rowcount > 0
+
     @staticmethod
     def _image_row_to_dict(row: tuple) -> dict:
         """Convert a processed_images SELECT row to a metadata dict.

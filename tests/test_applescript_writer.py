@@ -950,3 +950,154 @@ class TestUsePhotoscriptEnvVar:
             os.environ.pop("PYIMGTAG_USE_PHOTOSCRIPT", None)
             write_to_photos("/path/photo.jpg", ["tag"], "desc")
             mock_ps.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# delete_from_photos — mirror of reveal_in_photos: same UUID/filename
+# fast-path layout, same osascript subprocess plumbing, never empties the
+# Recently Deleted bin.
+# ---------------------------------------------------------------------------
+
+
+class TestBuildDeleteApplescript:
+    def test_uuid_stem_uses_media_item_id(self):
+        from pyimgtag.applescript_writer import _build_delete_applescript
+
+        script = _build_delete_applescript(_UUID_FILE)
+        assert f'media item id "{_UUID_STEM}"' in script
+
+    def test_uuid_stem_has_filename_fallback(self):
+        from pyimgtag.applescript_writer import _build_delete_applescript
+
+        script = _build_delete_applescript(_UUID_FILE)
+        assert "on error" in script
+        assert f'filename = "{_UUID_FILE}"' in script
+
+    def test_non_uuid_stem_skips_media_item_id(self):
+        from pyimgtag.applescript_writer import _build_delete_applescript
+
+        script = _build_delete_applescript("IMG_1234.jpg")
+        assert "media item id" not in script
+        assert 'filename = "IMG_1234.jpg"' in script
+
+    def test_script_invokes_delete_on_photos(self):
+        """The script must ask Photos.app to delete the resolved item."""
+        from pyimgtag.applescript_writer import _build_delete_applescript
+
+        script = _build_delete_applescript("vacation.jpg")
+        assert 'tell application "Photos"' in script
+        assert "delete theItem" in script
+        # We deliberately rely on Photos' Recently Deleted bin for the
+        # 30-day undo window; the script must NOT empty that bin.
+        assert "empty" not in script.lower()
+
+    def test_filename_with_quotes_escaped(self):
+        from pyimgtag.applescript_writer import _build_delete_applescript
+
+        script = _build_delete_applescript('say "hi".jpg')
+        assert '\\"' in script
+
+
+class TestDeleteFromPhotos:
+    """Unit tests for the public ``delete_from_photos`` helper."""
+
+    def test_returns_error_on_non_macos(self):
+        from pyimgtag.applescript_writer import delete_from_photos
+
+        with patch("pyimgtag.applescript_writer._IS_MACOS", False):
+            result = delete_from_photos("/path/photo.jpg")
+        assert result is not None
+        assert "macOS" in result
+
+    def test_returns_error_when_osascript_missing(self):
+        from pyimgtag.applescript_writer import delete_from_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=False),
+        ):
+            result = delete_from_photos("/path/photo.jpg")
+        assert result is not None
+        assert "osascript" in result.lower()
+
+    def test_success_returns_none(self):
+        from pyimgtag.applescript_writer import delete_from_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(0),
+            ),
+        ):
+            assert delete_from_photos("/path/to/photo.jpg") is None
+
+    def test_failure_nonzero_exit_returns_error(self):
+        from pyimgtag.applescript_writer import delete_from_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(1, stderr="Photos is not running."),
+            ),
+        ):
+            result = delete_from_photos("/path/to/photo.jpg")
+        assert result is not None
+        assert "Photos is not running." in result
+
+    def test_timeout_returns_error(self):
+        from pyimgtag.applescript_writer import delete_from_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=30),
+            ),
+        ):
+            result = delete_from_photos("/path/to/photo.jpg")
+        assert result is not None
+        assert "timed out" in result.lower()
+
+    def test_oserror_returns_error(self):
+        from pyimgtag.applescript_writer import delete_from_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=OSError("launch failed"),
+            ),
+        ):
+            result = delete_from_photos("/path/to/photo.jpg")
+        assert result is not None
+        assert "launch failed" in result
+
+    def test_uses_basename_not_full_path(self):
+        """The script must reference just the filename, not the full path."""
+        from pyimgtag.applescript_writer import delete_from_photos
+
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run),
+        ):
+            delete_from_photos("/some/deep/path/vacation.jpg")
+
+        assert captured, "subprocess.run was not called"
+        script = captured[0]
+        # "vacation" is not UUID-format — lookup goes via filename scan.
+        assert "media item id" not in script
+        assert 'filename = "vacation.jpg"' in script
+        assert "delete theItem" in script

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Edit page — bulk delete from Apple Photos**: new top-nav entry `/edit` lists every progress-DB row with `cleanup_class='delete'` and exposes a destructive "Delete N from Photos" action behind an explicit confirm checkbox. The action runs in a background thread, walks the marked rows one by one, asks Photos.app to delete each via a new `applescript_writer.delete_from_photos()` (UUID fast-path + filename-scan fallback, mirroring `reveal_in_photos`) and removes the matching `processed_images` row only on success so a re-scan won't re-process trashed images. Photos.app routes deletions to *Recently Deleted* (30-day undo) — the script never empties that bin. New endpoints: `GET /edit/api/marked` (count + sample), `POST /edit/api/run` (one job at a time, returns 400 + `error="job_already_running"` on overlap), `GET /edit/api/status` (live progress + recent events). AppleScript stderr is logged server-side and only stable category strings (`platform_unsupported` / `photos_timeout` / `photos_unavailable` / `photos_error`) reach the browser.
+
 ## [0.12.0] - 2026-05-03
 
 ### Added

@@ -427,3 +427,81 @@ def test_about(server_url: str, browser_ctx) -> None:
     page = _open(browser_ctx, server_url + "/about/")
     _shoot(page, "50-about")
     page.close()
+
+
+def test_edit(server_url: str, browser_ctx) -> None:
+    """Capture every state of the destructive Edit page.
+
+    The seeded DB has one ``cleanup_class='delete'`` row, so the page
+    naturally renders an idle "1 marked" summary. We then flip through
+    confirmed (checkbox ticked) and the running / done states by stubbing
+    the JS network calls so the screenshots are deterministic and don't
+    depend on the real AppleScript path. Resets the in-process Edit job
+    singleton on entry so a previous run can't leak ``running`` state.
+    """
+    # The screenshot worker shares the unified-app process with every
+    # other test, so the Edit job singleton may already be at ``done``
+    # from an earlier session. Reset it explicitly so the live page
+    # always starts at the idle state we expect.
+    from pyimgtag.webapp import routes_edit
+
+    routes_edit._reset_job_for_tests()
+
+    page = _open(browser_ctx, server_url + "/edit/")
+    page.wait_for_timeout(400)
+    _shoot(page, "60-edit-idle")
+
+    # Confirmed: checkbox ticked, button now enabled.
+    page.locator("#confirmChk").check()
+    page.wait_for_timeout(200)
+    _shoot(page, "61-edit-confirmed")
+
+    # Running state: route the run + status calls onto fake responses
+    # so the panel renders deterministic progress instead of hitting
+    # real Photos.app. Three poll cycles cover idle → running → done.
+    poll_count = {"n": 0}
+
+    def _route_status(route, request) -> None:  # noqa: ANN001 — playwright callbacks
+        poll_count["n"] += 1
+        if poll_count["n"] == 1:
+            body = (
+                '{"job_id":"x","state":"running","total":3,"done":1,"ok":1,'
+                '"failed":0,"started_at":1.0,"finished_at":null,"last_error":null,'
+                '"recent":[{"file_name":"DSC00042.jpg","status":"ok"}]}'
+            )
+        else:
+            body = (
+                '{"job_id":"x","state":"done","total":3,"done":3,"ok":2,'
+                '"failed":1,"started_at":1.0,"finished_at":2.0,'
+                '"last_error":"photos_unavailable","recent":['
+                '{"file_name":"DSC00042.jpg","status":"ok"},'
+                '{"file_name":"IMG_1002.jpg","status":"ok"},'
+                '{"file_name":"IMG_1003.jpg","status":"error",'
+                '"error":"photos_unavailable"}]}'
+            )
+        route.fulfill(status=200, content_type="application/json", body=body)
+
+    def _route_run(route, request) -> None:  # noqa: ANN001
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"ok":true,"job_id":"x"}',
+        )
+
+    page.route("**/edit/api/status", _route_status)
+    page.route("**/edit/api/run", _route_run)
+
+    page.locator("#runBtn").click()
+    # First poll → running.
+    page.wait_for_timeout(1100)
+    _shoot(page, "62-edit-running")
+    # Second poll → done.
+    page.wait_for_timeout(1100)
+    _shoot(page, "63-edit-done")
+
+    page.unroute("**/edit/api/status")
+    page.unroute("**/edit/api/run")
+    page.close()
+
+    # Leave the singleton clean for any tests that follow.
+    routes_edit._reset_job_for_tests()
