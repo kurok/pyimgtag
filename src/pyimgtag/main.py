@@ -420,6 +420,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SEC",
         help="Ollama request timeout",
     )
+    judge_p.add_argument(
+        "--skip-judged",
+        action="store_true",
+        help=(
+            "Skip images that already have a row in the judge_scores DB. "
+            "Lets repeat runs over the same source pick up where the last "
+            "one left off instead of rescoring from scratch."
+        ),
+    )
     add_web_flags(judge_p)
 
     # --- tags subcommand group ---

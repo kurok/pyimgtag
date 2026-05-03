@@ -167,11 +167,21 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
 
     interrupted = False
     try:
+        # ``is True`` deliberately rejects MagicMock or stringy truthy values
+        # so a test that builds args with MagicMock doesn't trigger this path
+        # by accident.
+        skip_judged = getattr(args, "skip_judged", False) is True and _db is not None
         try:
             for idx, file_path in enumerate(files, start=1):
                 if session is not None:
                     session.wait_if_paused()
                     session.set_current(str(file_path))
+
+                if skip_judged and _db.get_judge_result(str(file_path)) is not None:
+                    if session is not None:
+                        session.increment("skipped_already_judged")
+                        session.set_current(None)
+                    continue
 
                 scores: JudgeScores | None = ollama.judge_image(str(file_path))
                 if scores is None:

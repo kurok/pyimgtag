@@ -88,6 +88,12 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .lightbox img{max-width:95vw;max-height:95vh;object-fit:contain;cursor:default}
     .lightbox-close{position:fixed;top:16px;right:24px;color:#fff;font-size:32px;
                      cursor:pointer;line-height:1;user-select:none}
+    .img-judge{position:absolute;top:8px;right:8px;font-size:11px;font-weight:700;
+               padding:2px 7px;border-radius:10px;background:rgba(0,0,0,.55);
+               color:#fff;letter-spacing:.4px;pointer-events:none}
+    .img-judge.judge-high{background:rgba(34,139,34,.85)}
+    .img-judge.judge-mid{background:rgba(255,159,10,.85)}
+    .img-judge.judge-low{background:rgba(255,59,48,.85)}
   </style>
 </head>
 <body>
@@ -201,6 +207,12 @@ function setStatusFilter(val, btn) {
 function setSort(val) { _sort = val; _offset = 0; load(); }
 function setPageSize(n) { PAGE = n; _offset = 0; load(); }
 
+function judgeClass(score) {
+  if (score >= 8) return 'judge-high';
+  if (score >= 6) return 'judge-mid';
+  return 'judge-low';
+}
+
 function prevPage() { _offset = Math.max(0, _offset - PAGE); load(); }
 function nextPage() { _offset += PAGE; load(); }
 
@@ -254,6 +266,14 @@ function renderGrid(items) {
         (img.cleanup_class === 'delete' ? 'badge-del' : 'badge-rev');
       badge.textContent = img.cleanup_class.toUpperCase();
       thumbWrap.appendChild(badge);
+    }
+    if (typeof img.judge_score === 'number') {
+      // Show the judge weighted score (1–10 integer) as a corner badge.
+      const judge = document.createElement('span');
+      judge.className = 'img-judge ' + judgeClass(img.judge_score);
+      judge.textContent = img.judge_score + '/10';
+      if (img.judge_verdict) judge.title = img.judge_verdict;
+      thumbWrap.appendChild(judge);
     }
     wrap.appendChild(thumbWrap);
 
