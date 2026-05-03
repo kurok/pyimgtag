@@ -1,4 +1,11 @@
-"""Tests for photos_faces_importer (photoscript mocked)."""
+"""Tests for photos_faces_importer (photoscript mocked).
+
+The real photoscript ``PhotosLibrary`` does not expose a ``persons()``
+method; persons are surfaced only at the photo level via
+``Photo.persons`` (a list of name strings). These tests stub that
+contract and exercise the importer's name → uuid grouping plus its
+single-face-photo assignment logic.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +15,23 @@ import pytest
 
 from pyimgtag.models import FaceDetection
 from pyimgtag.photos_faces_importer import import_photos_persons
+
+
+def _mock_photo(uuid: str, persons: list[str]) -> MagicMock:
+    photo = MagicMock()
+    photo.uuid = uuid
+    photo.persons = persons
+    return photo
+
+
+def _patch_photoscript(library: MagicMock):
+    """Return the context-manager pair used by every test below."""
+    mock_ps = MagicMock()
+    mock_ps.PhotosLibrary.return_value = library
+    return (
+        patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
+        patch.dict("sys.modules", {"photoscript": mock_ps}),
+    )
 
 
 class TestImportPhotosPersons:
@@ -28,22 +52,11 @@ class TestImportPhotosPersons:
             )
             fid = db.insert_face("/photos/abc123.jpg", det)
 
-            mock_photo = MagicMock()
-            mock_photo.uuid = "abc123"
-            mock_person = MagicMock()
-            mock_person.name = "Alice"
-            mock_person.photos.return_value = [mock_photo]
+            library = MagicMock()
+            library.photos.return_value = [_mock_photo("abc123", ["Alice"])]
 
-            mock_library = MagicMock()
-            mock_library.persons.return_value = [mock_person]
-
-            mock_ps = MagicMock()
-            mock_ps.PhotosLibrary.return_value = mock_library
-
-            with (
-                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
-                patch.dict("sys.modules", {"photoscript": mock_ps}),
-            ):
+            ps_patch, sys_patch = _patch_photoscript(library)
+            with ps_patch, sys_patch:
                 imported, skipped = import_photos_persons(db)
 
             assert imported == 1
@@ -76,22 +89,11 @@ class TestImportPhotosPersons:
             db.insert_face("/photos/uuid1.jpg", det1)
             db.insert_face("/photos/uuid1.jpg", det2)
 
-            mock_photo = MagicMock()
-            mock_photo.uuid = "uuid1"
-            mock_person = MagicMock()
-            mock_person.name = "Bob"
-            mock_person.photos.return_value = [mock_photo]
+            library = MagicMock()
+            library.photos.return_value = [_mock_photo("uuid1", ["Bob"])]
 
-            mock_library = MagicMock()
-            mock_library.persons.return_value = [mock_person]
-
-            mock_ps = MagicMock()
-            mock_ps.PhotosLibrary.return_value = mock_library
-
-            with (
-                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
-                patch.dict("sys.modules", {"photoscript": mock_ps}),
-            ):
+            ps_patch, sys_patch = _patch_photoscript(library)
+            with ps_patch, sys_patch:
                 imported, skipped = import_photos_persons(db)
 
             assert imported == 1
@@ -103,20 +105,16 @@ class TestImportPhotosPersons:
 
     def test_skips_unnamed_persons(self, tmp_path):
         with self._make_db(tmp_path) as db:
-            mock_person = MagicMock()
-            mock_person.name = ""
-            mock_person.photos.return_value = []
+            library = MagicMock()
+            # Photo with an empty / blank-string person tag is ignored.
+            library.photos.return_value = [
+                _mock_photo("ph1", []),
+                _mock_photo("ph2", [""]),
+                _mock_photo("ph3", ["   "]),
+            ]
 
-            mock_library = MagicMock()
-            mock_library.persons.return_value = [mock_person]
-
-            mock_ps = MagicMock()
-            mock_ps.PhotosLibrary.return_value = mock_library
-
-            with (
-                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
-                patch.dict("sys.modules", {"photoscript": mock_ps}),
-            ):
+            ps_patch, sys_patch = _patch_photoscript(library)
+            with ps_patch, sys_patch:
                 imported, skipped = import_photos_persons(db)
 
             assert imported == 0
@@ -125,22 +123,11 @@ class TestImportPhotosPersons:
 
     def test_skips_photo_not_in_faces_db(self, tmp_path):
         with self._make_db(tmp_path) as db:
-            mock_photo = MagicMock()
-            mock_photo.uuid = "notindb"
-            mock_person = MagicMock()
-            mock_person.name = "Carol"
-            mock_person.photos.return_value = [mock_photo]
+            library = MagicMock()
+            library.photos.return_value = [_mock_photo("notindb", ["Carol"])]
 
-            mock_library = MagicMock()
-            mock_library.persons.return_value = [mock_person]
-
-            mock_ps = MagicMock()
-            mock_ps.PhotosLibrary.return_value = mock_library
-
-            with (
-                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
-                patch.dict("sys.modules", {"photoscript": mock_ps}),
-            ):
+            ps_patch, sys_patch = _patch_photoscript(library)
+            with ps_patch, sys_patch:
                 imported, skipped = import_photos_persons(db)
 
             # Person is created but no face assigned
@@ -161,31 +148,72 @@ class TestImportPhotosPersons:
             )
             db.insert_face("/photos/abc123.jpg", det)
 
-            mock_photo = MagicMock()
-            mock_photo.uuid = "abc123"
-            mock_person = MagicMock()
-            mock_person.name = "Alice"
-            mock_person.photos.return_value = [mock_photo]
+            library = MagicMock()
+            library.photos.return_value = [_mock_photo("abc123", ["Alice"])]
 
-            mock_library = MagicMock()
-            mock_library.persons.return_value = [mock_person]
-
-            mock_ps = MagicMock()
-            mock_ps.PhotosLibrary.return_value = mock_library
-
-            with (
-                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
-                patch.dict("sys.modules", {"photoscript": mock_ps}),
-            ):
-                # First import
+            ps_patch, sys_patch = _patch_photoscript(library)
+            with ps_patch, sys_patch:
                 imported1, _ = import_photos_persons(db)
-                # Second import — should skip the already-existing person
                 imported2, _ = import_photos_persons(db)
 
             assert imported1 == 1
             assert imported2 == 0
             # Still only one person row
             assert len(db.get_persons()) == 1
+
+    def test_photo_in_multiple_persons(self, tmp_path):
+        """A photo tagged with multiple names contributes to every person.
+
+        Real-world Apple Photos: a group shot has multiple persons. The
+        importer must create one row per name and (for a single-face
+        photo, which is unusual but possible if the user manually tagged
+        the same face with two names) assign that face once to whichever
+        person row reaches it first."""
+        with self._make_db(tmp_path) as db:
+            det = FaceDetection(
+                image_path="/photos/group.jpg",
+                bbox_x=0,
+                bbox_y=0,
+                bbox_w=30,
+                bbox_h=30,
+                confidence=0.9,
+            )
+            db.insert_face("/photos/group.jpg", det)
+
+            library = MagicMock()
+            library.photos.return_value = [_mock_photo("group", ["Alice", "Bob"])]
+
+            ps_patch, sys_patch = _patch_photoscript(library)
+            with ps_patch, sys_patch:
+                imported, _ = import_photos_persons(db)
+
+            assert imported == 2
+            labels = sorted(p.label for p in db.get_persons())
+            assert labels == ["Alice", "Bob"]
+
+    def test_unreadable_photo_metadata_is_skipped(self, tmp_path):
+        """``photoscript`` raises on iCloud-only photos the AppleScript
+        bridge cannot resolve. The importer must log and continue rather
+        than abort the whole import."""
+        with self._make_db(tmp_path) as db:
+            good = _mock_photo("good", ["Alice"])
+
+            bad = MagicMock()
+            type(bad).persons = property(
+                lambda self: (_ for _ in ()).throw(RuntimeError("AppleEvent timeout"))
+            )
+            type(bad).uuid = "bad"
+
+            library = MagicMock()
+            library.photos.return_value = [bad, good]
+
+            ps_patch, sys_patch = _patch_photoscript(library)
+            with ps_patch, sys_patch:
+                imported, _ = import_photos_persons(db)
+
+            # The good photo still produces its person row.
+            assert imported == 1
+            assert {p.label for p in db.get_persons()} == {"Alice"}
 
     def test_photoscript_unavailable_raises(self, tmp_path):
         with self._make_db(tmp_path) as db:
