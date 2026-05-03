@@ -234,6 +234,15 @@ class ProgressDB:
         self._conn.commit()
         return count
 
+    _QUERY_SORTS: dict[str, str] = {
+        "path_asc": "pi.file_path ASC",
+        "path_desc": "pi.file_path DESC",
+        "newest": "pi.processed_at DESC, pi.file_path ASC",
+        "oldest": "pi.processed_at ASC, pi.file_path ASC",
+        "judge_desc": "js.weighted_score DESC NULLS LAST, pi.file_path ASC",
+        "judge_asc": "js.weighted_score ASC NULLS LAST, pi.file_path ASC",
+    }
+
     def query_images(
         self,
         tag: str | None = None,
@@ -244,6 +253,10 @@ class ProgressDB:
         country: str | None = None,
         status: str | None = None,
         limit: int | None = None,
+        min_judge_score: int | None = None,
+        max_judge_score: int | None = None,
+        judged: bool | None = None,
+        sort: str = "path_asc",
     ) -> list[dict]:
         """Query images with advanced filters.
 
@@ -256,6 +269,12 @@ class ProgressDB:
             country: Case-insensitive substring match against nearest_country.
             status: Exact match against status ('ok', 'error').
             limit: Max rows to return. None = no limit.
+            min_judge_score: Only return images whose judge weighted_score >= this value.
+            max_judge_score: Only return images whose judge weighted_score <= this value.
+            judged: True = only images with a judge_scores row; False = only un-judged;
+                None = any.
+            sort: One of ``path_asc`` (default), ``path_desc``, ``newest``,
+                ``oldest``, ``judge_desc``, ``judge_asc``.
 
         Returns:
             List of image metadata dicts.
@@ -265,38 +284,51 @@ class ProgressDB:
 
         if tag is not None:
             conditions.append(
-                "EXISTS (SELECT 1 FROM json_each(tags) WHERE LOWER(value) LIKE LOWER(?))"
+                "EXISTS (SELECT 1 FROM json_each(pi.tags) WHERE LOWER(value) LIKE LOWER(?))"
             )
             params.append(f"%{tag}%")
         if has_text is True:
-            conditions.append("has_text = 1")
+            conditions.append("pi.has_text = 1")
         elif has_text is False:
-            conditions.append("(has_text = 0 OR has_text IS NULL)")
+            conditions.append("(pi.has_text = 0 OR pi.has_text IS NULL)")
         if cleanup_class is not None:
-            conditions.append("cleanup_class = ?")
+            conditions.append("pi.cleanup_class = ?")
             params.append(cleanup_class)
         if scene_category is not None:
-            conditions.append("scene_category = ?")
+            conditions.append("pi.scene_category = ?")
             params.append(scene_category)
         if city is not None:
-            conditions.append("LOWER(nearest_city) LIKE LOWER(?)")
+            conditions.append("LOWER(pi.nearest_city) LIKE LOWER(?)")
             params.append(f"%{city}%")
         if country is not None:
-            conditions.append("LOWER(nearest_country) LIKE LOWER(?)")
+            conditions.append("LOWER(pi.nearest_country) LIKE LOWER(?)")
             params.append(f"%{country}%")
         if status is not None:
-            conditions.append("status = ?")
+            conditions.append("pi.status = ?")
             params.append(status)
+        if min_judge_score is not None:
+            conditions.append("js.weighted_score >= ?")
+            params.append(min_judge_score)
+        if max_judge_score is not None:
+            conditions.append("js.weighted_score <= ?")
+            params.append(max_judge_score)
+        if judged is True:
+            conditions.append("js.weighted_score IS NOT NULL")
+        elif judged is False:
+            conditions.append("js.weighted_score IS NULL")
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
+        order_clause = self._QUERY_SORTS.get(sort, self._QUERY_SORTS["path_asc"])
         query = (  # nosec B608
-            "SELECT file_path, tags, scene_summary, processed_at, status, "
-            "cleanup_class, scene_category, emotional_tone, event_hint, significance, "
-            "nearest_city, nearest_region, nearest_country, error_message "
-            "FROM processed_images "
+            "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, pi.status, "
+            "pi.cleanup_class, pi.scene_category, pi.emotional_tone, pi.event_hint, "
+            "pi.significance, pi.nearest_city, pi.nearest_region, pi.nearest_country, "
+            "pi.error_message, js.weighted_score, js.reason, js.verdict "
+            "FROM processed_images pi "
+            "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
             + where  # nosec B608
-            + " ORDER BY file_path "
+            + f" ORDER BY {order_clause} "  # nosec B608
             + limit_clause
         )
         rows = self._conn.execute(query, params).fetchall()
@@ -304,13 +336,19 @@ class ProgressDB:
 
     @staticmethod
     def _query_row_to_dict(row: tuple) -> dict:
-        """Convert a query_images SELECT row to a metadata dict."""
+        """Convert a query_images SELECT row to a metadata dict.
+
+        The trailing three columns ``js.weighted_score``, ``js.reason``,
+        ``js.verdict`` come from the LEFT JOIN with ``judge_scores`` and
+        are ``None`` for any image that has not been judged yet.
+        """
         file_path: str = row[0]
         tags_raw: str | None = row[1]
         try:
             tags_list: list[str] = json.loads(tags_raw) if tags_raw else []
         except (json.JSONDecodeError, TypeError):
             tags_list = []
+        weighted_raw = row[14] if len(row) > 14 else None
         return {
             "file_path": file_path,
             "file_name": Path(file_path).name,
@@ -327,6 +365,9 @@ class ProgressDB:
             "nearest_region": row[11],
             "nearest_country": row[12],
             "error_message": row[13] if len(row) > 13 else None,
+            "judge_score": int(round(float(weighted_raw))) if weighted_raw is not None else None,
+            "judge_reason": row[15] if len(row) > 15 else None,
+            "judge_verdict": row[16] if len(row) > 16 else None,
         }
 
     def get_tag_counts(self) -> list[tuple[str, int]]:

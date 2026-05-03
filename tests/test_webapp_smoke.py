@@ -128,6 +128,7 @@ _PAGES = [
     "/tags/",
     "/query/",
     "/judge/",
+    "/about/",
 ]
 
 _JSON_APIS = [
@@ -138,6 +139,7 @@ _JSON_APIS = [
     ("/query/api/images", []),
     ("/judge/api/scores", []),
     ("/faces/api/persons", []),
+    ("/about/api/version", []),
 ]
 
 
@@ -320,8 +322,32 @@ class TestApiContracts:
             "nearest_city",
             "nearest_country",
             "error_message",
+            # Query LEFT JOINs judge_scores so the JS can render the
+            # judge column and hover-thumbnail tooltip.
+            "judge_score",
+            "judge_reason",
+            "judge_verdict",
         ):
             assert key in item, f"query item missing {key}"
+
+    def test_query_api_judge_filter_min(self, client: TestClient) -> None:
+        # The seeded image has weighted_score=8 — min_judge_score=8 keeps it,
+        # min_judge_score=9 should exclude it.
+        kept = client.get("/query/api/images", params={"min_judge_score": 8}).json()
+        assert any(it["judge_score"] == 8 for it in kept)
+        excluded = client.get("/query/api/images", params={"min_judge_score": 9}).json()
+        assert not any(it["judge_score"] == 8 for it in excluded)
+
+    def test_query_api_sort_judge_desc_accepted(self, client: TestClient) -> None:
+        for s in ("path_asc", "path_desc", "newest", "oldest", "judge_asc", "judge_desc"):
+            r = client.get("/query/api/images", params={"sort": s})
+            assert r.status_code == 200, s
+
+    def test_query_api_judged_filter(self, client: TestClient) -> None:
+        only_judged = client.get("/query/api/images", params={"judged": "true"}).json()
+        assert all(it["judge_score"] is not None for it in only_judged)
+        not_judged = client.get("/query/api/images", params={"judged": "false"}).json()
+        assert all(it["judge_score"] is None for it in not_judged)
 
     def test_judge_api_scores_shape(self, client: TestClient) -> None:
         d = client.get("/judge/api/scores").json()
@@ -369,3 +395,70 @@ class TestThumbnailAndOriginal:
         assert r.status_code == 200
         # Seeded JPEG → JPEG bytes.
         assert r.headers["content-type"].startswith("image/")
+
+
+class TestAboutPage:
+    """About page must load on every request and the version-check API
+    must always return a JSON body even when PyPI is unreachable."""
+
+    def test_about_html_renders(self, client: TestClient) -> None:
+        r = client.get("/about/")
+        assert r.status_code == 200
+        assert "About pyimgtag" in r.text
+        # The current version must appear in the rendered HTML so the
+        # user can see at a glance which build is running.
+        from pyimgtag import __version__
+
+        assert __version__ in r.text
+
+    def test_about_version_api_offline_friendly(self, client: TestClient) -> None:
+        # Force a clean cache so the endpoint actually attempts a lookup.
+        from pyimgtag.webapp import routes_about
+
+        routes_about._CACHE.update({"at": 0.0, "value": None})
+        # Patch the requests call to simulate "no network".
+        from unittest.mock import patch
+
+        with patch.object(routes_about, "_fetch_latest_pypi", return_value=None):
+            d = client.get("/about/api/version").json()
+        from pyimgtag import __version__
+
+        assert d["installed"] == __version__
+        assert d["latest"] is None
+        assert d["update"] is False
+
+    def test_about_version_api_flags_update(self, client: TestClient) -> None:
+        from pyimgtag.webapp import routes_about
+
+        routes_about._CACHE.update({"at": 0.0, "value": None})
+        from unittest.mock import patch
+
+        # Simulate a fresh PyPI release strictly newer than what we ship.
+        from pyimgtag import __version__
+
+        bumped_major = str(int(__version__.split(".")[0]) + 9) + ".0.0"
+        with patch.object(routes_about, "_fetch_latest_pypi", return_value=bumped_major):
+            d = client.get("/about/api/version").json()
+        assert d["latest"] == bumped_major
+        assert d["update"] is True
+
+
+class TestVersionParse:
+    def test_parse_basic_versions(self) -> None:
+        from pyimgtag.webapp.routes_about import _is_newer, _parse_version
+
+        assert _parse_version("0.10.0") == (0, 10, 0)
+        assert _parse_version("0.9.0") == (0, 9, 0)
+        # 0.10.0 is newer than 0.9.0 — the classic mistake when comparing
+        # versions as plain strings.
+        assert _is_newer("0.10.0", "0.9.0") is True
+        assert _is_newer("0.9.0", "0.10.0") is False
+        assert _is_newer("1.0.0", "0.99.99") is True
+
+    def test_parse_tolerates_suffixes(self) -> None:
+        from pyimgtag.webapp.routes_about import _is_newer, _parse_version
+
+        # Pre-release / dev suffixes get parsed conservatively rather
+        # than crashing the compare.
+        assert _parse_version("1.2.3rc1") == (1, 2, 3)
+        assert _is_newer("1.2.3rc1", "1.2.3") is False
