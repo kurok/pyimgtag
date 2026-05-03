@@ -423,6 +423,65 @@ def test_judge(server_url: str, browser_ctx) -> None:
     page.close()
 
 
+def test_judge_each_sort_option(server_url: str, browser_ctx) -> None:
+    """Cover every Sort option on /judge/ — the page mirrors Review's
+    toolbar layout but with a Judge-specific list (rating_*, path_*,
+    shot_*)."""
+    page = _open(browser_ctx, server_url + "/judge/")
+    options = (
+        "rating_desc",
+        "rating_asc",
+        "path_asc",
+        "path_desc",
+        "shot_desc",
+        "shot_asc",
+    )
+    for i, val in enumerate(options):
+        page.locator("#sortSel").select_option(val)
+        page.wait_for_timeout(400)
+        _shoot(page, f"41-judge-sort-{i:02d}-{val}")
+    page.close()
+
+
+def test_judge_rating_filter(server_url: str, browser_ctx) -> None:
+    """Drive the Min / Max rating inputs through a few representative
+    bands — pin the high-only, low-only, and a narrow window so the
+    visual check confirms the filter actually swaps the result set."""
+    page = _open(browser_ctx, server_url + "/judge/")
+    # High band: only the seeded 8/10 row should remain.
+    page.locator("#minRating").fill("8")
+    page.locator("#minRating").press("Tab")
+    page.wait_for_timeout(400)
+    _shoot(page, "42-judge-min-rating-8")
+    # Empty out so the next assertion isn't compounded.
+    page.locator("#minRating").fill("")
+    page.locator("#minRating").press("Tab")
+    page.wait_for_timeout(200)
+    # Low band: should now exclude the seeded 8/10 row.
+    page.locator("#maxRating").fill("5")
+    page.locator("#maxRating").press("Tab")
+    page.wait_for_timeout(400)
+    _shoot(page, "43-judge-max-rating-5")
+    # Narrow window covering the seeded rating.
+    page.locator("#maxRating").fill("")
+    page.locator("#minRating").fill("7")
+    page.locator("#maxRating").fill("9")
+    page.locator("#maxRating").press("Tab")
+    page.wait_for_timeout(400)
+    _shoot(page, "44-judge-rating-7-to-9")
+    page.close()
+
+
+def test_judge_each_per_page_option(server_url: str, browser_ctx) -> None:
+    """Per-page selector exposes 25 / 50 / 100 / 200 like Review."""
+    page = _open(browser_ctx, server_url + "/judge/")
+    for v in ("25", "50", "100", "200"):
+        page.locator("#pageSel").select_option(v)
+        page.wait_for_timeout(400)
+        _shoot(page, f"45-judge-perpage-{v}")
+    page.close()
+
+
 def test_about(server_url: str, browser_ctx) -> None:
     page = _open(browser_ctx, server_url + "/about/")
     _shoot(page, "50-about")

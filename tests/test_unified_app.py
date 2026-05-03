@@ -103,7 +103,9 @@ def test_unified_app_judge_at_prefix(tmp_path):
     assert "/judge/api/scores" in r.text
     r = client.get("/judge/api/scores")
     assert r.status_code == 200
-    assert r.json() == []  # _seed has no judge scores
+    # 0.13.0 contract: paginated ``{items, total}`` shape; ``_seed`` has
+    # no judge scores so both should be empty.
+    assert r.json() == {"items": [], "total": 0}
 
 
 def test_unified_app_dashboard_nav_includes_new_links(tmp_path):
