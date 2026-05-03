@@ -226,6 +226,66 @@ def _bulk_applescript_persons_property() -> str:
     )
 
 
+def _bulk_applescript_app_people() -> str:
+    """Bulk AppleScript that walks the **application-level** persons collection.
+
+    Some macOS Photos.app builds expose persons only as a top-level
+    collection on the application object — the user's "People"
+    sidebar shows named items but no ``person``-of-media-item
+    accessor surfaces them. Walk each person and read their attached
+    photos:
+
+        repeat with p in (people of application "Photos")
+            repeat with _photo in (photos of p)
+                emit (id of _photo) <TAB> (name of p) <LF>
+
+    Output format is ``<uuid>\\t<single_name>\\n`` (one row per
+    photo×person), distinct from the per-media-item scripts which
+    emit ``<uuid>\\t<pipe-joined-names>\\n``. The Python parser
+    handles both shapes.
+
+    Probes three identifiers in turn (``every person`` at the app
+    level, ``persons`` plural property, ``people`` UI-facing
+    terminology). Each probe is its own ``try`` block so unknown
+    identifiers don't poison the script.
+    """
+    return (
+        'tell application "Photos"\n'
+        '    set out to ""\n'
+        "    set lf to ASCII character 10\n"
+        "    set ht to ASCII character 9\n"
+        "    set _people_list to {}\n"
+        "    try\n"
+        "        set _people_list to (every person)\n"
+        "    end try\n"
+        "    if _people_list is {} then\n"
+        "        try\n"
+        "            set _people_list to persons\n"
+        "        end try\n"
+        "    end if\n"
+        "    if _people_list is {} then\n"
+        "        try\n"
+        "            set _people_list to people\n"
+        "        end try\n"
+        "    end if\n"
+        "    repeat with p in _people_list\n"
+        "        try\n"
+        "            set _name to name of p\n"
+        "            try\n"
+        "                set _photo_list to photos of p\n"
+        "                repeat with _photo in _photo_list\n"
+        "                    try\n"
+        "                        set out to out & (id of _photo) & ht & _name & lf\n"
+        "                    end try\n"
+        "                end repeat\n"
+        "            end try\n"
+        "        end try\n"
+        "    end repeat\n"
+        "    return out\n"
+        "end tell"
+    )
+
+
 # Back-compat alias — older tests import the original name directly.
 def _bulk_applescript() -> str:
     """Default bulk script (``every person`` form)."""
@@ -303,10 +363,56 @@ def _collect_via_bulk_applescript(emit: Callable[[str], None]) -> dict[str, list
             else f"osascript exit {proc.returncode}"
         )
 
+    name_to_uuids = _parse_bulk_output(proc.stdout or "", started, emit)
+
+    # If the per-media-item scripts ran but reported zero persons across
+    # the whole library, the user's Photos.app may simply not expose
+    # persons at the media-item level even though the People sidebar
+    # shows them. Walk Photos' application-level ``people`` collection
+    # instead and merge any rows it returns.
+    if not name_to_uuids:
+        emit(
+            "Per-photo person accessor returned 0 persons; "
+            "retrying via the application-level 'people' collection…"
+        )
+        logger.warning(
+            "bulk AppleScript per-photo paths returned 0 persons; "
+            "retrying via app-level people collection"
+        )
+        app_proc = _run_bulk_osascript(_bulk_applescript_app_people())
+        if app_proc.returncode == 0:
+            name_to_uuids = _parse_bulk_output(app_proc.stdout or "", started, emit)
+        else:
+            logger.warning(
+                "app-level 'people' walk also failed: %s",
+                (app_proc.stderr or "").strip(),
+            )
+
+    return name_to_uuids
+
+
+def _parse_bulk_output(
+    stdout: str,
+    started: float,
+    emit: Callable[[str], None],
+) -> dict[str, list[str]]:
+    """Parse the ``<uuid>\\t<names>\\n`` output of any bulk script.
+
+    Accepts both row formats:
+      - per-photo (per-media-item scripts): pipe-joined names per row,
+        one row per photo.
+      - per-(photo, person) pair (app-level walker): one row per pair,
+        same line format but a single name in the second field.
+
+    Both shapes accumulate into ``name -> [uuid, ...]`` because the
+    parser splits on ``|`` (no-op for single-name rows) and treats
+    each (uuid, name) pair as additive.
+    """
     name_to_uuids: dict[str, list[str]] = {}
     processed = 0
     persons_found: set[str] = set()
-    for line in (proc.stdout or "").splitlines():
+    seen_uuids: set[str] = set()
+    for line in stdout.splitlines():
         # Defensive: blank lines and rows without the tab separator are
         # silently skipped so one weird photo doesn't blow up the import.
         if not line:
@@ -317,7 +423,9 @@ def _collect_via_bulk_applescript(emit: Callable[[str], None]) -> dict[str, list
         uuid = uuid.strip()
         if not uuid:
             continue
-        processed += 1
+        if uuid not in seen_uuids:
+            processed += 1
+            seen_uuids.add(uuid)
         names = [n.strip() for n in raw_names.split(_PERSON_NAME_SEPARATOR) if n.strip()]
         for name in names:
             name_to_uuids.setdefault(name, []).append(uuid)
