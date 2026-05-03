@@ -621,6 +621,26 @@ class TestAboutPage:
         assert d["latest"] == bumped_major
         assert d["update"] is True
 
+    def test_about_wiki_buttons_have_specific_color_rules(self, client: TestClient) -> None:
+        """Regression: the primary "Open wiki" button rendered as a blank
+        blue rectangle because the page-scoped ``.about a {color:var(--accent)}``
+        rule (specificity 1,1) overrode the unscoped ``.wiki-btn {color:#fff}``
+        rule (specificity 1,0), so the white text became the same blue as the
+        background. Pin the scoped form so a future de-scope of these rules
+        fails this test instead of silently shipping invisible buttons."""
+        r = client.get("/about/")
+        assert r.status_code == 200
+        # Both buttons must use the page-scoped form. The unscoped ``.wiki-btn``
+        # selector must not appear standalone — only as ``.about .wiki-btn``.
+        assert ".about .wiki-btn{" in r.text or ".about .wiki-btn {" in r.text
+        # The primary button must explicitly assert white text.
+        assert "color:#fff" in r.text
+        # And the markup must still carry the readable label so the button
+        # is never blank even if a future user-agent style overrides the
+        # accent colour.
+        assert "Open wiki" in r.text
+        assert "Use-case diagrams" in r.text
+
 
 class TestDashboardSharesCliDb:
     """Regression: ``start_dashboard_for`` used to instantiate the unified

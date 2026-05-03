@@ -110,12 +110,19 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
               background:var(--surface)}
     .wiki-cta p{margin:0;font-size:13px;color:var(--text);flex:1;min-width:240px}
     .wiki-cta .btn-row{display:flex;gap:10px;flex-wrap:wrap}
-    .wiki-btn{display:inline-block;padding:8px 16px;border-radius:6px;
-              background:var(--accent);color:#fff;text-decoration:none;
-              font-size:13px;font-weight:500}
-    .wiki-btn:hover{filter:brightness(1.08);text-decoration:none}
-    .wiki-btn.secondary{background:transparent;color:var(--accent);
-                         border:1px solid var(--accent)}
+    /* The buttons live inside ``.about`` which has its own ``a`` rule
+       (``color:var(--accent)``). That rule is class+element specificity
+       (1,1) and beats a plain ``.wiki-btn`` (1,0) — the primary button
+       ends up with blue text on a blue background. Scope the rules to
+       ``.about .wiki-btn`` so the specificity (1,2,0) wins. */
+    .about .wiki-btn{display:inline-block;padding:8px 16px;border-radius:6px;
+                     background:var(--accent);color:#fff;text-decoration:none;
+                     font-size:13px;font-weight:500}
+    .about .wiki-btn:hover{filter:brightness(1.08);text-decoration:none;
+                           color:#fff}
+    .about .wiki-btn.secondary{background:transparent;color:var(--accent);
+                               border:1px solid var(--accent)}
+    .about .wiki-btn.secondary:hover{color:var(--accent)}
   </style>
 </head>
 <body>
