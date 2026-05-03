@@ -52,9 +52,11 @@ class TestCheckFaceRecognition:
 
     def test_pkg_resources_missing_gets_setuptools_hint(self):
         """face_recognition_models is installed but ``pkg_resources`` is
-        missing (Python 3.12+ no longer bundles setuptools). The pre-flight
-        check must distinguish this from "package not installed" and tell
-        the user to install setuptools, not re-install the models package."""
+        missing — either because setuptools isn't installed at all, or
+        because setuptools 81+ dropped the bundled ``pkg_resources``
+        module. The pre-flight must distinguish this from "package not
+        installed" and tell the user to pin setuptools<81, not re-install
+        the models package."""
         import builtins
 
         from pyimgtag._face_dep_check import MissingFaceModelsError, _ensure_face_dep
@@ -74,9 +76,13 @@ class TestCheckFaceRecognition:
                 _ensure_face_dep()
 
         msg = str(excinfo.value)
-        # Must point at setuptools, not at re-installing the models repo.
+        # Must call out setuptools and pkg_resources by name.
         assert "setuptools" in msg
         assert "pkg_resources" in msg
+        # Must include the version-pinned install command — without the
+        # <81 cap the user can land on setuptools 81+ and still hit the
+        # same ModuleNotFoundError after "fixing" the install.
+        assert "setuptools<81" in msg
         # Must NOT instruct re-installing face_recognition_models from git
         # for this case — that would be misleading.
         assert "git+https://github.com/ageitgey/face_recognition_models" not in msg

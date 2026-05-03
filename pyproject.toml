@@ -46,10 +46,14 @@ photos = ["photoscript>=0.5.3"]
 # package is missing, so the user always gets an actionable next step.
 # `setuptools` is kept here so `from pkg_resources import …` (used by
 # face_recognition_models at import time) doesn't trip on Python 3.12+,
-# which no longer bundles setuptools by default.
+# which no longer bundles setuptools by default. Capped at <81 because
+# setuptools 81.0.0 removed the bundled ``pkg_resources`` module — a
+# fresh install of setuptools 81+ has the package metadata but
+# ``import pkg_resources`` raises ``ModuleNotFoundError``, which
+# breaks face_recognition_models at import time.
 face = [
     "face-recognition>=1.3",
-    "setuptools>=68.0",
+    "setuptools>=68.0,<81",
     "scikit-learn>=1.3",
 ]
 review = ["fastapi>=0.100", "uvicorn>=0.20", "pydantic>=2.0", "httpx>=0.24"]
@@ -60,7 +64,9 @@ all = [
     # See note above on [face]: face_recognition_models cannot be listed
     # here either; it is installed separately from a git URL.
     "face-recognition>=1.3",
-    "setuptools>=68.0",
+    # Cap at <81 — setuptools 81 removed the bundled ``pkg_resources``
+    # module that face_recognition_models still imports at load time.
+    "setuptools>=68.0,<81",
     "scikit-learn>=1.3",
     "fastapi>=0.100",
     "uvicorn>=0.20",
