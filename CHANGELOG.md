@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-05-03
+
+### Added
+- **Query page judge filter + sort + Judge column** (#151): three new filter inputs (`Judge ≥`, `Judge ≤`, `Judged`) and a `Sort` dropdown plumbed through `query_images(sort=…)` with a whitelisted ORDER BY (path / newest / oldest / `judge_desc` / `judge_asc`). Results table gains a colour-coded Judge column with the model's reason in the tooltip.
+- **Hover thumbnail** on Query result rows (#151): hovering a row renders a 280×280 preview next to the cursor, reusing the `/review/thumbnail` endpoint (which routes user input through the DB-stored path).
+- **About page** (`/about`) (#151): installed version, latest PyPI release, up-to-date / update-available status, curated repo + wiki links, and an embedded wiki iframe. New `GET /about/api/version` endpoint returns `{installed, latest, update}` cached for an hour.
+- **Version chip on every page** (#151): every nav now carries a clickable `vN.N.N` chip that points at `/about`. When the cached PyPI lookup says a newer release is available the chip turns accent-coloured with an upward arrow.
+- **CLI startup banner** (#151): `pyimgtag <subcommand>` runs a best-effort PyPI version check and prints a single-line nag to stderr if a newer release is on PyPI. Suppressed by `PYIMGTAG_NO_UPDATE_CHECK`.
+
+### Fixed
+- **`pyimgtag faces import-photos`** (#150): photoscript's `PhotosLibrary` does not expose a `persons()` method; the importer now walks `library.photos()` and reads `Photo.persons` (a list of name strings) to build the `name → uuids` map. Defensive guards skip iCloud-only / AppleScript-broken photos so a single bad row no longer aborts the whole import.
+
 ## [0.10.0] - 2026-05-03
 
 ### Changed
