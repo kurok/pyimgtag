@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-05-03
+
+### Added
+- **Photo datetime in Query results** (#157): DB migration v8 adds a `processed_images.image_date` column populated from `read_exif().date_original`. The Query page renders a new Date column next to File and the Sort dropdown gains "Newest taken" / "Oldest taken" — both backed by new whitelisted `_QUERY_SORTS` keys (`shot_desc` / `shot_asc`, NULLs last). Older rows from before v8 surface `image_date=null` and the JS falls back to an em-dash so existing DBs render cleanly.
+- **"Open original" reveals the photo in Apple Photos** (#157): new `POST /review/api/open-in-photos` endpoint in the review router calls `applescript_writer.reveal_in_photos`, which activates Photos.app and `spotlight`s the matching media item (UUID-stem fast path, filename-scan fallback). The Review card "Open original" link POSTs to that endpoint on a plain click; modifier-clicks and any failure on the macOS hop fall through to the existing `/review/original` byte stream so non-Photos files and power-user flows still work.
+- **Local screenshot smoke** (#157): new `tests/local/test_webapp_screenshots.py` boots the unified webapp in a uvicorn thread, drives it with a sandboxed Chromium via Playwright, and writes ~40 PNGs per run covering every page + every menu / pill / sort option / filter value. Excluded from CI by default — run with `pytest tests/local/ --override-ini='addopts=' -s` after `pip install '.[screenshot]' && playwright install chromium`. Set `PYIMGTAG_SCREENSHOT_DB` to walk the UI against your real DB.
+- **`/health` endpoint** (#159): plain JSON `{ok, version, db}` mounted at `/health` on the unified app, used as the readiness signal by the new pre-PR + PR runners.
+- **Standalone webapp launcher** (#159): `python -m pyimgtag.webapp` reads `HOST` / `PORT` / `PYIMGTAG_DB` / `PYIMGTAG_LOG_LEVEL` from the environment, so local and CI launches share one surface.
+- **End-to-end Playwright smoke + CI workflow** (#159): `tests/e2e/test_smoke.py` auto-discovers every `nav.nav a.nav-link` from the home page and clicks through them — failing the run on **any** HTTP 5xx response, uncaught JS exception, browser console error, blank page, or unreplaced `__TOKEN__` template macro. Adding a new top-level page to `nav.py` is automatically covered without touching the smoke. Playwright tracing is started for every test and only kept on failure (full `trace.zip` + `screenshot.png` under `tests/e2e/artifacts/<test-id>/`).
+- **Local pre-PR runner** (#159): `scripts/test-smoke-local.sh` is an idempotent dev runner — installs Playwright + Chromium if missing, starts uvicorn against a tmp DB, waits for `/health` (45 s timeout, dies fast on uvicorn exit), runs unit + smoke suites, and tears the app down on EXIT/INT/TERM.
+- **GitHub Actions `pr-tests` workflow** (#159): runs the same flow on `pull_request` + push to main and uploads `tests/e2e/artifacts/` on failure as `pr-tests-artifacts` (screenshots, traces, app.log). New "Pre-PR smoke" section in the README documents the runner, env knobs, artefact paths, and the required CI check.
+
+### Fixed
+- **Test cleanup** (#158): closed two CodeQL alerts on `tests/test_cli_args_matrix.py` — dropped the unused `_TAGS_SHARED` global (`py/unused-global-variable`) and the dead `del cache_dir, os` line (`py/unnecessary-delete`).
+
+### Security
+- **Stack-trace exposure on `/review/api/open-in-photos`** (#160, [CodeQL alert #147](https://github.com/kurok/pyimgtag/security/code-scanning/147)): the endpoint used to surface the verbose AppleScript stderr (which can include `osascript` line / column references) directly in the JSON response body. The detailed error is now logged server-side and the client receives one of a small set of stable category strings — `image_not_found` / `platform_unsupported` / `photos_timeout` / `photos_unavailable` / `photos_error` — so a script-level trace never reaches the browser.
+- **Empty-except annotation** (#160, [CodeQL alert #148](https://github.com/kurok/pyimgtag/security/code-scanning/148)): added an explanatory comment to the artefact-capture `except` in `tests/e2e/conftest.py` documenting why we silently swallow there (a screenshot failure must not mask the real test failure that pytest already records).
+
 ## [0.11.2] - 2026-05-03
 
 ### Fixed
