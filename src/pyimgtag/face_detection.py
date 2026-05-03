@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from pyimgtag._face_dep_check import _ensure_face_dep
 from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic
 from pyimgtag.models import FaceDetection
 
@@ -16,14 +17,16 @@ _DEFAULT_MAX_DIM = 1280
 
 
 def _check_face_recognition() -> None:
-    """Raise ImportError with a helpful message if face_recognition is missing."""
-    try:
-        import face_recognition  # noqa: F401
-    except ImportError:
-        raise ImportError(
-            "face_recognition is not installed. "
-            "Install the [face] extra: pip install pyimgtag[face]"
-        ) from None
+    """Legacy pre-flight wrapper kept for backward compatibility.
+
+    Existing callers (notably ``pyimgtag.commands.faces``) import this
+    helper to bail early with a friendly error before any face work
+    starts. The real check now lives in :func:`pyimgtag._face_dep_check
+    ._ensure_face_dep` and additionally surfaces a missing
+    ``face_recognition_models`` install, which the old check silently
+    skipped.
+    """
+    _ensure_face_dep()
 
 
 def _load_and_resize(image_path: Path, max_dim: int) -> Image.Image:
@@ -66,11 +69,11 @@ def detect_faces(
         in the coordinate space of the resized image.
 
     Raises:
+        MissingFaceModelsError: If ``face_recognition_models`` is missing.
         ImportError: If face_recognition is not installed.
         FileNotFoundError: If the image file does not exist.
     """
-    _check_face_recognition()
-    import face_recognition
+    face_recognition = _ensure_face_dep()
     import numpy as np
 
     path = Path(image_path)

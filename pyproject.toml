@@ -30,13 +30,34 @@ dependencies = [
 [project.optional-dependencies]
 heic = ["pillow-heif>=0.10.0"]
 photos = ["photoscript>=0.5.3"]
-face = ["face-recognition>=1.3", "scikit-learn>=1.3"]
+# face_recognition_models is a runtime dependency of face-recognition that is
+# NOT published to PyPI — it only exists at the upstream git URL below. It must
+# stay in this extras list (and out of the wheel's runtime install_requires)
+# because PyPI rejects published packages that declare direct-URL dependencies
+# in their core metadata. Direct URLs are tolerated for source / editable
+# installs from extras, which is exactly the install path we want for users
+# opting into face features. Do not "tidy up" the URL into a normal version
+# pin — there is no PyPI release to pin against.
+face = [
+    "face-recognition>=1.3",
+    "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models",
+    # face_recognition_models does ``from pkg_resources import …`` at
+    # import time. ``pkg_resources`` ships with setuptools, which is no
+    # longer bundled by default in Python 3.12+ — pin it here so a fresh
+    # ``pip install '.[face]'`` doesn't trip on a missing pkg_resources.
+    "setuptools>=68.0",
+    "scikit-learn>=1.3",
+]
 review = ["fastapi>=0.100", "uvicorn>=0.20", "pydantic>=2.0", "httpx>=0.24"]
 raw = ["rawpy>=0.18"]
 all = [
     "pillow-heif>=0.10.0",
     "photoscript>=0.5.3",
     "face-recognition>=1.3",
+    # See note above on the [face] extra: this direct URL must stay in extras.
+    "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models",
+    # See note in [face]: needed for face_recognition_models' pkg_resources import.
+    "setuptools>=68.0",
     "scikit-learn>=1.3",
     "fastapi>=0.100",
     "uvicorn>=0.20",
