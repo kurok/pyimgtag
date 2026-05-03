@@ -40,6 +40,19 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     db = ProgressDB(db_path=db_path)
     app = FastAPI(title="pyimgtag", docs_url=None, redoc_url=None, openapi_url=None)
 
+    @app.get("/health")
+    async def health() -> dict:
+        """Liveness probe used by the smoke runner + CI workflow.
+
+        Returns the running version, the path of the SQLite progress DB
+        the app is bound to, and ``ok=True``. The endpoint is plain
+        JSON, never templated, and is the cheapest readiness signal we
+        can give a CI runner waiting for the server to come up.
+        """
+        from pyimgtag import __version__
+
+        return {"ok": True, "version": __version__, "db": str(db._path)}
+
     app.include_router(build_dashboard_router())
     app.include_router(build_review_router(db, api_base="/review"), prefix="/review")
     app.include_router(build_faces_router(db, api_base="/faces"), prefix="/faces")
