@@ -186,7 +186,6 @@ class TestNoUnreplacedPlaceholders:
 
 
 _HREF_RE = re.compile(r'href="([^"]+)"')
-_INTERNAL_PREFIXES = ("/", "review", "tags", "query", "judge", "faces", "api")
 
 
 def _normalise(href: str) -> str:

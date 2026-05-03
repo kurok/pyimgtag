@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-05-03
+
+### Changed
+- **Judge prompt switched to `{score, reason}`** (#148): the model now returns a single integer 1–10 plus a 2–4-sentence reason, rather than 13 per-criterion sub-scores plus a verdict. The internal evaluation axes (Impact / Creativity / Storytelling, Technical Quality, Composition) and the 1-3 / 4-6 / 7-8 / 9 / 10 banding are spelled out in the prompt so scoring is reproducible.
+- The legacy 13-criterion shape is still parsed for back-compat with rows already in the DB and any user still issuing the older prompt manually. New rows fan the integer score across every per-criterion field so weighted/core/visible math is a no-op.
+
+### Added
+- `JudgeScores.reason` carries the model's natural-language justification. It surfaces in `--verbose` CLI output, in `--output-json`, on the `/judge` web page, and in the `/review` badge tooltip — but is **never** written to image tags or EXIF/sidecar metadata. Apple Photos write-back still emits exactly one keyword (`score:N`).
+- DB migration v7 adds a `reason` TEXT column on `judge_scores`. `save_judge_result` writes it; `get_judge_result` / `get_all_judge_results` / the `/review` LEFT JOIN return it (`judge_reason` field on review API items).
+
+### Fixed
+- Removed unused `_INTERNAL_PREFIXES` constant in `tests/test_webapp_smoke.py` (closes [CodeQL alert #144](https://github.com/kurok/pyimgtag/security/code-scanning/144), `py/unused-global-variable`).
+
 ## [0.9.0] - 2026-05-03
 
 ### Added
