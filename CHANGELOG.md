@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-05-03
+
+### Added
+- **Tag-click search across the web UI** (#141): three places now route a tag click to `/query?tag=<name>` with the filter pre-filled and auto-applied — the `/tags` page (each tag name is a link), the review grid (each tag chip's label is a link; the × button still removes the tag), and the Query results table (each chip in the Tags column is a link). The Query page reads `tag`, `has_text`, `cleanup`, `scene_category`, `city`, `country`, `status`, and `limit` from `window.location.search` on load and fires the search if any preset is present.
+
 ## [0.8.1] - 2026-05-03
 
 ### Fixed
