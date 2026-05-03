@@ -34,7 +34,17 @@ def start_dashboard_for(
         from pyimgtag.webapp.server_thread import DashboardServer
         from pyimgtag.webapp.unified_app import create_unified_app
 
-        dashboard = DashboardServer(create_unified_app(), host=args.web_host, port=args.web_port)
+        # Thread args.db all the way through so the in-process dashboard
+        # reads from the exact same SQLite the CLI is writing to. Without
+        # this, ``create_unified_app()`` opens the default
+        # ``~/.cache/pyimgtag/progress.db`` while the worker may be using
+        # a user-supplied path — the user then sees "0 scored" on the
+        # Judge page even though the CLI is happily writing rows.
+        dashboard = DashboardServer(
+            create_unified_app(db_path=getattr(args, "db", None)),
+            host=args.web_host,
+            port=args.web_port,
+        )
     except ImportError as exc:
         print(f"Warning: dashboard disabled ({exc})", file=sys.stderr)
         run_registry.set_current(None)

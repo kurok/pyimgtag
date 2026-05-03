@@ -511,8 +511,14 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.progress_db import ProgressDB
 
     progress_db: ProgressDB | None = None
-    if args.subcommand == "judge" and getattr(args, "db", None) is not None:
-        progress_db = ProgressDB(db_path=args.db)
+    if args.subcommand == "judge":
+        # Always open the progress DB for judge — without this, omitting
+        # ``--db`` silently dropped every score because ``cmd_judge``'s
+        # ``_db`` parameter stayed ``None`` and ``save_judge_result`` was
+        # never called. The dashboard then opened the default
+        # ``~/.cache/pyimgtag/progress.db`` and showed "0 scored" while
+        # the CLI was happily printing scores.
+        progress_db = ProgressDB(db_path=getattr(args, "db", None))
 
     dispatch: dict[str, Any] = {
         "run": lambda: cmd_run(args, parser),
