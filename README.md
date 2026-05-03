@@ -162,26 +162,32 @@ pyimgtag faces import-photos  # reads system default Photos library
 #### Face features: `face_recognition_models` is git-only
 
 `face_recognition` needs a companion package, `face_recognition_models`,
-which only lives on git — it was never published to PyPI. Two paths:
+which only lives on git — it was never published to PyPI. **You always
+need to install it as a separate step**, regardless of whether you got
+pyimgtag from PyPI or source: PyPI rejects packages whose metadata
+declares direct-URL dependencies, so `[face]` / `[all]` extras can't
+list it for you.
 
-- **From source (`pip install -e '.[face]'` or `.[all]`)** — pulls the
-  models package automatically from its git URL. Nothing extra to do.
-- **From PyPI (`pip install 'pyimgtag[face]'` / `'pyimgtag[all]'`)** —
-  PyPI strips direct-URL dependencies, so you must run one extra command
-  in the **same Python environment**:
-
-  ```bash
-  python -m pip install \
-      "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"
-  ```
+```bash
+pip install 'pyimgtag[face]'      # or .[all]; models package NOT included
+python -m pip install \
+    "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"
+```
 
 If `pyimgtag faces scan` exits with a "Please install
-`face_recognition_models`" message and no traceback, you hit this case.
-Verify the install landed in the right venv with:
+`face_recognition_models`" message and no traceback, you skipped that
+second command. Verify the install landed in the right venv with:
 
 ```bash
 python -m pip show face_recognition_models
 ```
+
+If `pip show` says it's installed but pyimgtag still complains, the
+likely culprit is a missing `pkg_resources` (Python 3.12+ no longer
+bundles setuptools by default and `face_recognition_models` imports
+`pkg_resources` at load time). The pyimgtag `[face]` extra pins
+`setuptools>=68.0` to cover this; if you installed without the extra,
+run `python -m pip install setuptools`.
 
 ### Linux Setup
 
