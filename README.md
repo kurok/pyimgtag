@@ -36,7 +36,7 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `preflight`, `query`, `tags`
+- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `preflight`, `query`, `tags`, `faces`, `review`
 - Photo quality scoring with professional 13-criterion rubric (new: `judge` subcommand)
 - Dry-run mode, date/limit filters, JSON/CSV export
 - SQLite progress DB with schema versioning for incremental re-runs
@@ -443,12 +443,69 @@ pyimgtag cleanup --include-review
 # Search by tag
 pyimgtag query --tag sunset
 
-# Search by location
-pyimgtag query --location "San Francisco"
+# Search by city / country
+pyimgtag query --city "San Francisco"
+pyimgtag query --country Italy
 
-# Output as JSON
-pyimgtag query --tag beach --output-json matches.json
+# Filter by scene / cleanup / status
+pyimgtag query --scene-category outdoor_travel --status ok
+pyimgtag query --cleanup delete
+
+# Filter by text-detection state
+pyimgtag query --has-text
+pyimgtag query --no-text
+
+# Output as JSON or just paths (e.g. for shell pipelines)
+pyimgtag query --tag beach --format json
+pyimgtag query --tag beach --format paths --limit 50
 ```
+
+#### `pyimgtag faces` — face detection, clustering, naming *(macOS)*
+
+Six sub-subcommands chain into a typical face workflow:
+
+```bash
+# 1. Detect faces and compute embeddings
+pyimgtag faces scan --photos-library ~/Pictures/Photos\ Library.photoslibrary
+
+# 2. Cluster embeddings into person groups (DBSCAN)
+pyimgtag faces cluster --eps 0.5 --min-samples 2
+
+# 3. Inspect the clusters from the CLI
+pyimgtag faces review
+
+# 4. Import named persons from Apple Photos (uses bulk AppleScript)
+pyimgtag faces import-photos
+
+# 5. Write person keywords to image metadata (EXIF or XMP sidecar)
+pyimgtag faces apply --write-exif
+pyimgtag faces apply --sidecar-only --dry-run
+
+# 6. Manage clusters via the web UI (rename, merge, delete)
+pyimgtag faces ui  # serves the unified webapp on http://127.0.0.1:8766
+```
+
+`scan` accepts `--detection-model {hog,cnn}` (hog = fast CPU, cnn = accurate
+GPU), `--max-dim`, `--extensions`, and `--limit`, plus the same dashboard
+flags as `run` / `judge` (`--web` / `--no-web` / `--web-host` / `--web-port`
+/ `--no-browser`).
+
+The `[face]` extra is required; see the
+[`face_recognition_models` install note](#face-features-face_recognition_models-is-git-only)
+above.
+
+#### `pyimgtag review` — launch the local review UI
+
+```bash
+# Browse the progress DB, edit tags, change cleanup class
+pyimgtag review                      # serves on http://127.0.0.1:8765
+pyimgtag review --port 9000 --no-browser
+```
+
+This serves the **same** unified webapp as `run --web`, just bound to a
+different default port. See [Local webapp](#local-webapp) below for the
+full page list. Requires the `[review]` extra (`pip install
+'pyimgtag[review]'`).
 
 #### `pyimgtag tags` — manage tags
 
@@ -529,10 +586,18 @@ pyimgtag judge --input-dir ~/Pictures/exported \
 | `--output-json FILE` | — | Write ranked results to JSON |
 | `--verbose` | false | Per-criterion breakdown |
 | `--no-recursive` | false | Do not scan subdirectories |
-| `--model NAME` | `gemma4:e4b` | Ollama model |
-| `--ollama-url URL` | `http://localhost:11434` | Ollama API URL |
+| `--backend ollama\|anthropic\|openai\|gemini` | `ollama` | Vision-model backend (same as `pyimgtag run`) |
+| `--model NAME` | backend-specific | Model name; defaults `gemma4:e4b` / `claude-sonnet-4-6` / `gpt-4o-mini` / `gemini-1.5-flash` |
+| `--ollama-url URL` | `http://localhost:11434` | Ollama API URL (used when `--backend=ollama`) |
+| `--api-base URL` | provider default | Override the cloud-API base URL (anthropic / openai / gemini) |
+| `--api-key KEY` | env var | Cloud-API key; defaults to the provider's conventional env var |
 | `--max-dim N` | `1280` | Max image dimension before resize |
 | `--timeout N` | `120` | Request timeout (seconds) |
+| `--db PATH` | `~/.cache/pyimgtag/progress.db` | Progress DB path; judge scores share the same DB as `run` |
+| `--skip-judged` | false | Skip images that already have a row in `judge_scores` |
+| `--write-back` | false | Write the score keyword back to Apple Photos *(macOS + `--photos-library` only)* |
+| `--write-back-mode overwrite\|append` | `overwrite` | Whether write-back replaces or merges keywords |
+| `--web` / `--no-web` / `--web-host` / `--web-port` / `--no-browser` | — | Same dashboard flags as `pyimgtag run` (default port `8770`) |
 
 ### Sample verbose output
 
@@ -624,24 +689,40 @@ src/pyimgtag/
   scanner.py           Directory and Photos library scanning
   exif_reader.py       EXIF GPS + date extraction (exiftool + Pillow)
   ollama_client.py     Ollama vision API client (rich structured response)
+  cloud_clients.py     Anthropic / OpenAI / Gemini vision-API adapters
   geocoder.py          Nominatim reverse geocoder with disk cache
   filters.py           Date/GPS filter logic
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       SQLite progress DB with versioned migrations
   applescript_writer.py  Apple Photos keyword/description write-back
+  _face_dep_check.py   Friendly preflight for face_recognition_models
   dedup.py             Perceptual hash duplicate detection
   heic_converter.py    HEIC to JPEG conversion (macOS sips)
   cache.py             Simple JSON disk cache
-  judge_scorer.py        Weighted rubric score computation (13-criterion)
+  judge_scorer.py      Weighted rubric score computation (13-criterion)
+  preflight.py         Shared preflight helpers
   commands/
     run.py             `pyimgtag run` handler
     judge.py           `pyimgtag judge` handler
     db.py              `pyimgtag status/reprocess/cleanup` handlers
     query.py           `pyimgtag query` handler
     tags.py            `pyimgtag tags` handler
-    faces.py           `pyimgtag faces` handler
+    faces.py           `pyimgtag faces` (scan / cluster / review / apply / import-photos / ui)
     preflight_cmd.py   `pyimgtag preflight` handler
     review_cmd.py      `pyimgtag review` handler
+  webapp/
+    __main__.py        `python -m pyimgtag.webapp` standalone uvicorn launcher
+    unified_app.py     FastAPI app composition + `/health` endpoint
+    nav.py             Shared nav shell + design system
+    routes_review.py   `/review` router (browse / edit / lightbox)
+    routes_faces.py    `/faces` router (cluster management UI)
+    routes_tags.py     `/tags` router
+    routes_query.py    `/query` router
+    routes_judge.py    `/judge` router (rating grid + filter/sort)
+    routes_edit.py     `/edit` router (bulk-delete from Photos)
+    routes_about.py    `/about` router (version / update check / wiki)
+    dashboard_server.py / server_thread.py / bootstrap.py
+                       In-process dashboard for `run` / `judge` / `faces scan`
 ```
 
 ## Development
@@ -728,15 +809,29 @@ or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only faile
 ## Local webapp
 
 `pyimgtag run`, `pyimgtag judge`, and `pyimgtag faces scan` auto-start a
-local webapp at http://127.0.0.1:8770 by default. The same app also hosts:
+local webapp at http://127.0.0.1:8770 by default. The same unified app
+hosts a single top-nav with these pages:
 
+- `/` — Dashboard (live progress, status, quick links).
 - `/review` — browse DB entries, edit tags, change cleanup class.
 - `/faces` — manage person clusters, rename, merge, delete.
+- `/tags` — list, rename, merge, delete tags across the DB.
+- `/query` — full-text/tag/scene/judge filters with hover thumbnails.
+- `/judge` — judge-score grid with rating filter / sort / pager.
+- `/edit` — bulk-delete files marked `cleanup_class='delete'` from
+  Apple Photos (macOS only; gated behind an explicit confirm).
+- `/about` — installed version, latest PyPI release, update check, wiki links.
+- `/health` — plain JSON liveness probe (`{ok, version, db}`); used by
+  the pre-PR + CI smoke runners.
 
 The standalone commands continue to work and serve the **same** unified app:
 
 - `pyimgtag review` on http://127.0.0.1:8765 (review at `/review`).
 - `pyimgtag faces ui` on http://127.0.0.1:8766 (faces at `/faces`).
+- `python -m pyimgtag.webapp` for a bare uvicorn launch — reads `HOST`
+  / `PORT` / `PYIMGTAG_DB` / `PYIMGTAG_LOG_LEVEL` from the environment.
+  This is the same launch surface used by `scripts/test-smoke-local.sh`
+  and the `pr-tests` GitHub Actions workflow.
 
 Flags (apply to `run`, `judge`, `faces scan`):
 
@@ -746,10 +841,6 @@ Flags (apply to `run`, `judge`, `faces scan`):
 - `--web-port PORT` — bind port (default `8770`).
 - `--no-browser` — do not auto-open the browser.
 
-Environment variable:
-
-- `PYIMGTAG_NO_WEB=1` — disable the dashboard by default (same as `--no-web`).
-
 Pause semantics are cooperative: the gate is checked before each file so
 in-flight Ollama / face-detection requests are never interrupted mid-call.
 
@@ -757,6 +848,25 @@ in-flight Ollama / face-detection requests are never interrupted mid-call.
 now serve the unified app, so the URL paths have shifted. Bookmarks that
 used `http://localhost:8765/api/stats` should be updated to
 `http://localhost:8765/review/api/stats`.
+
+## Environment variables
+
+| Variable | Used by | Effect |
+|---|---|---|
+| `PYIMGTAG_BACKEND` | `pyimgtag run` / `pyimgtag judge` | Default vision backend (`ollama` / `anthropic` / `openai` / `gemini`). Overridden by `--backend`. |
+| `OLLAMA_URL` | `pyimgtag run` / `judge` / `preflight` | Default Ollama base URL (default `http://localhost:11434`). Overridden by `--ollama-url`. |
+| `ANTHROPIC_API_KEY` | `--backend anthropic` | Auth for Claude. Overridden by `--api-key`. |
+| `OPENAI_API_KEY` | `--backend openai` | Auth for OpenAI. Overridden by `--api-key`. |
+| `GOOGLE_API_KEY` / `GEMINI_API_KEY` | `--backend gemini` | Auth for Gemini (either name accepted). Overridden by `--api-key`. |
+| `PYIMGTAG_NO_WEB` | All commands that start the dashboard | `1` / `true` / `yes` disables the dashboard by default (same as `--no-web`). |
+| `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
+| `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |
+| `PYIMGTAG_PARSE_ERROR_LOG` | `pyimgtag run` | Path to the Ollama JSON-parse error log (default `pyimgtag-parse-errors.log` in the cwd). |
+| `PYIMGTAG_DB` | `python -m pyimgtag.webapp` | Override the progress-DB path the standalone webapp opens. |
+| `PYIMGTAG_LOG_LEVEL` | `python -m pyimgtag.webapp` | uvicorn log level (default `info`). |
+| `HOST` / `PORT` | `python -m pyimgtag.webapp` | Bind host / port for the standalone launcher (default `127.0.0.1:8000`). |
+| `PYIMGTAG_SCREENSHOT_DB` | `tests/local/test_webapp_screenshots.py` | Walk the screenshot suite against an existing DB instead of a sandboxed one. |
+| `BASE_URL` / `PYIMGTAG_E2E_HEADLESS` | `tests/e2e/` Playwright suite | Override smoke-test target URL / run with a visible browser. |
 
 ## Contributing
 
