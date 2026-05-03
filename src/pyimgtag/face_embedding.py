@@ -6,7 +6,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pyimgtag.face_detection import _check_face_recognition, _load_and_resize, detect_faces
+from pyimgtag._face_dep_check import _ensure_face_dep
+from pyimgtag.face_detection import _load_and_resize, detect_faces
 from pyimgtag.models import FaceDetection
 
 if TYPE_CHECKING:
@@ -37,14 +38,14 @@ def compute_embeddings(
         The list may be shorter than ``faces`` if encoding fails for some.
 
     Raises:
+        MissingFaceModelsError: If ``face_recognition_models`` is missing.
         ImportError: If face_recognition is not installed.
         FileNotFoundError: If the image file does not exist.
     """
     if not faces:
         return []
 
-    _check_face_recognition()
-    import face_recognition
+    face_recognition = _ensure_face_dep()
     import numpy as np
 
     path = Path(image_path)

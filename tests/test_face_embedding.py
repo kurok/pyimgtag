@@ -14,6 +14,17 @@ from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
 
 
+def _patch_face_modules(face_recognition_module):
+    """Install fakes for both face deps so the pre-flight check passes."""
+    return patch.dict(
+        "sys.modules",
+        {
+            "face_recognition_models": MagicMock(),
+            "face_recognition": face_recognition_module,
+        },
+    )
+
+
 def _make_image(tmp_path: Path, size: tuple[int, int] = (640, 480)) -> Path:
     img = Image.new("RGB", size, color="white")
     path = tmp_path / "photo.jpg"
@@ -35,7 +46,7 @@ class TestComputeEmbeddings:
         fake_encoding = np.random.rand(128)
         mock_fr = MagicMock()
         mock_fr.face_encodings.return_value = [fake_encoding]
-        with patch.dict("sys.modules", {"face_recognition": mock_fr}):
+        with _patch_face_modules(mock_fr):
             result = compute_embeddings(path, faces)
         assert len(result) == 1
         np.testing.assert_array_equal(result[0], fake_encoding)
@@ -47,7 +58,7 @@ class TestComputeEmbeddings:
         ]
         mock_fr = MagicMock()
         mock_fr.face_encodings.return_value = [np.zeros(128)]
-        with patch.dict("sys.modules", {"face_recognition": mock_fr}):
+        with _patch_face_modules(mock_fr):
             compute_embeddings(path, faces)
         call_kwargs = mock_fr.face_encodings.call_args[1]
         # (top, right, bottom, left) = (bbox_y, bbox_x+bbox_w, bbox_y+bbox_h, bbox_x)
@@ -61,23 +72,42 @@ class TestComputeEmbeddings:
         ]
         mock_fr = MagicMock()
         mock_fr.face_encodings.return_value = [np.ones(128), np.ones(128) * 2]
-        with patch.dict("sys.modules", {"face_recognition": mock_fr}):
+        with _patch_face_modules(mock_fr):
             result = compute_embeddings(path, faces)
         assert len(result) == 2
 
     def test_file_not_found(self, tmp_path):
         faces = [FaceDetection(image_path="/missing.jpg")]
         mock_fr = MagicMock()
-        with patch.dict("sys.modules", {"face_recognition": mock_fr}):
+        with _patch_face_modules(mock_fr):
             with pytest.raises(FileNotFoundError):
                 compute_embeddings(tmp_path / "missing.jpg", faces)
 
     def test_import_error_without_face_recognition(self, tmp_path):
         path = _make_image(tmp_path)
         faces = [FaceDetection(image_path=str(path))]
-        with patch.dict("sys.modules", {"face_recognition": None}):
+        with patch.dict(
+            "sys.modules",
+            {"face_recognition_models": MagicMock(), "face_recognition": None},
+        ):
             with pytest.raises(ImportError, match="face_recognition is not installed"):
                 compute_embeddings(path, faces)
+
+    def test_raises_missing_models_error(self, tmp_path):
+        """Pre-flight surfaces a clear error when face_recognition_models is gone."""
+        from pyimgtag._face_dep_check import MissingFaceModelsError
+
+        path = _make_image(tmp_path)
+        faces = [FaceDetection(image_path=str(path))]
+        with patch.dict(
+            "sys.modules",
+            {"face_recognition_models": None, "face_recognition": MagicMock()},
+        ):
+            with pytest.raises(MissingFaceModelsError) as excinfo:
+                compute_embeddings(path, faces)
+            msg = str(excinfo.value)
+            assert "face_recognition_models" in msg
+            assert "git+https://github.com/ageitgey/face_recognition_models" in msg
 
 
 class TestScanAndStore:

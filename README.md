@@ -159,6 +159,30 @@ pyimgtag faces import-photos  # reads system default Photos library
 
 **Note:** Apple Photos library access requires Full Disk Access permission for your terminal app — grant it in System Settings > Privacy & Security > Full Disk Access.
 
+#### Face features: `face_recognition_models` is git-only
+
+`face_recognition` needs a companion package, `face_recognition_models`,
+which only lives on git — it was never published to PyPI. Two paths:
+
+- **From source (`pip install -e '.[face]'` or `.[all]`)** — pulls the
+  models package automatically from its git URL. Nothing extra to do.
+- **From PyPI (`pip install 'pyimgtag[face]'` / `'pyimgtag[all]'`)** —
+  PyPI strips direct-URL dependencies, so you must run one extra command
+  in the **same Python environment**:
+
+  ```bash
+  python -m pip install \
+      "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"
+  ```
+
+If `pyimgtag faces scan` exits with a "Please install
+`face_recognition_models`" message and no traceback, you hit this case.
+Verify the install landed in the right venv with:
+
+```bash
+python -m pip show face_recognition_models
+```
+
 ### Linux Setup
 
 ```bash
