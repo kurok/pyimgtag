@@ -873,3 +873,60 @@ class TestEditPage:
             assert r.json()["error"] == "job_already_running"
         finally:
             routes_edit._reset_job_for_tests()
+
+
+class TestEditCategoriseApplescriptError:
+    """Direct unit-tests of ``_categorise_applescript_error`` so each
+    failure mode of the new UI-scripting delete path is pinned to a
+    stable category. The browser must never see the raw osascript
+    stderr — only one of the labels asserted below."""
+
+    def test_macos_marker_routes_to_platform_unsupported(self) -> None:
+        from pyimgtag.webapp.routes_edit import _categorise_applescript_error
+
+        assert (
+            _categorise_applescript_error("Apple Photos delete is only available on macOS")
+            == "platform_unsupported"
+        )
+
+    def test_timeout_marker_routes_to_photos_timeout(self) -> None:
+        from pyimgtag.webapp.routes_edit import _categorise_applescript_error
+
+        assert (
+            _categorise_applescript_error("osascript timed out while deleting photo")
+            == "photos_timeout"
+        )
+
+    def test_accessibility_denied_signals_route_to_dedicated_category(self) -> None:
+        """System Events surfaces accessibility-denied as ``(-1719)`` /
+        ``(-25204)`` in the osascript stderr; those must not collapse
+        into the generic ``photos_unavailable`` because the user-visible
+        next step is different (grant Accessibility, not "is Photos.app
+        installed?")."""
+        from pyimgtag.webapp.routes_edit import _categorise_applescript_error
+
+        e1 = (
+            "AppleScript error (exit 1): System Events got an error: "
+            "osascript is not allowed assistive access. (-1719)"
+        )
+        e2 = (
+            "AppleScript error (exit 1): System Events got an error: "
+            'Can\'t get process "Photos". (-25204)'
+        )
+        e3 = "AppleScript error: assistive access not allowed"
+        assert _categorise_applescript_error(e1) == "accessibility_denied"
+        assert _categorise_applescript_error(e2) == "accessibility_denied"
+        assert _categorise_applescript_error(e3) == "accessibility_denied"
+
+    def test_generic_applescript_error_routes_to_photos_unavailable(self) -> None:
+        from pyimgtag.webapp.routes_edit import _categorise_applescript_error
+
+        assert (
+            _categorise_applescript_error("AppleScript error (exit 1): osascript reported a glitch")
+            == "photos_unavailable"
+        )
+
+    def test_unknown_text_routes_to_photos_error(self) -> None:
+        from pyimgtag.webapp.routes_edit import _categorise_applescript_error
+
+        assert _categorise_applescript_error("something deeply weird") == "photos_error"
