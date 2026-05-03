@@ -148,9 +148,13 @@ async function search() {
       tdTags.appendChild(em);
     } else {
       for (const t of (row.tags_list || [])) {
-        const chip = document.createElement('span');
+        const chip = document.createElement('a');
         chip.className = 'tag-chip';
         chip.style.marginRight = '3px';
+        chip.style.textDecoration = 'none';
+        chip.style.cursor = 'pointer';
+        chip.href = '/query?tag=' + encodeURIComponent(t);
+        chip.title = 'Search images with this tag';
         chip.textContent = t;
         tdTags.appendChild(chip);
       }
@@ -177,6 +181,35 @@ async function search() {
   }
   wrap.appendChild(tbl);
 }
+
+// On page load, pre-fill any filter from the URL (e.g. /query?tag=sunset
+// from the Tags page click-through) and auto-run the search so the user
+// lands on the results without an extra click.
+(function applyUrlFilters() {
+  const params = new URLSearchParams(window.location.search);
+  const presets = [
+    ['tag', 'f_tag'],
+    ['has_text', 'f_text'],
+    ['cleanup', 'f_cleanup'],
+    ['scene_category', 'f_cat'],
+    ['city', 'f_city'],
+    ['country', 'f_country'],
+    ['status', 'f_status'],
+    ['limit', 'f_limit'],
+  ];
+  let any = false;
+  for (const [key, id] of presets) {
+    const v = params.get(key);
+    if (v != null && v !== '') {
+      const el = document.getElementById(id);
+      if (el != null) {
+        el.value = v;
+        any = true;
+      }
+    }
+  }
+  if (any) search();
+})();
 </script>
 </body>
 </html>"""

@@ -58,6 +58,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .tag-rm{background:none;border:none;cursor:pointer;color:var(--muted);
             font-size:10px;padding:0 2px;line-height:1}
     .tag-rm:hover{color:var(--danger)}
+    .tag-chip-label{color:inherit;text-decoration:none;cursor:pointer}
+    .tag-chip-label:hover{color:var(--accent);text-decoration:underline}
     .pagination{display:flex;align-items:center;gap:12px;padding:16px 32px;
                 justify-content:center}
     .pagination button{padding:6px 16px;border-radius:var(--radius-sm);font-size:13px;
@@ -307,11 +309,20 @@ function renderTags(container, img) {
   for (const t of (img.tags || [])) {
     const chip = document.createElement('span');
     chip.className = 'tag-chip';
-    chip.textContent = t;
+    // Clicking the label opens a Query search filtered to this tag.
+    const label = document.createElement('a');
+    label.className = 'tag-chip-label';
+    label.href = '/query?tag=' + encodeURIComponent(t);
+    label.title = 'Search images with this tag';
+    label.textContent = t;
+    chip.appendChild(label);
     const rm = document.createElement('button');
     rm.className = 'tag-rm';
     rm.textContent = '\u00d7';
-    rm.addEventListener('click', () => removeTag(img, t, container));
+    rm.addEventListener('click', e => {
+      e.preventDefault();
+      removeTag(img, t, container);
+    });
     chip.appendChild(rm);
     container.appendChild(chip);
   }

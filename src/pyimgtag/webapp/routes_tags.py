@@ -26,7 +26,10 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
          background:var(--surface);border-radius:var(--radius-sm);
          box-shadow:var(--shadow-sm);transition:box-shadow .15s}
     .row:hover{box-shadow:var(--shadow-md)}
-    .tag-name{flex:1;font-size:13px;font-weight:500;color:var(--text)}
+    .tag-name{flex:1;font-size:13px;font-weight:500}
+    .tag-name a{color:var(--text);text-decoration:none;
+                 border-bottom:1px dotted transparent;cursor:pointer}
+    .tag-name a:hover{color:var(--accent);border-bottom-color:var(--accent)}
     .cnt{font-size:12px;color:var(--muted);min-width:56px;text-align:right}
     .row-btn{padding:5px 10px;font-size:12px;font-weight:500;border-radius:6px;
              border:1px solid var(--border);background:transparent;color:var(--muted);
@@ -68,7 +71,14 @@ function render(tags) {
 
     const nameEl = document.createElement('span');
     nameEl.className = 'tag-name';
-    nameEl.textContent = t.tag;
+    // Click the tag name to open the Query page filtered to images with
+    // this tag. textContent on the anchor keeps unescaped tag values
+    // safe (no innerHTML interpolation).
+    const nameLink = document.createElement('a');
+    nameLink.href = '/query?tag=' + encodeURIComponent(t.tag);
+    nameLink.title = 'Search images with this tag';
+    nameLink.textContent = t.tag;
+    nameEl.appendChild(nameLink);
     const cntEl = document.createElement('span');
     cntEl.className = 'cnt';
     cntEl.textContent = t.count + '\u00a0img';
