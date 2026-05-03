@@ -448,3 +448,76 @@ def reveal_in_photos(file_path: str) -> str | None:
             else f"AppleScript failed with exit code {proc.returncode}"
         )
     return None
+
+
+def _build_delete_applescript(file_name: str) -> str:
+    """Build AppleScript that deletes the matching media item from Photos.
+
+    Photos.app moves the item to *Recently Deleted* automatically. The
+    script never empties that bin — the 30-day undo window is the whole
+    safety story for this destructive action.
+    """
+    stem = PurePosixPath(file_name).stem
+    safe_file_name = _escape_applescript_string(file_name)
+
+    if _looks_like_uuid(stem):
+        uuid = _escape_applescript_string(stem)
+        lookup = (
+            "    try\n"
+            f'        set theItem to media item id "{uuid}"\n'
+            "    on error\n"
+            + _filename_scan_block(safe_file_name, indent="        ")
+            + "    end try\n"
+        )
+    else:
+        lookup = _filename_scan_block(safe_file_name)
+
+    return 'tell application "Photos"\n' + lookup + "    delete theItem\n" + "end tell"
+
+
+def delete_from_photos(file_path: str) -> str | None:
+    """Delete a media item from Apple Photos (moves to Recently Deleted).
+
+    **macOS only.** Photos.app automatically routes the deletion to its
+    *Recently Deleted* album, where it stays recoverable for 30 days —
+    this helper deliberately does **not** empty that bin. Photo lookup
+    mirrors :func:`reveal_in_photos` and :func:`write_to_photos`: UUID
+    stems try ``media item id`` first and fall back to a filename scan,
+    non-UUID stems go straight to the filename scan.
+
+    Args:
+        file_path: Full path to the image (only the basename is used for lookup).
+
+    Returns:
+        ``None`` on success, or an error message string on failure
+        (non-macOS host, ``osascript`` unavailable, photo not found, or
+        any AppleScript error).
+    """
+    if not _IS_MACOS:
+        return "Apple Photos delete is only available on macOS"
+    if not is_applescript_available():
+        return "osascript is not available on this system"
+
+    file_name = PurePosixPath(file_path).name
+    script = _build_delete_applescript(file_name)
+
+    try:
+        proc = subprocess.run(  # noqa: S603
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return "osascript timed out while deleting photo"
+    except OSError as exc:
+        return f"Failed to launch osascript: {exc}"
+
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        return (
+            f"AppleScript error (exit {proc.returncode}): {stderr}"
+            if stderr
+            else f"AppleScript failed with exit code {proc.returncode}"
+        )
+    return None
