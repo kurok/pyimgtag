@@ -2,9 +2,16 @@
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.x.x   | Yes       |
+Security fixes are issued for the most recent minor release. Older minor
+releases stop receiving security updates as soon as a newer minor lands.
+
+| Version  | Supported |
+|----------|-----------|
+| 0.8.x    | ✅ — current release line, all fixes land here |
+| 0.7.x    | ❌ — superseded by 0.8.0 |
+| ≤ 0.6.x  | ❌ — superseded |
+
+The current latest release is **0.8.3** ([release notes](https://github.com/kurok/pyimgtag/releases/tag/v0.8.3)).
 
 ## Reporting a Vulnerability
 
