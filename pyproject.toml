@@ -47,6 +47,10 @@ all = [
 dev = ["pytest>=9.0", "pytest-xdist>=3.0", "pytest-cov>=4.0"]
 lint = ["mypy>=1.0", "ruff>=0.1.0"]
 security = ["bandit>=1.7", "pip-audit>=2.6"]
+# Optional: install Playwright + Pillow for the local screenshot smoke
+# under tests/local/. After `pip install '.[screenshot]'` run
+# `playwright install chromium` once to fetch the browser binary.
+screenshot = ["playwright>=1.40", "Pillow>=10.0"]
 
 [project.scripts]
 pyimgtag = "pyimgtag.main:main"
@@ -56,7 +60,11 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-n auto --dist=worksteal"
+# `tests/local/` holds the Playwright screenshot smoke; it boots a real
+# uvicorn server, opens a sandboxed Chromium, and writes PNGs. Excluded
+# from the default run (and from CI) — invoke it explicitly with
+# `pytest tests/local/ --override-ini='addopts='`.
+addopts = "-n auto --dist=worksteal --ignore=tests/local"
 
 [tool.coverage.run]
 branch = false
