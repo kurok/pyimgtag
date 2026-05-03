@@ -30,6 +30,7 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
 
     from pyimgtag.progress_db import ProgressDB
     from pyimgtag.webapp.dashboard_server import build_dashboard_router
+    from pyimgtag.webapp.routes_about import build_about_router
     from pyimgtag.webapp.routes_faces import build_faces_router
     from pyimgtag.webapp.routes_judge import build_judge_router
     from pyimgtag.webapp.routes_query import build_query_router
@@ -45,5 +46,6 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     app.include_router(build_tags_router(db, api_base="/tags"), prefix="/tags")
     app.include_router(build_query_router(db, api_base="/query"), prefix="/query")
     app.include_router(build_judge_router(db, api_base="/judge"), prefix="/judge")
+    app.include_router(build_about_router(), prefix="/about")
 
     return app

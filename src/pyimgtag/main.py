@@ -464,6 +464,32 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _check_for_update() -> None:
+    """Print a one-line banner if a newer pyimgtag is on PyPI.
+
+    Best-effort and short-circuited by the ``PYIMGTAG_NO_UPDATE_CHECK``
+    env var so CI / scripted invocations don't pay an HTTP round-trip.
+    Failure modes (no network, PyPI down, malformed response) silently
+    drop the banner — the check must never block a real run.
+    """
+    if os.environ.get("PYIMGTAG_NO_UPDATE_CHECK"):
+        return
+    try:
+        from pyimgtag.webapp.routes_about import _is_newer, _latest_version
+    except ImportError:
+        return  # webapp extras not installed → silent no-op
+    try:
+        latest = _latest_version()
+    except Exception:  # noqa: BLE001 — never let the check block a run
+        return
+    if latest and _is_newer(latest, __version__):
+        print(
+            f"pyimgtag {latest} is available (you're on {__version__}). "
+            "Run: pip install --upgrade pyimgtag",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -471,6 +497,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand is None:
         parser.print_help()
         return 1
+
+    _check_for_update()
 
     from pyimgtag.commands.db import cmd_cleanup, cmd_reprocess, cmd_status
     from pyimgtag.commands.faces import cmd_faces

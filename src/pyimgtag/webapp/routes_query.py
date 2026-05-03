@@ -39,6 +39,22 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .status-error{color:var(--danger);font-size:11px;font-weight:600}
     .err-msg{font-size:11px;color:var(--danger);margin-top:3px;
              font-family:ui-monospace,'SF Mono',monospace;word-break:break-word}
+    .judge-cell{font-weight:700;font-size:12px;color:var(--text);
+                white-space:nowrap}
+    .judge-high{color:#16a34a}
+    .judge-mid{color:#d97706}
+    .judge-low{color:var(--danger)}
+    .judge-none{color:var(--muted);font-weight:400}
+    /* Hover thumbnail floats next to the cursor without re-laying out the row. */
+    #hover-thumb{position:fixed;display:none;z-index:1000;pointer-events:none;
+                 background:#fff;border:1px solid var(--border);
+                 box-shadow:0 4px 18px rgba(0,0,0,.18);border-radius:6px;
+                 padding:3px}
+    #hover-thumb img{display:block;max-width:280px;max-height:280px;
+                     object-fit:contain;border-radius:4px}
+    #hover-thumb.placeholder{padding:8px 12px;font-size:11px;color:var(--muted);
+                              font-family:ui-monospace,'SF Mono',monospace}
+    .tbl tr.row{cursor:default}
   </style>
 </head>
 <body>
@@ -75,11 +91,31 @@ __NAV__
         <option value="ok">ok</option>
         <option value="error">error</option>
       </select></div>
+    <div class="field"><label>Judge ≥</label>
+      <input id="f_min_judge" type="number" min="1" max="10" placeholder="1-10"></div>
+    <div class="field"><label>Judge ≤</label>
+      <input id="f_max_judge" type="number" min="1" max="10" placeholder="1-10"></div>
+    <div class="field"><label>Judged</label>
+      <select id="f_judged">
+        <option value="">any</option>
+        <option value="true">scored</option>
+        <option value="false">not scored</option>
+      </select></div>
+    <div class="field"><label>Sort</label>
+      <select id="f_sort">
+        <option value="path_asc">Path (A→Z)</option>
+        <option value="path_desc">Path (Z→A)</option>
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="judge_desc">Judge score (high→low)</option>
+        <option value="judge_asc">Judge score (low→high)</option>
+      </select></div>
     <div class="field"><label>Limit</label>
       <input id="f_limit" type="number" value="100" min="1" max="5000"></div>
     <button class="btn btn-primary" onclick="search()">Search</button>
   </div>
 </div>
+<div id="hover-thumb"></div>
 <div id="count"></div>
 <div id="results"></div>
 <script>
@@ -96,6 +132,10 @@ async function search() {
   add('f_city', 'city');
   add('f_country', 'country');
   add('f_status', 'status');
+  add('f_min_judge', 'min_judge_score');
+  add('f_max_judge', 'max_judge_score');
+  add('f_judged', 'judged');
+  add('f_sort', 'sort');
   add('f_limit', 'limit');
 
   const r = await fetch('__API_BASE__/api/images?' + params.toString());
@@ -108,7 +148,7 @@ async function search() {
   const tbl = document.createElement('table');
   tbl.className = 'tbl';
   const hdr = document.createElement('tr');
-  for (const h of ['File','Status','Tags','Category','Cleanup','Location']) {
+  for (const h of ['File','Status','Judge','Tags','Category','Cleanup','Location']) {
     const th = document.createElement('th');
     th.textContent = h;
     hdr.appendChild(th);
@@ -117,6 +157,11 @@ async function search() {
 
   for (const row of rows) {
     const tr = document.createElement('tr');
+    tr.className = 'row';
+    // Hover the row → show a 280px thumbnail next to the cursor.
+    tr.addEventListener('mouseenter', () => showHoverThumb(row));
+    tr.addEventListener('mousemove', moveHoverThumb);
+    tr.addEventListener('mouseleave', hideHoverThumb);
     const tdFile = document.createElement('td');
     tdFile.className = 'fname';
     tdFile.title = row.file_path;
@@ -139,6 +184,20 @@ async function search() {
       statusEl.textContent = row.status || 'ok';
     }
     tdStatus.appendChild(statusEl);
+
+    const tdJudge = document.createElement('td');
+    const judgeEl = document.createElement('span');
+    judgeEl.className = 'judge-cell';
+    if (typeof row.judge_score === 'number') {
+      judgeEl.classList.add(judgeColour(row.judge_score));
+      judgeEl.textContent = row.judge_score + '/10';
+      const tip = row.judge_reason || row.judge_verdict;
+      if (tip) judgeEl.title = tip;
+    } else {
+      judgeEl.classList.add('judge-none');
+      judgeEl.textContent = '—';
+    }
+    tdJudge.appendChild(judgeEl);
 
     const tdTags = document.createElement('td');
     if (row.status === 'error' && row.error_message) {
@@ -176,10 +235,57 @@ async function search() {
     const tdLoc = document.createElement('td');
     tdLoc.textContent = [row.nearest_city, row.nearest_country].filter(Boolean).join(', ');
 
-    for (const td of [tdFile, tdStatus, tdTags, tdCat, tdClean, tdLoc]) tr.appendChild(td);
+    for (const td of [tdFile, tdStatus, tdJudge, tdTags, tdCat, tdClean, tdLoc]) tr.appendChild(td);
     tbl.appendChild(tr);
   }
   wrap.appendChild(tbl);
+}
+
+function judgeColour(score) {
+  if (score >= 8) return 'judge-high';
+  if (score >= 6) return 'judge-mid';
+  return 'judge-low';
+}
+
+// --- Hover thumbnail ---------------------------------------------------------
+const _hoverThumb = document.getElementById('hover-thumb');
+
+function showHoverThumb(row) {
+  if (!row || !row.file_path) return;
+  // Reuse the review thumbnail endpoint — it lives at the unified app's
+  // /review prefix. The unified webapp serves /review and /query from
+  // the same FastAPI app so a relative URL with that absolute prefix
+  // resolves cleanly regardless of how the user opened the page.
+  _hoverThumb.innerHTML = '';
+  _hoverThumb.classList.remove('placeholder');
+  const img = document.createElement('img');
+  img.src = '/review/thumbnail?path=' + encodeURIComponent(row.file_path) + '&size=400';
+  img.alt = row.file_name || '';
+  img.addEventListener('error', () => {
+    _hoverThumb.innerHTML = '';
+    _hoverThumb.classList.add('placeholder');
+    _hoverThumb.textContent = row.file_name || 'thumbnail unavailable';
+  });
+  _hoverThumb.appendChild(img);
+  _hoverThumb.style.display = 'block';
+}
+
+function moveHoverThumb(e) {
+  // Place the preview to the right of the cursor; if it would overflow
+  // the viewport, switch to the left side.
+  const padding = 16;
+  let x = e.clientX + padding;
+  const y = Math.min(window.innerHeight - 320, Math.max(0, e.clientY - 140));
+  if (x + 320 > window.innerWidth) {
+    x = e.clientX - 320 - padding;
+  }
+  _hoverThumb.style.left = x + 'px';
+  _hoverThumb.style.top = y + 'px';
+}
+
+function hideHoverThumb() {
+  _hoverThumb.style.display = 'none';
+  _hoverThumb.innerHTML = '';
 }
 
 // On page load, pre-fill any filter from the URL (e.g. /query?tag=sunset
@@ -195,6 +301,10 @@ async function search() {
     ['city', 'f_city'],
     ['country', 'f_country'],
     ['status', 'f_status'],
+    ['min_judge_score', 'f_min_judge'],
+    ['max_judge_score', 'f_max_judge'],
+    ['judged', 'f_judged'],
+    ['sort', 'f_sort'],
     ['limit', 'f_limit'],
   ];
   let any = false;
@@ -263,12 +373,21 @@ def build_query_router(db: "ProgressDB", api_base: str = "") -> Any:
         country: str | None = None,
         status: str | None = None,
         limit: int | None = 100,
+        min_judge_score: int | None = None,
+        max_judge_score: int | None = None,
+        judged: str | None = None,
+        sort: str = "path_asc",
     ) -> list[dict]:
         has_text_bool: bool | None = None
         if has_text == "true":
             has_text_bool = True
         elif has_text == "false":
             has_text_bool = False
+        judged_bool: bool | None = None
+        if judged == "true":
+            judged_bool = True
+        elif judged == "false":
+            judged_bool = False
         return db.query_images(
             tag=tag or None,
             has_text=has_text_bool,
@@ -278,6 +397,10 @@ def build_query_router(db: "ProgressDB", api_base: str = "") -> Any:
             country=country or None,
             status=status or None,
             limit=limit,
+            min_judge_score=min_judge_score,
+            max_judge_score=max_judge_score,
+            judged=judged_bool,
+            sort=sort,
         )
 
     return router

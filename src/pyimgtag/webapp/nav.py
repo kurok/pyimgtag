@@ -26,6 +26,13 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .nav-link.active{color:var(--text);font-weight:500;border-bottom-color:var(--accent)}
 .nav-spacer{flex:1}
 .nav-status{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.nav-version{font-family:ui-monospace,'SF Mono',monospace;font-size:11px;
+             color:var(--muted);padding:0 14px;text-decoration:none;
+             border-left:1px solid var(--border);height:52px;display:flex;
+             align-items:center;letter-spacing:.3px}
+.nav-version:hover{color:var(--accent)}
+.nav-version.update-available{color:var(--accent);font-weight:600}
+.nav-version.update-available::after{content:'\\2191';margin-left:6px;font-weight:700}
 .page-hdr{display:flex;align-items:baseline;gap:12px;padding:28px 32px 0}
 .page-title{font-size:28px;font-weight:700;letter-spacing:-.5px;color:var(--text)}
 .page-meta{font-size:13px;color:var(--muted)}
@@ -142,14 +149,23 @@ function closeModal() {
 def render_nav(active: str, status_html: str = "") -> str:
     """Return nav HTML with ``active`` section highlighted.
 
-    ``active``: one of dashboard, review, faces, tags, query, judge.
+    ``active``: one of dashboard, review, faces, tags, query, judge, about.
     ``status_html``: injected into the right-side status slot (Dashboard only).
+
+    The version label is rendered on every page so the user can see at a
+    glance which build is running, and clicking it links to the About
+    page (which exposes the wiki + update check).
     """
+    from pyimgtag import __version__ as _ver
 
     def cls(name: str) -> str:
         return "nav-link active" if name == active else "nav-link"
 
     status = f'<span class="nav-status">{status_html}</span>' if status_html else ""
+    version_link = (
+        f'<a class="nav-version" href="/about" title="About / wiki / version" '
+        f'data-version="{_ver}">v{_ver}</a>'
+    )
     return (
         '<nav class="nav">'
         '<span class="nav-logo">pyimgtag</span>'
@@ -159,7 +175,9 @@ def render_nav(active: str, status_html: str = "") -> str:
         f'<a class="{cls("tags")}" href="/tags">Tags</a>'
         f'<a class="{cls("query")}" href="/query">Query</a>'
         f'<a class="{cls("judge")}" href="/judge">Judge</a>'
+        f'<a class="{cls("about")}" href="/about">About</a>'
         '<span class="nav-spacer"></span>'
         f"{status}"
+        f"{version_link}"
         "</nav>"
     )
