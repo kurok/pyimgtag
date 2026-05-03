@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-05-03
+
+### Tests
+- **Per-subcommand CLI argument matrix** (#153): new `tests/test_cli_args_matrix.py` adds 181 fast contract tests covering every flag on every subcommand. For each flag we pin the argparse default, the destination attribute name, and a representative round-trip value, plus a top-level dispatch table that verifies `main()` routes the parsed args to the declared handler. Catches silent default changes, flag renames, and dispatch regressions at PR time without running any side effects (no DB, no Ollama, no network).
+
 ## [0.11.0] - 2026-05-03
 
 ### Added
