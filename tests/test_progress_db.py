@@ -218,7 +218,7 @@ class TestSchemaVersioning:
     def test_fresh_db_is_at_version_3(self, tmp_path):
         """A brand-new database must be fully migrated to the latest version."""
         with ProgressDB(db_path=tmp_path / "v3.db") as db:
-            assert self._user_version(db._conn) == 8
+            assert self._user_version(db._conn) == 9
 
     def test_fresh_db_has_all_new_columns(self, tmp_path):
         """All version-2 columns must be present in a fresh database."""
@@ -269,7 +269,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 8
+            assert self._user_version(db._conn) == 9
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db._conn))
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
@@ -294,12 +294,12 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 8
+            assert self._user_version(db._conn) == 9
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
 
     def test_user_version_is_set_correctly_after_migration(self, tmp_path):
-        """PRAGMA user_version must equal 6 after migration from version 1."""
+        """PRAGMA user_version must equal 9 after full migration from version 1."""
         db_path = tmp_path / "check_version.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute(
@@ -325,7 +325,7 @@ class TestSchemaVersioning:
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute("PRAGMA user_version").fetchone()[0] == 8
+            assert raw.execute("PRAGMA user_version").fetchone()[0] == 9
         finally:
             raw.close()
 
@@ -336,10 +336,23 @@ class TestSchemaVersioning:
             pass
 
         with ProgressDB(db_path=db_path) as db2:
-            assert self._user_version(db2._conn) == 8
+            assert self._user_version(db2._conn) == 9
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db2._conn))
             assert self._table_exists(db2._conn, "faces")
             assert self._table_exists(db2._conn, "persons")
+
+    def test_v9_indexes_created(self, tmp_path):
+        """Migration v9 must create indexes on status, cleanup_class, processed_at."""
+        with ProgressDB(db_path=tmp_path / "v9.db") as db:
+            indexes = {
+                row[1]
+                for row in db._conn.execute(
+                    "SELECT * FROM sqlite_master WHERE type='index' AND tbl_name='processed_images'"
+                ).fetchall()
+            }
+        assert "idx_pi_status" in indexes
+        assert "idx_pi_cleanup" in indexes
+        assert "idx_pi_date" in indexes
 
 
 class TestGetCleanupCandidates:
@@ -715,7 +728,7 @@ class TestMigrationV4:
     def test_fresh_db_is_at_version_4(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 8
+            assert ver == 9
 
     def test_fresh_db_has_location_columns(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
@@ -786,7 +799,7 @@ class TestMigrationV4:
 
         with ProgressDB(db_path=db_path) as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 8
+            assert ver == 9
             cols = {
                 row[1] for row in db._conn.execute("PRAGMA table_info(processed_images)").fetchall()
             }

@@ -92,6 +92,10 @@ class ProgressDB:
         # 0.12.0: persist the photo's EXIF capture timestamp so the Query
         # page can show "when the photo was taken" without re-reading EXIF.
         (8, "ALTER TABLE processed_images ADD COLUMN image_date TEXT"),
+        # 0.13.6: indexes on filter/sort columns to speed up paginated queries.
+        (9, "CREATE INDEX IF NOT EXISTS idx_pi_status ON processed_images(status)"),
+        (9, "CREATE INDEX IF NOT EXISTS idx_pi_cleanup ON processed_images(cleanup_class)"),
+        (9, "CREATE INDEX IF NOT EXISTS idx_pi_date ON processed_images(processed_at)"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -213,14 +217,10 @@ class ProgressDB:
 
     def get_stats(self) -> dict:
         """Return counts of processed images by status."""
-        total = self._conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0]
-        ok = self._conn.execute(
-            "SELECT COUNT(*) FROM processed_images WHERE status = 'ok'"
-        ).fetchone()[0]
-        error = self._conn.execute(
-            "SELECT COUNT(*) FROM processed_images WHERE status = 'error'"
-        ).fetchone()[0]
-        return {"total": total, "ok": ok, "error": error}
+        row = self._conn.execute(
+            "SELECT COUNT(*), SUM(status='ok'), SUM(status='error') FROM processed_images"
+        ).fetchone()
+        return {"total": row[0] or 0, "ok": int(row[1] or 0), "error": int(row[2] or 0)}
 
     def reset_all(self) -> int:
         """Delete all rows from the processed_images table. Returns count deleted."""
