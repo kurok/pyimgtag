@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.6] - 2026-05-04
+
+### Performance
+- **Web dashboard no longer blocks on thumbnail/original requests** (#184): `get_thumbnail` and `get_original` route handlers now run PIL decode, sips fallback, and raw file I/O inside `asyncio.to_thread()` so the FastAPI event loop is never stalled by a slow image. `_serve_original()` extracted as a reusable sync helper.
+- **`get_stats()` reduced from 3 SQL round-trips to 1** (#184): `SELECT COUNT(*), SUM(status='ok'), SUM(status='error') FROM processed_images` replaces three separate `SELECT COUNT(*)` queries.
+- **DB migration v9: indexes on `status`, `cleanup_class`, `processed_at`** (#184): paginated queries on the Edit/Review pages that filter by status or cleanup class now hit an index instead of a full table scan.
+
 ## [0.13.5] - 2026-05-03
 
 ### Added

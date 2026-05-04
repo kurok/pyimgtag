@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyimgtag"
-version = "0.13.5"
+version = "0.13.6"
 description = "Tag macOS Photos library images using local Gemma model for searchable tags"
 readme = "README.md"
 license = {text = "MIT"}
