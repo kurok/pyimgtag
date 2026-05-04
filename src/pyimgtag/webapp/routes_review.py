@@ -501,6 +501,29 @@ def _make_thumbnail(image_path: str, size: int) -> bytes | None:
     return data
 
 
+def _serve_original(safe_path: str) -> tuple[bytes, str] | None:
+    """Return (bytes, media_type) for the original file, or None on failure.
+
+    Runs synchronously — always call via asyncio.to_thread from async handlers.
+    """
+    from pathlib import Path as _P
+
+    try:
+        p = _P(safe_path)
+        if not p.is_file():
+            return None
+        suffix = p.suffix.lower()
+        if suffix in _MIME_BY_SUFFIX:
+            return p.read_bytes(), _MIME_BY_SUFFIX[suffix]
+    except OSError:
+        return None
+    # HEIC / RAW — decode to a high-quality JPEG the browser can render.
+    data = _make_thumbnail(safe_path, 4000)
+    if data is None:
+        return None
+    return data, "image/jpeg"
+
+
 def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
     """Build and return a FastAPI APIRouter with all review UI routes.
 
@@ -560,13 +583,17 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         path: str = Query(..., description="Absolute path to the image file"),
         size: int = Query(default=200, ge=50, le=4000),
     ) -> Response:
+        import asyncio
+
         # Use the request value purely as a DB lookup key; the actual
         # filesystem read uses the path the DB stored when pyimgtag
         # processed the image. This keeps user input out of Image.open().
         row = db.get_image(path)
         if row is None:
             return Response(status_code=404)
-        data = _make_thumbnail(row["file_path"], size)
+        # PIL decode + JPEG encode are CPU/IO-bound; run off the event loop
+        # so concurrent requests (stats, pagination) are never blocked.
+        data = await asyncio.to_thread(_make_thumbnail, row["file_path"], size)
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/jpeg")
@@ -587,28 +614,20 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         scanned the file), so the request-controlled value never reaches
         ``open()`` / ``Path.is_file()``.
         """
+        import asyncio
+
         row = db.get_image(path)
         if row is None:
             return Response(status_code=404)
-        # ``safe_path`` is the DB-stored path. CodeQL treats this as
-        # untainted because it flows from a SQL row, not the HTTP request.
+        # ``safe_path`` is the DB-stored path; not derived from the HTTP request.
         safe_path: str = row["file_path"]
-        try:
-            from pathlib import Path as _P
-
-            p = _P(safe_path)
-            if not p.is_file():
-                return Response(status_code=404)
-            suffix = p.suffix.lower()
-            if suffix in _MIME_BY_SUFFIX:
-                return Response(content=p.read_bytes(), media_type=_MIME_BY_SUFFIX[suffix])
-        except OSError:
+        # File I/O and PIL decode are blocking — run off the event loop so
+        # concurrent requests (stats, pagination) are never stalled.
+        result = await asyncio.to_thread(_serve_original, safe_path)
+        if result is None:
             return Response(status_code=404)
-        # Fall through to a high-quality JPEG render for HEIC / RAW / etc.
-        data = _make_thumbnail(safe_path, 4000)
-        if data is None:
-            return Response(status_code=404)
-        return Response(content=data, media_type="image/jpeg")
+        data, media_type = result
+        return Response(content=data, media_type=media_type)
 
     @router.post("/api/open-in-photos")
     async def open_in_photos(
