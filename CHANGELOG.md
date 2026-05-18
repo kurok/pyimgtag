@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.7] - 2026-05-18
+
+### Security
+- **Upgrade urllib3 2.6.3 → 2.7.0** (#185): fixes two high-severity CVEs — sensitive headers forwarded across origins in proxied redirects, and decompression-bomb safeguards bypassed in the streaming API.
+
 ## [0.13.6] - 2026-05-04
 
 ### Performance
