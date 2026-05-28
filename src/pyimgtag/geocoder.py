@@ -60,11 +60,14 @@ class ReverseGeocoder:
     def _fetch(self, lat: float, lon: float) -> GeoResult:
         self._rate_limit()
         try:
-            resp = self._session.get(
-                _NOMINATIM_URL,
-                params={"lat": lat, "lon": lon, "format": "json", "zoom": 10, "addressdetails": 1},
-                timeout=10,
-            )
+            params: dict[str, str | float | int] = {
+                "lat": lat,
+                "lon": lon,
+                "format": "json",
+                "zoom": 10,
+                "addressdetails": 1,
+            }
+            resp = self._session.get(_NOMINATIM_URL, params=params, timeout=10)
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as e:
