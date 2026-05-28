@@ -121,7 +121,7 @@ class AnthropicClient:
         *,
         on_error_msg: str | None,
     ) -> str | TagResult | None:
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "max_tokens": _CLOUD_MAX_TOKENS,
             "messages": [
@@ -299,7 +299,7 @@ class GeminiClient:
         *,
         on_error_msg: str | None,
     ) -> str | TagResult | None:
-        payload = {
+        payload: dict[str, Any] = {
             "contents": [
                 {
                     "parts": [

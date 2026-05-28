@@ -218,7 +218,7 @@ class TestRawpyAvailable:
         assert isinstance(result, bool)
 
     def test_returns_false_when_rawpy_not_importable(self):
-        with patch.dict(sys.modules, {"rawpy": None}):
+        with patch("pyimgtag.raw_converter.rawpy", None):
             assert rawpy_available() is False
 
 
