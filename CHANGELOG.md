@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-05-29
+
+### Fixed
+- **Faces hover preview overlapped cards below** (#205): preview popup `top` was not clamped to the viewport height, so thumbnails near the bottom of the page produced previews that extended below the fold and covered neighbouring cards. Fixed: `top = min(max(rect.top, 8), window.innerHeight - 340)`.
+
+### Added
+- **Faces hero thumbnail** (#205): faces in each cluster are sorted by confidence descending; the highest-confidence face is shown at 100×100 px with an accent border. Tooltip includes the confidence score.
+- **Faces Confirm button** (#205): each AUTO cluster card has a green "Confirm" button. Clicking it sets `confirmed=1, trusted=1` so the cluster survives the next re-clustering pass. Badge changes AUTO → TRUSTED and the button disappears.
+- **Rename also confirms** (#205): giving a person a non-empty name via Rename implicitly sets `confirmed=1, trusted=1` — a named cluster is treated as manually verified and survives re-clustering without requiring a separate Confirm click.
+
 ## [0.16.2] - 2026-05-29
 
 ### Performance
