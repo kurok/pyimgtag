@@ -16,9 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-    - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         python-version: "3.14"
+        activate-environment: true
     - name: Install dependencies
       run: uv pip install -e ".[dev,lint]"
     - name: Check formatting with ruff
@@ -35,9 +36,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-    - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         python-version: "3.14"
+        activate-environment: true
     - name: Install pre-commit
       run: uv pip install pre-commit
     - name: Run pre-commit on all files
@@ -69,9 +71,10 @@ jobs:
             python-version: "3.12"
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-    - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         python-version: ${{ matrix.python-version }}
+        activate-environment: true
     - name: Install dependencies
       run: uv pip install -e ".[dev,lint,review]"
     - name: Run tests
@@ -99,9 +102,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-    - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86  # v5
+    - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         python-version: "3.14"
+        activate-environment: true
     - name: Install dependencies
       run: uv pip install -e ".[security]"
     - name: Run bandit (security linter)
