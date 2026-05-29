@@ -50,6 +50,25 @@ __MODAL_JS__
 </div>
 <div id="persons"></div>
 <script>
+// Hover preview overlay
+const _preview = document.createElement('div');
+_preview.style.cssText = 'display:none;position:fixed;z-index:9999;pointer-events:none;'
+  + 'border-radius:8px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.45);';
+document.body.appendChild(_preview);
+const _previewImg = document.createElement('img');
+_previewImg.style.cssText = 'display:block;max-width:320px;max-height:320px;';
+_preview.appendChild(_previewImg);
+
+function showPreview(faceId, rect) {
+  _previewImg.src = '__API_BASE__/api/faces/' + faceId + '/preview';
+  const left = Math.min(rect.right + 10, window.innerWidth - 340);
+  const top  = Math.max(rect.top, 8);
+  _preview.style.left = left + 'px';
+  _preview.style.top  = top  + 'px';
+  _preview.style.display = 'block';
+}
+function hidePreview() { _preview.style.display = 'none'; }
+
 async function load() {
   const resp = await fetch('__API_BASE__/api/persons');
   const persons = await resp.json();
@@ -91,7 +110,10 @@ function renderPerson(p, faces) {
     img.className = 'face-thumb';
     img.src = 'data:image/jpeg;base64,' + f.thumb;
     img.title = 'Click to unassign';
+    img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
+    img.addEventListener('mouseleave', hidePreview);
     img.addEventListener('click', async () => {
+      hidePreview();
       await fetch('__API_BASE__/api/faces/' + f.id + '/unassign', {method: 'POST'});
       load();
     });
@@ -216,6 +238,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                 "face_count": len(p.face_ids),
             }
             for p in persons
+            if p.face_ids or p.trusted  # skip non-trusted ghost persons with no faces
         ]
 
     @router.get("/api/persons/{person_id}/faces")
@@ -235,6 +258,50 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
             )
             result.append({**f, "thumb": thumb})
         return result
+
+    @router.get("/api/faces/{face_id}/preview")
+    async def face_preview(face_id: int):  # type: ignore[return]
+        from io import BytesIO
+
+        from fastapi.responses import Response
+        from PIL import Image, ImageDraw
+
+        face = db.get_face_by_id(face_id)
+        if face is None:
+            raise HTTPException(status_code=404, detail="Face not found")
+        try:
+            img = Image.open(face["image_path"]).convert("RGB")
+        except Exception:
+            raise HTTPException(status_code=404, detail="Image not readable")
+
+        # Scale bounding box to actual image size (face_detection resizes to max_dim)
+        # The bbox is stored in resized coordinates; recover scale factor.
+        max_dim = 1280
+        w, h = img.size
+        scale = min(max_dim / w, max_dim / h, 1.0)
+        if scale < 1.0:
+            rw = int(w * scale)
+        else:
+            rw = w
+        factor = w / rw  # bbox was recorded at rw×rh, display at w×h
+
+        x = int(face["bbox_x"] * factor)
+        y = int(face["bbox_y"] * factor)
+        bw = int(face["bbox_w"] * factor)
+        bh = int(face["bbox_h"] * factor)
+
+        draw = ImageDraw.Draw(img)
+        lw = max(3, int(min(w, h) / 150))
+        draw.rectangle([x, y, x + bw, y + bh], outline="red", width=lw)
+
+        # Downscale for preview if large
+        preview_max = 800
+        if max(w, h) > preview_max:
+            img.thumbnail((preview_max, preview_max), Image.LANCZOS)
+
+        buf = BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        return Response(content=buf.getvalue(), media_type="image/jpeg")
 
     async def update_label(person_id: int, body: _LabelBody = Body(...)) -> dict:
         db.update_person_label(person_id, body.label)

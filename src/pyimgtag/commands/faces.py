@@ -138,6 +138,8 @@ def _start_cluster_thread(
 ) -> threading.Thread:
     """Start a daemon thread that periodically re-clusters detected faces.
 
+    Opens its own ProgressDB connection so SQLite writes from the scan
+    loop and the cluster loop never share a connection object across threads.
     Runs :func:`~pyimgtag.face_clustering.recluster_auto` every
     ``_CLUSTER_INTERVAL_S`` seconds so the faces UI stays current during
     a long scan.  The thread stops as soon as *stop_event* is set and
@@ -153,18 +155,20 @@ def _start_cluster_thread(
 
     eps = getattr(args, "eps", 0.5)
     min_samples = getattr(args, "min_samples", 2)
+    db_path = db._path
 
     def _loop() -> None:
-        while not stop_event.wait(timeout=_CLUSTER_INTERVAL_S):
+        with ProgressDB(db_path=db_path) as thread_db:
+            while not stop_event.wait(timeout=_CLUSTER_INTERVAL_S):
+                try:
+                    recluster_auto(thread_db, eps=eps, min_samples=min_samples)
+                except Exception:  # nosec B110
+                    pass
+            # Final pass after scan finishes
             try:
-                recluster_auto(db, eps=eps, min_samples=min_samples)
+                recluster_auto(thread_db, eps=eps, min_samples=min_samples)
             except Exception:  # nosec B110
                 pass
-        # Final pass after scan finishes
-        try:
-            recluster_auto(db, eps=eps, min_samples=min_samples)
-        except Exception:  # nosec B110
-            pass
 
     t = threading.Thread(target=_loop, daemon=True, name="faces-cluster-bg")
     t.start()
