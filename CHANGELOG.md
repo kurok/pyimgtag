@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.1] - 2026-05-29
+
+### Fixed
+- **Faces dashboard: dark/wrong thumbnail squares** (#199): face bounding boxes are stored in 1280px detection space but were applied directly to the full-resolution image, producing crops from the wrong location. `face_thumbnail_b64` now scales bbox coords by `max(iw, ih) / 1280` before cropping. HEIC images are also handled via `sips` fallback.
+- **Faces dashboard: hover preview showed full image with tiny red box** (#199): preview endpoint now crops to the face region with 80% padding and returns a 400px-max zoomed view instead of the full image. Hover overlay hides automatically on image load error.
+- **`faces scan` warning: `pkg_resources is deprecated as an API`** (#198): setuptools emits this warning with `stacklevel=2`, attributing it to `face_recognition_models/__init__.py`, not `pkg_resources`. The filter now matches on message text instead of module name.
+
+### CI
+- **Upgrade `deploy-pages` v4 → v5 and `upload-pages-artifact` v3 → v5** (#200): Node 24 runtime; suppress MkDocs `not_found` link warnings from root files included via snippets.
+
 ## [0.16.0] - 2026-05-29
 
 ### CI
