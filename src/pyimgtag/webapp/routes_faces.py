@@ -72,15 +72,15 @@ function showPreview(faceId, rect) {
 function hidePreview() { _preview.style.display = 'none'; }
 
 async function load() {
-  const resp = await fetch('__API_BASE__/api/persons');
-  const persons = await resp.json();
+  // Single request returns all persons with their top-8 face thumbnails.
+  // Thumbnails are generated in parallel on the server, so total latency is
+  // max(slowest person) rather than sum(all persons).
+  const persons = await fetch('__API_BASE__/api/persons/with-faces').then(r => r.json());
   document.getElementById('status').textContent = persons.length + ' person(s)';
   const grid = document.getElementById('persons');
   grid.innerHTML = '';
   for (const p of persons) {
-    const fr = await fetch('__API_BASE__/api/persons/' + p.id + '/faces');
-    const faces = await fr.json();
-    grid.appendChild(renderPerson(p, faces));
+    grid.appendChild(renderPerson(p, p.faces));
   }
 }
 
@@ -240,26 +240,79 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                 "face_count": len(p.face_ids),
             }
             for p in persons
-            if p.face_ids or p.trusted  # skip non-trusted ghost persons with no faces
+            if p.face_ids or p.trusted
         ]
+
+    @router.get("/api/persons/with-faces")
+    async def list_persons_with_faces() -> list[dict]:
+        """Return all persons with their top-8 face thumbnails in one request.
+
+        Thumbnail generation for each person runs in a thread-pool worker so
+        image I/O does not block the event loop. All persons are processed
+        concurrently, so total latency equals the slowest single person rather
+        than the sum of all persons.
+        """
+        import asyncio
+
+        persons = db.get_persons()
+        visible = [p for p in persons if p.face_ids or p.trusted]
+
+        async def _person_entry(p) -> dict:
+            faces = db.get_faces_for_person(p.person_id)
+
+            def _gen_thumbs() -> list[dict]:
+                return [
+                    {
+                        **f,
+                        "thumb": face_thumbnail_b64(
+                            f["image_path"],
+                            f["bbox_x"],
+                            f["bbox_y"],
+                            f["bbox_w"],
+                            f["bbox_h"],
+                        ),
+                    }
+                    for f in faces[:8]
+                ]
+
+            faces_with_thumbs = await asyncio.to_thread(_gen_thumbs)
+            return {
+                "id": p.person_id,
+                "label": p.label,
+                "confirmed": p.confirmed,
+                "source": p.source,
+                "trusted": p.trusted,
+                "face_count": len(p.face_ids),
+                "faces": faces_with_thumbs,
+            }
+
+        return list(await asyncio.gather(*[_person_entry(p) for p in visible]))
 
     @router.get("/api/persons/{person_id}/faces")
     async def get_person_faces(person_id: int) -> list[dict]:
+        import asyncio
+
         persons = db.get_persons()
         if not any(p.person_id == person_id for p in persons):
             raise HTTPException(status_code=404, detail="Person not found")
         faces = db.get_faces_for_person(person_id)
-        result = []
-        for f in faces:
-            thumb = face_thumbnail_b64(
-                f["image_path"],
-                f["bbox_x"],
-                f["bbox_y"],
-                f["bbox_w"],
-                f["bbox_h"],
-            )
-            result.append({**f, "thumb": thumb})
-        return result
+
+        def _gen_thumbs() -> list[dict]:
+            return [
+                {
+                    **f,
+                    "thumb": face_thumbnail_b64(
+                        f["image_path"],
+                        f["bbox_x"],
+                        f["bbox_y"],
+                        f["bbox_w"],
+                        f["bbox_h"],
+                    ),
+                }
+                for f in faces
+            ]
+
+        return await asyncio.to_thread(_gen_thumbs)
 
     @router.get("/api/faces/{face_id}/preview")
     async def face_preview(face_id: int):  # type: ignore[return]
