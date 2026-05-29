@@ -28,7 +28,7 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          uv pip install -e ".[dev,review,e2e]"
+          uv pip install --system -e ".[dev,review,e2e]"
 
       - name: Install Chromium for Playwright
         run: |

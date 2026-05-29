@@ -20,7 +20,7 @@ jobs:
       with:
         python-version: "3.14"
     - name: Install dependencies
-      run: uv pip install -e ".[dev,lint]"
+      run: uv pip install --system -e ".[dev,lint]"
     - name: Check formatting with ruff
       run: uv run ruff format --check .
     - name: Lint with ruff
@@ -39,7 +39,7 @@ jobs:
       with:
         python-version: "3.14"
     - name: Install pre-commit
-      run: uv pip install pre-commit
+      run: uv pip install --system pre-commit
     - name: Run pre-commit on all files
       run: uv run pre-commit run --all-files
 
@@ -73,7 +73,7 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
-      run: uv pip install -e ".[dev,lint,review]"
+      run: uv pip install --system -e ".[dev,lint,review]"
     - name: Run tests
       shell: bash
       run: |
@@ -103,7 +103,7 @@ jobs:
       with:
         python-version: "3.14"
     - name: Install dependencies
-      run: uv pip install -e ".[security]"
+      run: uv pip install --system -e ".[security]"
     - name: Run bandit (security linter)
       run: uv run python -m bandit -r src/pyimgtag/ -c pyproject.toml
     - name: Run pip-audit (dependency vulnerabilities)
