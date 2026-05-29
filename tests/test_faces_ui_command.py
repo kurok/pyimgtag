@@ -12,6 +12,7 @@ def _make_args(tmp_path):
         db=str(tmp_path / "progress.db"),
         host="127.0.0.1",
         port=8766,
+        no_browser=True,
     )
 
 
@@ -33,8 +34,9 @@ def test_faces_ui_success_path_invokes_uvicorn(tmp_path, capsys):
     kwargs = mock_run.call_args.kwargs
     assert kwargs["host"] == "127.0.0.1"
     assert kwargs["port"] == 8766
+    assert kwargs.get("log_level") == "warning"
     out = capsys.readouterr().out
-    assert "pyimgtag webapp" in out
+    assert "pyimgtag faces UI" in out
     assert "/faces" in out
 
 
