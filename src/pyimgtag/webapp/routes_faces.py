@@ -53,6 +53,25 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .person-name a{color:var(--text);text-decoration:none}
     .person-name a:hover{color:var(--accent);text-decoration:underline}
     .more-hint{font-size:11px;color:var(--muted);margin-bottom:8px}
+    .filter-bar{display:flex;gap:6px;padding:4px 32px 12px;align-items:center;flex-wrap:wrap}
+    .filter-btn{padding:4px 14px;border-radius:var(--radius-sm);font-size:12px;font-weight:500;
+                border:1px solid var(--border);background:var(--surface);
+                color:var(--muted);cursor:pointer;transition:all .15s}
+    .filter-btn:hover{border-color:var(--accent);color:var(--accent)}
+    .filter-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+    #unassigned-section{padding:0 32px 32px}
+    .unassigned-grid{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+    .face-thumb.selectable{cursor:pointer}
+    .face-thumb.selected{outline:3px solid var(--accent);outline-offset:1px}
+    .assign-bar{display:flex;gap:8px;align-items:center;padding:8px 0;flex-wrap:wrap;
+                font-size:13px;color:var(--muted)}
+    .assign-bar button{padding:5px 14px;border-radius:var(--radius-sm);font-size:12px;
+                       font-weight:500;border:1px solid var(--border);
+                       background:var(--surface);color:var(--text);cursor:pointer}
+    .assign-bar button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+    .assign-bar button:disabled{opacity:.35;cursor:default}
+    .assign-bar .confirm-btn{color:#1a7f50!important;border-color:rgba(52,199,89,.4)!important}
+    .assign-bar .confirm-btn:hover:not(:disabled){background:rgba(52,199,89,.08)!important}
   </style>
 </head>
 <body>
@@ -63,12 +82,37 @@ __MODAL_JS__
   <h1 class="page-title">Faces</h1>
   <span id="status" class="page-meta">Loading\u2026</span>
 </div>
+<div class="filter-bar">
+  <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
+  <button class="filter-btn" data-filter="trusted" onclick="setFilter('trusted')">Trusted</button>
+  <button class="filter-btn" data-filter="auto" onclick="setFilter('auto')">Auto</button>
+  <button class="filter-btn" data-filter="unassigned" onclick="setFilter('unassigned')">Unassigned</button>
+</div>
 <div class="pager" id="pager" style="display:none">
   <button id="btn-prev" onclick="goPage(-1)">\u2190 Previous</button>
   <span id="pager-info"></span>
   <button id="btn-next" onclick="goPage(1)">Next \u2192</button>
 </div>
 <div id="persons"></div>
+<div id="unassigned-section" style="display:none">
+  <div class="assign-bar" id="assign-bar">
+    <span id="sel-count">0 selected</span>
+    <button id="btn-select-all" onclick="selectAll()">Select all</button>
+    <button id="btn-clear-sel" onclick="clearSelection()">Clear</button>
+    <button class="confirm-btn" id="btn-assign" disabled onclick="openAssignModal()">
+      Assign to person\u2026
+    </button>
+    <button id="btn-new-person" disabled onclick="createNewPerson()">
+      New person from selected
+    </button>
+  </div>
+  <div class="unassigned-grid" id="unassigned-grid"></div>
+  <div class="pager" id="ua-pager" style="display:none">
+    <button id="ua-prev" onclick="goUAPage(-1)">\u2190 Previous</button>
+    <span id="ua-pager-info"></span>
+    <button id="ua-next" onclick="goUAPage(1)">Next \u2192</button>
+  </div>
+</div>
 <script>
 // Hover preview overlay
 const _preview = document.createElement('div');
@@ -92,17 +136,39 @@ function showPreview(faceId, rect) {
 function hidePreview() { _preview.style.display = 'none'; }
 
 const PAGE_SIZE = 10;
+const UA_PAGE_SIZE = 40;
 let _offset = 0;
 let _total = 0;
+let _filter = 'all';
+let _uaOffset = 0;
+let _uaTotal = 0;
+let _selected = new Set();  // face ids selected in unassigned view
+
+// ── Filter ──────────────────────────────────────────────────────────────────
+function setFilter(f) {
+  _filter = f;
+  _offset = 0;
+  _uaOffset = 0;
+  _selected.clear();
+  document.querySelectorAll('.filter-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.filter === f));
+  const isUA = f === 'unassigned';
+  document.getElementById('persons').style.display = isUA ? 'none' : '';
+  document.getElementById('pager').style.display = 'none';
+  document.getElementById('unassigned-section').style.display = isUA ? '' : 'none';
+  if (isUA) loadUnassigned(); else load();
+}
 
 function goPage(delta) {
   _offset = Math.max(0, Math.min(_offset + delta * PAGE_SIZE, _total - 1));
   load();
 }
 
+// ── Persons grid ─────────────────────────────────────────────────────────────
 async function load() {
   document.getElementById('status').textContent = 'Loading…';
-  const url = '__API_BASE__/api/persons/with-faces?offset=' + _offset + '&limit=' + PAGE_SIZE;
+  const url = '__API_BASE__/api/persons/with-faces?offset=' + _offset
+    + '&limit=' + PAGE_SIZE + '&filter=' + _filter;
   const data = await fetch(url).then(r => r.json());
   _total = data.total;
   const persons = data.items;
@@ -124,6 +190,125 @@ async function load() {
   } else {
     pager.style.display = 'none';
   }
+}
+
+// ── Unassigned faces ─────────────────────────────────────────────────────────
+function goUAPage(delta) {
+  _uaOffset = Math.max(0, Math.min(_uaOffset + delta * UA_PAGE_SIZE, _uaTotal - 1));
+  _selected.clear();
+  updateSelectionUI();
+  loadUnassigned();
+}
+
+async function loadUnassigned() {
+  document.getElementById('status').textContent = 'Loading…';
+  const url = '__API_BASE__/api/faces/unassigned?offset=' + _uaOffset + '&limit=' + UA_PAGE_SIZE;
+  const data = await fetch(url).then(r => r.json());
+  _uaTotal = data.total;
+  document.getElementById('status').textContent = _uaTotal + ' unassigned face(s)';
+
+  const grid = document.getElementById('unassigned-grid');
+  grid.innerHTML = '';
+  data.items.forEach(f => {
+    if (!f.thumb) return;
+    const img = document.createElement('img');
+    img.className = 'face-thumb selectable' + (_selected.has(f.id) ? ' selected' : '');
+    img.src = 'data:image/jpeg;base64,' + f.thumb;
+    img.dataset.faceId = f.id;
+    img.title = 'Click to select — confidence ' + (f.confidence ? f.confidence.toFixed(2) : '?');
+    img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
+    img.addEventListener('mouseleave', hidePreview);
+    img.addEventListener('click', () => {
+      hidePreview();
+      _selected.has(f.id) ? _selected.delete(f.id) : _selected.add(f.id);
+      img.classList.toggle('selected', _selected.has(f.id));
+      updateSelectionUI();
+    });
+    grid.appendChild(img);
+  });
+
+  const pager = document.getElementById('ua-pager');
+  if (_uaTotal > UA_PAGE_SIZE) {
+    pager.style.display = 'flex';
+    const end = Math.min(_uaOffset + UA_PAGE_SIZE, _uaTotal);
+    document.getElementById('ua-pager-info').textContent =
+      (_uaOffset + 1) + '–' + end + ' of ' + _uaTotal;
+    document.getElementById('ua-prev').disabled = _uaOffset === 0;
+    document.getElementById('ua-next').disabled = end >= _uaTotal;
+  } else {
+    pager.style.display = 'none';
+  }
+}
+
+function selectAll() {
+  document.querySelectorAll('#unassigned-grid .face-thumb').forEach(img => {
+    _selected.add(Number(img.dataset.faceId));
+    img.classList.add('selected');
+  });
+  updateSelectionUI();
+}
+
+function clearSelection() {
+  _selected.clear();
+  document.querySelectorAll('#unassigned-grid .face-thumb').forEach(img =>
+    img.classList.remove('selected'));
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const n = _selected.size;
+  document.getElementById('sel-count').textContent = n + ' selected';
+  document.getElementById('btn-assign').disabled = n === 0;
+  document.getElementById('btn-new-person').disabled = n === 0;
+}
+
+async function openAssignModal() {
+  const persons = await fetch('__API_BASE__/api/persons').then(r => r.json());
+  if (!persons.length) { alert('No persons yet — use "New person from selected" instead.'); return; }
+  const opts = persons.map(p =>
+    '<option value="' + p.id + '">' +
+    (p.label ? p.label : ('Person ' + p.id + ' (auto)')) +
+    ' — ' + p.face_count + ' faces' +
+    '</option>'
+  ).join('');
+  openModal(
+    'Assign faces to person',
+    _selected.size + ' face(s) selected.',
+    '<select class="inp" id="m-person-sel" style="width:100%">' + opts + '</select>',
+    'Assign', 'btn-primary',
+    async () => {
+      const personId = Number(document.getElementById('m-person-sel').value);
+      await fetch('__API_BASE__/api/faces/assign-batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({face_ids: [..._selected], person_id: personId}),
+      });
+      closeModal();
+      _selected.clear();
+      loadUnassigned();
+    }
+  );
+}
+
+async function createNewPerson() {
+  openModal(
+    'Create person from selected faces',
+    _selected.size + ' face(s) will be assigned.',
+    '<input class="inp" id="m-inp" placeholder="Name (optional)" />',
+    'Create', 'btn-primary',
+    async () => {
+      const label = document.getElementById('m-inp').value.trim();
+      await fetch('__API_BASE__/api/faces/assign-batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({face_ids: [..._selected], person_id: null, label}),
+      });
+      closeModal();
+      _selected.clear();
+      loadUnassigned();
+    }
+  );
+  setTimeout(() => document.getElementById('m-inp').focus(), 50);
 }
 
 function renderPerson(p, faces) {
@@ -539,24 +724,27 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         ]
 
     @router.get("/api/persons/with-faces")
-    async def list_persons_with_faces(offset: int = 0, limit: int = 10) -> dict:
+    async def list_persons_with_faces(
+        offset: int = 0, limit: int = 10, filter: str = "all"
+    ) -> dict:
         """Return a page of persons with their top-8 face thumbnails.
 
         Query params:
           offset  – 0-based index of the first person to return (default 0)
           limit   – number of persons per page (default 10, max 50)
+          filter  – ``all`` | ``trusted`` | ``auto`` (default ``all``)
 
         Response: ``{"total": N, "items": [...]}``
-
-        Thumbnail generation for each person in the page runs in a thread-pool
-        worker (off the event loop) and all persons in the page are processed
-        concurrently via asyncio.gather.
         """
         import asyncio
 
         limit = min(max(limit, 1), 50)
         persons = db.get_persons()
         visible = [p for p in persons if p.face_ids or p.trusted]
+        if filter == "trusted":
+            visible = [p for p in visible if p.trusted]
+        elif filter == "auto":
+            visible = [p for p in visible if not p.trusted]
         total = len(visible)
         page = visible[offset : offset + limit]
 
@@ -632,6 +820,60 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
             ]
 
         return await asyncio.to_thread(_gen_thumbs)
+
+    @router.get("/api/faces/unassigned")
+    async def list_unassigned_faces(offset: int = 0, limit: int = 40) -> dict:
+        """Return a page of faces with no person assignment, with thumbnails."""
+        import asyncio
+
+        limit = min(max(limit, 1), 200)
+        all_faces = db.get_unassigned_faces()
+        total = len(all_faces)
+        page = all_faces[offset : offset + limit]
+
+        def _gen_thumbs() -> list[dict]:
+            return [
+                {
+                    **f,
+                    "thumb": face_thumbnail_b64(
+                        f["image_path"],
+                        f["bbox_x"],
+                        f["bbox_y"],
+                        f["bbox_w"],
+                        f["bbox_h"],
+                    ),
+                }
+                for f in page
+            ]
+
+        items = await asyncio.to_thread(_gen_thumbs)
+        return {"total": total, "items": items}
+
+    class _AssignBatchBody(BaseModel):
+        face_ids: list[int]
+        person_id: int | None = None
+        label: str = ""
+
+    @router.post("/api/faces/assign-batch")
+    async def assign_faces_batch(body: _AssignBatchBody) -> dict:
+        """Assign multiple faces to a person.
+
+        If ``person_id`` is provided, faces are assigned to that person.
+        If ``person_id`` is None, a new person is created (with optional ``label``).
+        """
+        if not body.face_ids:
+            raise HTTPException(status_code=400, detail="face_ids must not be empty")
+        if body.person_id is not None:
+            target_id = body.person_id
+        else:
+            target_id = db.create_person(
+                label=body.label,
+                confirmed=bool(body.label),
+                trusted=bool(body.label),
+            )
+        for fid in body.face_ids:
+            db.set_person_id(fid, target_id)
+        return {"ok": True, "person_id": target_id}
 
     @router.get("/api/faces/{face_id}/preview")
     async def face_preview(face_id: int):  # type: ignore[return]
