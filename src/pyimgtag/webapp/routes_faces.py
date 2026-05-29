@@ -468,8 +468,11 @@ def render_person_detail_html(person_id: int, api_base: str = "") -> str:
     """Return the person detail page HTML."""
     from pyimgtag.webapp.nav import MODAL_HTML, MODAL_JS, NAV_STYLES, render_nav
 
+    # Coerce through int() so the substituted value is guaranteed to be
+    # a digit-only string — eliminates the XSS taint path from the URL.
+    safe_id = str(int(person_id))
     return (
-        _PERSON_DETAIL_TEMPLATE.replace("__PERSON_ID__", str(person_id))
+        _PERSON_DETAIL_TEMPLATE.replace("__PERSON_ID__", safe_id)
         .replace("__API_BASE__", api_base)
         .replace("__NAV__", render_nav("faces"))
         .replace("__NAV_STYLES__", NAV_STYLES)
