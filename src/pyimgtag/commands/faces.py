@@ -158,12 +158,12 @@ def _start_cluster_thread(
         while not stop_event.wait(timeout=_CLUSTER_INTERVAL_S):
             try:
                 recluster_auto(db, eps=eps, min_samples=min_samples)
-            except Exception:
+            except Exception:  # nosec B110
                 pass
         # Final pass after scan finishes
         try:
             recluster_auto(db, eps=eps, min_samples=min_samples)
-        except Exception:
+        except Exception:  # nosec B110
             pass
 
     t = threading.Thread(target=_loop, daemon=True, name="faces-cluster-bg")
@@ -360,7 +360,7 @@ def _handle_faces_ui(args: argparse.Namespace) -> int:
             time.sleep(0.5)
             try:
                 webbrowser.open(url)
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001  # nosec B110
                 pass
 
         threading.Thread(target=_open, daemon=True).start()

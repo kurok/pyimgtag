@@ -987,9 +987,10 @@ class ProgressDB:
             return
         placeholders = ",".join("?" * len(auto_ids))
         self._conn.execute(
-            f"UPDATE faces SET person_id = NULL WHERE person_id IN ({placeholders})", auto_ids
+            f"UPDATE faces SET person_id = NULL WHERE person_id IN ({placeholders})",  # nosec B608
+            auto_ids,
         )
-        self._conn.execute(f"DELETE FROM persons WHERE id IN ({placeholders})", auto_ids)
+        self._conn.execute(f"DELETE FROM persons WHERE id IN ({placeholders})", auto_ids)  # nosec B608
         self._conn.commit()
 
     def get_unassigned_faces(self) -> list[dict]:
