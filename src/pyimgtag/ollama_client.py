@@ -453,7 +453,7 @@ def _extract_first_json_object(text: str) -> dict | None:
                 if isinstance(obj, dict):
                     return obj
             except (json.JSONDecodeError, ValueError):
-                pass
+                pass  # fall through to truncation-repair below
             # Phase 2: attempt truncation repair on the suffix.
             repaired = _repair_truncated_json(text[i:])
             if repaired is not None:
