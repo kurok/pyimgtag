@@ -1,6 +1,9 @@
 name: Upload Python Package
 
 on:
+  push:
+    tags:
+      - "v*"
   release:
     types: [published]
 
@@ -55,3 +58,4 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
         with:
           packages-dir: dist/
+          skip-existing: true
