@@ -320,6 +320,65 @@ async function openAssignModal() {
   );
 }
 
+// ── Rename / merge modal ─────────────────────────────────────────────────────
+async function openRenameModal(personId, currentLabel, onDone) {
+  const allPersons = await fetch('__API_BASE__/api/persons').then(r => r.json());
+  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== personId);
+
+  const body = '<input class="inp" id="m-inp" placeholder="Type a new name…"'
+    + ' style="margin-bottom:8px;display:block;width:100%" />'
+    + '<label style="font-size:12px;color:var(--muted);display:block;margin:6px 0 4px">'
+    + 'Or merge into existing trusted person:</label>'
+    + '<select class="inp" id="m-merge-sel" style="display:block;width:100%">'
+    + '<option value="">— assign a new name only —</option></select>';
+
+  openModal(
+    'Rename / merge person',
+    'Type a new name or pick an existing trusted person to merge this cluster into.',
+    body,
+    'Apply', 'btn-primary',
+    async () => {
+      const sel = document.getElementById('m-merge-sel');
+      const targetId = sel && sel.value ? Number(sel.value) : null;
+      if (targetId) {
+        await fetch('__API_BASE__/api/persons/' + personId + '/merge/' + targetId,
+          {method: 'POST'});
+        closeModal();
+        if (typeof onDone === 'function') onDone(targetId);
+      } else {
+        const val = document.getElementById('m-inp').value.trim();
+        if (!val) return;
+        await fetch('__API_BASE__/api/persons/' + personId + '/label', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label: val}),
+        });
+        closeModal();
+        if (typeof onDone === 'function') onDone(null);
+      }
+    }
+  );
+
+  setTimeout(() => {
+    const inp = document.getElementById('m-inp');
+    const sel = document.getElementById('m-merge-sel');
+    if (inp) { inp.value = currentLabel || ''; inp.focus(); }
+    if (sel && targets.length) {
+      targets.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.label + ' (' + p.face_count + ' face'
+          + (p.face_count !== 1 ? 's' : '') + ')';
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => {
+        const t = targets.find(p => p.id === Number(sel.value));
+        if (t && inp) inp.value = t.label;
+      });
+    }
+  }, 50);
+}
+
 async function createNewPerson() {
   openModal(
     'Create person from selected faces',
@@ -482,28 +541,12 @@ function renderPerson(p, faces) {
 
   const renBtn = document.createElement('button');
   renBtn.textContent = 'Rename';
-  renBtn.addEventListener('click', () => {
-    openModal(
-      'Rename person',
-      'Enter a new name for this person.',
-      '<input class="inp" id="m-inp" placeholder="Name" />',
-      'Rename', 'btn-primary',
-      async () => {
-        const val = document.getElementById('m-inp').value.trim();
-        if (!val) return;
-        await fetch('__API_BASE__/api/persons/' + p.id + '/label', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({label: val}),
-        });
-        closeModal();
-        load();
-      }
-    );
-    // Set value via DOM after modal renders — avoids XSS via innerHTML attribute
-    document.getElementById('m-inp').value = p.label || '';
-    setTimeout(() => document.getElementById('m-inp').focus(), 50);
-  });
+  renBtn.addEventListener('click', () =>
+    openRenameModal(p.id, p.label, targetId => {
+      if (targetId) window.location.href = '__API_BASE__/persons/' + targetId;
+      else load();
+    })
+  );
   acts.appendChild(renBtn);
 
   const delBtn = document.createElement('button');
@@ -694,26 +737,62 @@ function renderFaces(faces) {
   });
 }
 
-document.getElementById('rename-btn').addEventListener('click', () => {
+document.getElementById('rename-btn').addEventListener('click', async () => {
+  const allPersons = await fetch(_apiBase + '/api/persons').then(r => r.json());
+  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== _personId);
+
+  const body = '<input class="inp" id="m-inp" placeholder="Type a new name…"'
+    + ' style="margin-bottom:8px;display:block;width:100%" />'
+    + '<label style="font-size:12px;color:var(--muted);display:block;margin:6px 0 4px">'
+    + 'Or merge into existing trusted person:</label>'
+    + '<select class="inp" id="m-merge-sel" style="display:block;width:100%">'
+    + '<option value="">— assign a new name only —</option></select>';
+
   openModal(
-    'Rename person',
-    'Enter a new name for this person.',
-    '<input class="inp" id="m-inp" placeholder="Name" />',
-    'Rename', 'btn-primary',
+    'Rename / merge person',
+    'Type a new name or pick an existing trusted person to merge this cluster into.',
+    body,
+    'Apply', 'btn-primary',
     async () => {
-      const val = document.getElementById('m-inp').value.trim();
-      if (!val) return;
-      await fetch(_apiBase + '/api/persons/' + _personId + '/label', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({label: val}),
-      });
-      closeModal();
-      load();
+      const sel = document.getElementById('m-merge-sel');
+      const targetId = sel && sel.value ? Number(sel.value) : null;
+      if (targetId) {
+        await fetch(_apiBase + '/api/persons/' + _personId + '/merge/' + targetId,
+          {method: 'POST'});
+        closeModal();
+        window.location.href = _apiBase + '/persons/' + targetId;
+      } else {
+        const val = document.getElementById('m-inp').value.trim();
+        if (!val) return;
+        await fetch(_apiBase + '/api/persons/' + _personId + '/label', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label: val}),
+        });
+        closeModal();
+        load();
+      }
     }
   );
-  document.getElementById('m-inp').value = (_person && _person.label) || '';
-  setTimeout(() => document.getElementById('m-inp').focus(), 50);
+
+  setTimeout(() => {
+    const inp = document.getElementById('m-inp');
+    const sel = document.getElementById('m-merge-sel');
+    if (inp) { inp.value = (_person && _person.label) || ''; inp.focus(); }
+    if (sel && targets.length) {
+      targets.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.label + ' (' + p.face_count + ' face'
+          + (p.face_count !== 1 ? 's' : '') + ')';
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => {
+        const t = targets.find(tp => tp.id === Number(sel.value));
+        if (t && inp) inp.value = t.label;
+      });
+    }
+  }, 50);
 });
 
 document.getElementById('confirm-btn').addEventListener('click', async () => {
