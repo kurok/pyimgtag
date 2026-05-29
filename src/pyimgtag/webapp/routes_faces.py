@@ -38,6 +38,13 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .person-actions button:hover{border-color:var(--accent);color:var(--accent)}
     .del-btn{color:var(--danger)!important;border-color:rgba(255,59,48,.3)!important}
     .del-btn:hover{background:rgba(255,59,48,.05)!important}
+    .pager{display:flex;align-items:center;gap:10px;padding:8px 32px 4px;
+           font-size:13px;color:var(--muted)}
+    .pager button{padding:4px 12px;border-radius:var(--radius-sm);font-size:12px;
+                  border:1px solid var(--border);background:var(--surface);
+                  color:var(--text);cursor:pointer;transition:all .15s}
+    .pager button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+    .pager button:disabled{opacity:.35;cursor:default}
   </style>
 </head>
 <body>
@@ -47,6 +54,11 @@ __MODAL_JS__
 <div class="page-hdr">
   <h1 class="page-title">Faces</h1>
   <span id="status" class="page-meta">Loading\u2026</span>
+</div>
+<div class="pager" id="pager" style="display:none">
+  <button id="btn-prev" onclick="goPage(-1)">\u2190 Previous</button>
+  <span id="pager-info"></span>
+  <button id="btn-next" onclick="goPage(1)">Next \u2192</button>
 </div>
 <div id="persons"></div>
 <script>
@@ -71,16 +83,38 @@ function showPreview(faceId, rect) {
 }
 function hidePreview() { _preview.style.display = 'none'; }
 
+const PAGE_SIZE = 10;
+let _offset = 0;
+let _total = 0;
+
+function goPage(delta) {
+  _offset = Math.max(0, Math.min(_offset + delta * PAGE_SIZE, _total - 1));
+  load();
+}
+
 async function load() {
-  // Single request returns all persons with their top-8 face thumbnails.
-  // Thumbnails are generated in parallel on the server, so total latency is
-  // max(slowest person) rather than sum(all persons).
-  const persons = await fetch('__API_BASE__/api/persons/with-faces').then(r => r.json());
-  document.getElementById('status').textContent = persons.length + ' person(s)';
+  document.getElementById('status').textContent = 'Loading…';
+  const url = '__API_BASE__/api/persons/with-faces?offset=' + _offset + '&limit=' + PAGE_SIZE;
+  const data = await fetch(url).then(r => r.json());
+  _total = data.total;
+  const persons = data.items;
+
+  document.getElementById('status').textContent = _total + ' person(s)';
+
   const grid = document.getElementById('persons');
   grid.innerHTML = '';
-  for (const p of persons) {
-    grid.appendChild(renderPerson(p, p.faces));
+  for (const p of persons) grid.appendChild(renderPerson(p, p.faces));
+
+  const pager = document.getElementById('pager');
+  if (_total > PAGE_SIZE) {
+    pager.style.display = 'flex';
+    const end = Math.min(_offset + PAGE_SIZE, _total);
+    document.getElementById('pager-info').textContent =
+      (_offset + 1) + '–' + end + ' of ' + _total;
+    document.getElementById('btn-prev').disabled = _offset === 0;
+    document.getElementById('btn-next').disabled = end >= _total;
+  } else {
+    pager.style.display = 'none';
   }
 }
 
@@ -117,6 +151,8 @@ function renderPerson(p, faces) {
     img.addEventListener('click', async () => {
       hidePreview();
       await fetch('__API_BASE__/api/faces/' + f.id + '/unassign', {method: 'POST'});
+      // After an unassign the total may shrink; clamp offset so we stay on a valid page.
+      _offset = Math.min(_offset, Math.max(0, _total - PAGE_SIZE - 1));
       load();
     });
     facesGrid.appendChild(img);
@@ -244,18 +280,26 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         ]
 
     @router.get("/api/persons/with-faces")
-    async def list_persons_with_faces() -> list[dict]:
-        """Return all persons with their top-8 face thumbnails in one request.
+    async def list_persons_with_faces(offset: int = 0, limit: int = 10) -> dict:
+        """Return a page of persons with their top-8 face thumbnails.
 
-        Thumbnail generation for each person runs in a thread-pool worker so
-        image I/O does not block the event loop. All persons are processed
-        concurrently, so total latency equals the slowest single person rather
-        than the sum of all persons.
+        Query params:
+          offset  – 0-based index of the first person to return (default 0)
+          limit   – number of persons per page (default 10, max 50)
+
+        Response: ``{"total": N, "items": [...]}``
+
+        Thumbnail generation for each person in the page runs in a thread-pool
+        worker (off the event loop) and all persons in the page are processed
+        concurrently via asyncio.gather.
         """
         import asyncio
 
+        limit = min(max(limit, 1), 50)
         persons = db.get_persons()
         visible = [p for p in persons if p.face_ids or p.trusted]
+        total = len(visible)
+        page = visible[offset : offset + limit]
 
         async def _person_entry(p) -> dict:
             faces = db.get_faces_for_person(p.person_id)
@@ -286,7 +330,8 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                 "faces": faces_with_thumbs,
             }
 
-        return list(await asyncio.gather(*[_person_entry(p) for p in visible]))
+        items = list(await asyncio.gather(*[_person_entry(p) for p in page]))
+        return {"total": total, "items": items}
 
     @router.get("/api/persons/{person_id}/faces")
     async def get_person_faces(person_id: int) -> list[dict]:
