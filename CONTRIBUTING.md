@@ -229,7 +229,7 @@ Every push and PR triggers 5 parallel CI jobs:
 
 ### Style
 
-- **Formatter/linter:** ruff (line length: 100, target Python 3.14)
+- **Formatter/linter:** ruff (line length: 100, target Python 3.11)
 - Follow existing patterns in the codebase
 - Keep functions focused -- one function, one job
 - No unnecessary abstractions; simple and direct is better
