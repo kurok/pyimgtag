@@ -19,8 +19,9 @@ jobs:
     - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         python-version: "3.14"
+        activate-environment: true
     - name: Install dependencies
-      run: uv pip install --system -e ".[dev,lint]"
+      run: uv pip install -e ".[dev,lint]"
     - name: Check formatting with ruff
       run: uv run ruff format --check .
     - name: Lint with ruff
@@ -38,8 +39,9 @@ jobs:
     - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         python-version: "3.14"
+        activate-environment: true
     - name: Install pre-commit
-      run: uv pip install --system pre-commit
+      run: uv pip install pre-commit
     - name: Run pre-commit on all files
       run: uv run pre-commit run --all-files
 
@@ -72,8 +74,9 @@ jobs:
     - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         python-version: ${{ matrix.python-version }}
+        activate-environment: true
     - name: Install dependencies
-      run: uv pip install --system -e ".[dev,lint,review]"
+      run: uv pip install -e ".[dev,lint,review]"
     - name: Run tests
       shell: bash
       run: |
@@ -102,8 +105,9 @@ jobs:
     - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
       with:
         python-version: "3.14"
+        activate-environment: true
     - name: Install dependencies
-      run: uv pip install --system -e ".[security]"
+      run: uv pip install -e ".[security]"
     - name: Run bandit (security linter)
       run: uv run python -m bandit -r src/pyimgtag/ -c pyproject.toml
     - name: Run pip-audit (dependency vulnerabilities)
