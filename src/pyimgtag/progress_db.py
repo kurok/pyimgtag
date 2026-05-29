@@ -971,6 +971,27 @@ class ProgressDB:
         self._conn.execute("DELETE FROM persons WHERE id = ?", (person_id,))
         self._conn.commit()
 
+    def clear_auto_persons(self) -> None:
+        """Delete all auto-clustered persons that are not trusted or confirmed.
+
+        Resets person_id to NULL on their faces so they can be re-clustered.
+        Persons imported from Photos (trusted=1) or manually confirmed are preserved.
+        """
+        auto_ids = [
+            r[0]
+            for r in self._conn.execute(
+                "SELECT id FROM persons WHERE trusted = 0 AND confirmed = 0"
+            ).fetchall()
+        ]
+        if not auto_ids:
+            return
+        placeholders = ",".join("?" * len(auto_ids))
+        self._conn.execute(
+            f"UPDATE faces SET person_id = NULL WHERE person_id IN ({placeholders})", auto_ids
+        )
+        self._conn.execute(f"DELETE FROM persons WHERE id IN ({placeholders})", auto_ids)
+        self._conn.commit()
+
     def get_unassigned_faces(self) -> list[dict]:
         """Return faces that have no person assignment."""
         rows = self._conn.execute(

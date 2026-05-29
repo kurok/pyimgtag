@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import threading
 from pathlib import Path
 
 from pyimgtag import run_registry
@@ -15,6 +16,8 @@ try:
     from pyimgtag.face_embedding import scan_and_store
 except ImportError:
     scan_and_store = None  # type: ignore[assignment]
+
+_CLUSTER_INTERVAL_S = 30
 
 
 def cmd_faces(args: argparse.Namespace) -> int:
@@ -83,6 +86,9 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
     interrupted = False
     try:
         with ProgressDB(db_path=args.db) as db:
+            stop_event = threading.Event()
+            cluster_thread = _start_cluster_thread(db, args, stop_event)
+
             try:
                 for i, file_path in enumerate(files):
                     if args.limit and i >= args.limit:
@@ -110,6 +116,9 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
                 if session is not None:
                     session.mark_interrupted()
                 print("\nInterrupted.", file=sys.stderr)
+            finally:
+                stop_event.set()
+                cluster_thread.join()
 
         print(f"\nScanned {scanned} images, detected {total_faces} faces.", file=sys.stderr)
         if session is not None and not interrupted:
@@ -120,6 +129,46 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         run_registry.set_current(None)
 
     return 1 if interrupted else 0
+
+
+def _start_cluster_thread(
+    db: ProgressDB,
+    args: argparse.Namespace,
+    stop_event: threading.Event,
+) -> threading.Thread:
+    """Start a daemon thread that periodically re-clusters detected faces.
+
+    Runs :func:`~pyimgtag.face_clustering.recluster_auto` every
+    ``_CLUSTER_INTERVAL_S`` seconds so the faces UI stays current during
+    a long scan.  The thread stops as soon as *stop_event* is set and
+    performs one final cluster pass before exiting.
+    """
+    try:
+        from pyimgtag.face_clustering import recluster_auto
+    except ImportError:
+        # scikit-learn not installed — skip background clustering silently
+        t = threading.Thread(target=lambda: None, daemon=True)
+        t.start()
+        return t
+
+    eps = getattr(args, "eps", 0.5)
+    min_samples = getattr(args, "min_samples", 2)
+
+    def _loop() -> None:
+        while not stop_event.wait(timeout=_CLUSTER_INTERVAL_S):
+            try:
+                recluster_auto(db, eps=eps, min_samples=min_samples)
+            except Exception:
+                pass
+        # Final pass after scan finishes
+        try:
+            recluster_auto(db, eps=eps, min_samples=min_samples)
+        except Exception:
+            pass
+
+    t = threading.Thread(target=_loop, daemon=True, name="faces-cluster-bg")
+    t.start()
+    return t
 
 
 def _handle_faces_cluster(args: argparse.Namespace) -> int:
