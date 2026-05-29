@@ -13,22 +13,11 @@ from pyimgtag.webapp.config import add_web_flags
 _DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        prog="pyimgtag",
-        description="Tag images using a local Ollama Gemma vision model "
-        "with EXIF GPS reverse geocoding.",
-    )
-    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-
-    subparsers = p.add_subparsers(dest="subcommand")
-
-    # --- run subcommand ---
+def _add_run_subcommand(subparsers: Any) -> None:
     run_p = subparsers.add_parser("run", help="Tag images (default workhorse)")
     src = run_p.add_mutually_exclusive_group(required=False)
     src.add_argument("--input-dir", help="Path to an exported image folder")
     src.add_argument("--photos-library", help="Path to an Apple Photos library package")
-
     run_p.add_argument(
         "--backend",
         choices=("ollama", "anthropic", "openai", "gemini"),
@@ -165,11 +154,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_web_flags(run_p)
 
-    # --- status subcommand ---
+
+def _add_status_reprocess_preflight_subcommands(subparsers: Any) -> None:
     status_p = subparsers.add_parser("status", help="Show progress stats from the DB")
     status_p.add_argument("--db", help=_DEFAULT_DB_HELP)
 
-    # --- reprocess subcommand ---
     reprocess_p = subparsers.add_parser(
         "reprocess", help="Reset DB entries so photos get re-tagged"
     )
@@ -179,7 +168,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only reset entries with this status (e.g. 'error'). Omit to reset everything.",
     )
 
-    # --- preflight subcommand ---
     preflight_p = subparsers.add_parser(
         "preflight", help="Run preflight checks for prerequisites and exit"
     )
@@ -195,7 +183,8 @@ def build_parser() -> argparse.ArgumentParser:
     src_pre.add_argument("--input-dir", help="Path to an exported image folder")
     src_pre.add_argument("--photos-library", help="Path to an Apple Photos library package")
 
-    # --- cleanup subcommand ---
+
+def _add_cleanup_subcommands(subparsers: Any) -> None:
     cleanup_p = subparsers.add_parser(
         "cleanup", help="List photos flagged for cleanup (delete/review) and exit"
     )
@@ -206,7 +195,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also show photos flagged as 'review' (default: delete only)",
     )
 
-    # --- cleanup-drift subcommand ---
     drift_p = subparsers.add_parser(
         "cleanup-drift",
         help=(
@@ -215,9 +203,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     drift_p.add_argument("--db", help=_DEFAULT_DB_HELP)
-    # ``--dry-run`` is the default behaviour and is accepted explicitly so
-    # scripts can self-document. ``--prune`` is the destructive opt-in;
-    # the two are mutually exclusive — passing both is a user error.
     drift_mode = drift_p.add_mutually_exclusive_group()
     drift_mode.add_argument(
         "--dry-run",
@@ -232,7 +217,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Actually delete the dead rows from the DB.",
     )
 
-    # --- review subcommand ---
+
+def _add_review_subcommand(subparsers: Any) -> None:
     review_p = subparsers.add_parser(
         "review", help="Launch the local review UI (requires pyimgtag[review])"
     )
@@ -243,11 +229,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-browser", action="store_true", help="Do not open the browser automatically"
     )
 
-    # --- faces subcommand group ---
+
+def _add_faces_subcommand(subparsers: Any) -> None:
     faces_p = subparsers.add_parser("faces", help="Face detection, clustering, and tagging")
     faces_sub = faces_p.add_subparsers(dest="faces_action")
 
-    # faces scan
     faces_scan = faces_sub.add_parser("scan", help="Detect faces and compute embeddings")
     faces_scan_src = faces_scan.add_mutually_exclusive_group(required=True)
     faces_scan_src.add_argument("--input-dir", help="Path to an exported image folder")
@@ -271,7 +257,6 @@ def build_parser() -> argparse.ArgumentParser:
     faces_scan.add_argument("--limit", type=int, help="Max images to scan")
     add_web_flags(faces_scan)
 
-    # faces cluster
     faces_cluster = faces_sub.add_parser("cluster", help="Cluster faces into person groups")
     faces_cluster.add_argument("--db", help=_DEFAULT_DB_HELP)
     faces_cluster.add_argument(
@@ -284,11 +269,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum faces to form a cluster (default: 2)",
     )
 
-    # faces review
     faces_review = faces_sub.add_parser("review", help="List detected persons and face counts")
     faces_review.add_argument("--db", help=_DEFAULT_DB_HELP)
 
-    # faces apply
     faces_apply = faces_sub.add_parser("apply", help="Write person keywords to image metadata")
     faces_apply.add_argument("--db", help=_DEFAULT_DB_HELP)
     faces_apply.add_argument(
@@ -307,19 +290,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preview keyword changes without writing",
     )
 
-    # faces import-photos
     faces_import = faces_sub.add_parser(
         "import-photos", help="Import named persons from Apple Photos library"
     )
     faces_import.add_argument("--db", help=_DEFAULT_DB_HELP)
 
-    # faces ui
     faces_ui = faces_sub.add_parser("ui", help="Start face management web UI")
     faces_ui.add_argument("--db", help=_DEFAULT_DB_HELP)
     faces_ui.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     faces_ui.add_argument("--port", type=int, default=8766, help="Port (default: 8766)")
 
-    # --- query subcommand ---
+
+def _add_query_subcommand(subparsers: Any) -> None:
     query_p = subparsers.add_parser("query", help="Query images with advanced filters")
     query_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     query_p.add_argument("--tag", help="Filter by tag (case-insensitive substring match)")
@@ -345,21 +327,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     query_p.add_argument("--limit", type=int, help="Max results to return")
 
-    # --- judge subcommand ---
+
+def _add_judge_subcommand(subparsers: Any) -> None:
     judge_p = subparsers.add_parser(
         "judge",
         help="Score photos with the professional photo-judge rubric",
     )
     judge_src = judge_p.add_mutually_exclusive_group(required=False)
+    judge_src.add_argument("--input-dir", metavar="DIR", help="Directory of images to judge")
     judge_src.add_argument(
-        "--input-dir",
-        metavar="DIR",
-        help="Directory of images to judge",
-    )
-    judge_src.add_argument(
-        "--photos-library",
-        metavar="LIBRARY",
-        help="Path to Photos library (.photoslibrary)",
+        "--photos-library", metavar="LIBRARY", help="Path to Photos library (.photoslibrary)"
     )
     judge_p.add_argument(
         "--extensions",
@@ -457,28 +434,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_web_flags(judge_p)
 
-    # --- tags subcommand group ---
+
+def _add_tags_subcommand(subparsers: Any) -> None:
     tags_p = subparsers.add_parser("tags", help="Manage tags across the image database")
     tags_sub = tags_p.add_subparsers(dest="tags_action")
 
-    # tags list
     tags_list_p = tags_sub.add_parser("list", help="List all tags with image counts")
     tags_list_p.add_argument("--db", help=_DEFAULT_DB_HELP)
 
-    # tags rename
     tags_rename_p = tags_sub.add_parser("rename", help="Rename a tag across all images")
     tags_rename_p.add_argument("old_tag", help="Tag to rename")
     tags_rename_p.add_argument("new_tag", help="Replacement tag")
     tags_rename_p.add_argument("--dry-run", action="store_true", help="Preview without writing")
     tags_rename_p.add_argument("--db", help=_DEFAULT_DB_HELP)
 
-    # tags delete
     tags_delete_p = tags_sub.add_parser("delete", help="Delete a tag from all images")
     tags_delete_p.add_argument("tag", help="Tag to delete")
     tags_delete_p.add_argument("--dry-run", action="store_true", help="Preview without writing")
     tags_delete_p.add_argument("--db", help=_DEFAULT_DB_HELP)
 
-    # tags merge
     tags_merge_p = tags_sub.add_parser(
         "merge", help="Merge source tag into target tag across all images"
     )
@@ -486,6 +460,26 @@ def build_parser() -> argparse.ArgumentParser:
     tags_merge_p.add_argument("target_tag", help="Tag to add (source is removed)")
     tags_merge_p.add_argument("--dry-run", action="store_true", help="Preview without writing")
     tags_merge_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="pyimgtag",
+        description="Tag images using a local Ollama Gemma vision model "
+        "with EXIF GPS reverse geocoding.",
+    )
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+
+    subparsers = p.add_subparsers(dest="subcommand")
+
+    _add_run_subcommand(subparsers)
+    _add_status_reprocess_preflight_subcommands(subparsers)
+    _add_cleanup_subcommands(subparsers)
+    _add_review_subcommand(subparsers)
+    _add_faces_subcommand(subparsers)
+    _add_query_subcommand(subparsers)
+    _add_judge_subcommand(subparsers)
+    _add_tags_subcommand(subparsers)
 
     return p
 

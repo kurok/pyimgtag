@@ -18,6 +18,14 @@ if TYPE_CHECKING:
 
     from pyimgtag.models import JudgeResult
 
+# Default limit for get_all_judge_results; kept as a named constant so it
+# is easy to find and change in one place.
+_DEFAULT_JUDGE_RESULTS_LIMIT: int = 200
+
+# Default batch size for iter_image_paths; 1 000 rows per round-trip
+# keeps memory usage low on a 22 k-photo library.
+_DEFAULT_PATH_BATCH_SIZE: int = 1000
+
 
 class ProgressDB:
     """Track which images have been processed to enable incremental re-runs."""
@@ -251,42 +259,20 @@ class ProgressDB:
         "shot_asc": "pi.image_date ASC NULLS LAST, pi.file_path ASC",
     }
 
-    def query_images(
-        self,
-        tag: str | None = None,
-        has_text: bool | None = None,
-        cleanup_class: str | None = None,
-        scene_category: str | None = None,
-        city: str | None = None,
-        country: str | None = None,
-        status: str | None = None,
-        limit: int | None = None,
-        min_judge_score: int | None = None,
-        max_judge_score: int | None = None,
-        judged: bool | None = None,
-        sort: str = "path_asc",
-    ) -> list[dict]:
-        """Query images with advanced filters.
-
-        Args:
-            tag: Case-insensitive substring match against any tag value.
-            has_text: True = only images with text; False = only without; None = any.
-            cleanup_class: Exact match against cleanup_class ('delete', 'review', etc.).
-            scene_category: Exact match against scene_category.
-            city: Case-insensitive substring match against nearest_city.
-            country: Case-insensitive substring match against nearest_country.
-            status: Exact match against status ('ok', 'error').
-            limit: Max rows to return. None = no limit.
-            min_judge_score: Only return images whose judge weighted_score >= this value.
-            max_judge_score: Only return images whose judge weighted_score <= this value.
-            judged: True = only images with a judge_scores row; False = only un-judged;
-                None = any.
-            sort: One of ``path_asc`` (default), ``path_desc``, ``newest``,
-                ``oldest``, ``judge_desc``, ``judge_asc``.
-
-        Returns:
-            List of image metadata dicts.
-        """
+    @staticmethod
+    def _build_query_conditions(
+        tag: str | None,
+        has_text: bool | None,
+        cleanup_class: str | None,
+        scene_category: str | None,
+        city: str | None,
+        country: str | None,
+        status: str | None,
+        min_judge_score: int | None,
+        max_judge_score: int | None,
+        judged: bool | None,
+    ) -> tuple[list[str], list[object]]:
+        """Translate filter arguments into ``(conditions, params)`` for query_images."""
         conditions: list[str] = []
         params: list[object] = []
 
@@ -325,10 +311,14 @@ class ProgressDB:
         elif judged is False:
             conditions.append("js.weighted_score IS NULL")
 
+        return conditions, params
+
+    @staticmethod
+    def _build_images_query(conditions: list[str], order_clause: str, limit: int | None) -> str:
+        """Assemble the SELECT SQL for query_images from pre-validated parts."""
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
-        order_clause = self._QUERY_SORTS.get(sort, self._QUERY_SORTS["path_asc"])
-        query = (  # nosec B608
+        return (  # nosec B608
             "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, pi.status, "
             "pi.cleanup_class, pi.scene_category, pi.emotional_tone, pi.event_hint, "
             "pi.significance, pi.nearest_city, pi.nearest_region, pi.nearest_country, "
@@ -339,6 +329,57 @@ class ProgressDB:
             + f" ORDER BY {order_clause} "  # nosec B608
             + limit_clause
         )
+
+    def query_images(
+        self,
+        tag: str | None = None,
+        has_text: bool | None = None,
+        cleanup_class: str | None = None,
+        scene_category: str | None = None,
+        city: str | None = None,
+        country: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        min_judge_score: int | None = None,
+        max_judge_score: int | None = None,
+        judged: bool | None = None,
+        sort: str = "path_asc",
+    ) -> list[dict]:
+        """Query images with advanced filters.
+
+        Args:
+            tag: Case-insensitive substring match against any tag value.
+            has_text: True = only images with text; False = only without; None = any.
+            cleanup_class: Exact match against cleanup_class ('delete', 'review', etc.).
+            scene_category: Exact match against scene_category.
+            city: Case-insensitive substring match against nearest_city.
+            country: Case-insensitive substring match against nearest_country.
+            status: Exact match against status ('ok', 'error').
+            limit: Max rows to return. None = no limit.
+            min_judge_score: Only return images whose judge weighted_score >= this value.
+            max_judge_score: Only return images whose judge weighted_score <= this value.
+            judged: True = only images with a judge_scores row; False = only un-judged;
+                None = any.
+            sort: One of ``path_asc`` (default), ``path_desc``, ``newest``,
+                ``oldest``, ``judge_desc``, ``judge_asc``.
+
+        Returns:
+            List of image metadata dicts.
+        """
+        conditions, params = self._build_query_conditions(
+            tag,
+            has_text,
+            cleanup_class,
+            scene_category,
+            city,
+            country,
+            status,
+            min_judge_score,
+            max_judge_score,
+            judged,
+        )
+        order_clause = self._QUERY_SORTS.get(sort, self._QUERY_SORTS["path_asc"])
+        query = self._build_images_query(conditions, order_clause, limit)
         rows = self._conn.execute(query, params).fetchall()
         return [self._query_row_to_dict(r) for r in rows]
 
@@ -396,6 +437,33 @@ class ProgressDB:
         ).fetchall()
         return [(r[0], r[1]) for r in rows]
 
+    def _iter_tag_rows(self) -> list[tuple[str, list[str]]]:
+        """Return ``(file_path, tags)`` for every row that has tags.
+
+        Used by :meth:`rename_tag`, :meth:`delete_tag`, and
+        :meth:`merge_tags` to share the fetch-parse boilerplate.  Rows
+        whose ``tags`` column cannot be parsed as JSON are silently
+        excluded.
+        """
+        rows = self._conn.execute(
+            "SELECT file_path, tags FROM processed_images WHERE tags IS NOT NULL"
+        ).fetchall()
+        result = []
+        for file_path, tags_raw in rows:
+            try:
+                tags: list[str] = json.loads(tags_raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            result.append((file_path, tags))
+        return result
+
+    def _write_tags(self, file_path: str, new_tags: list[str]) -> None:
+        """Overwrite the tags for *file_path* inside an open transaction."""
+        self._conn.execute(
+            "UPDATE processed_images SET tags = ? WHERE file_path = ?",
+            (json.dumps(new_tags), file_path),
+        )
+
     def rename_tag(self, old_tag: str, new_tag: str) -> int:
         """Rename a tag across all images.
 
@@ -412,16 +480,9 @@ class ProgressDB:
         """
         old_lower = old_tag.lower()
         new_lower = new_tag.lower()
-        rows = self._conn.execute(
-            "SELECT file_path, tags FROM processed_images WHERE tags IS NOT NULL"
-        ).fetchall()
         updated = 0
         with self._conn:
-            for file_path, tags_raw in rows:
-                try:
-                    tags: list[str] = json.loads(tags_raw)
-                except (json.JSONDecodeError, TypeError):
-                    continue
+            for file_path, tags in self._iter_tag_rows():
                 tags_lower = [t.lower() for t in tags]
                 if old_lower not in tags_lower:
                     continue
@@ -433,10 +494,7 @@ class ProgressDB:
                     if replacement not in seen:
                         seen.add(replacement)
                         new_tags.append(replacement)
-                self._conn.execute(
-                    "UPDATE processed_images SET tags = ? WHERE file_path = ?",
-                    (json.dumps(new_tags), file_path),
-                )
+                self._write_tags(file_path, new_tags)
                 updated += 1
         return updated
 
@@ -450,23 +508,13 @@ class ProgressDB:
             Number of images updated.
         """
         tag_lower = tag.lower()
-        rows = self._conn.execute(
-            "SELECT file_path, tags FROM processed_images WHERE tags IS NOT NULL"
-        ).fetchall()
         updated = 0
         with self._conn:
-            for file_path, tags_raw in rows:
-                try:
-                    tags: list[str] = json.loads(tags_raw)
-                except (json.JSONDecodeError, TypeError):
-                    continue
+            for file_path, tags in self._iter_tag_rows():
                 new_tags = [t for t in tags if t.lower() != tag_lower]
                 if len(new_tags) == len(tags):
                     continue
-                self._conn.execute(
-                    "UPDATE processed_images SET tags = ? WHERE file_path = ?",
-                    (json.dumps(new_tags), file_path),
-                )
+                self._write_tags(file_path, new_tags)
                 updated += 1
         return updated
 
@@ -485,26 +533,16 @@ class ProgressDB:
         """
         src_lower = source_tag.lower()
         tgt_lower = target_tag.lower()
-        rows = self._conn.execute(
-            "SELECT file_path, tags FROM processed_images WHERE tags IS NOT NULL"
-        ).fetchall()
         updated = 0
         with self._conn:
-            for file_path, tags_raw in rows:
-                try:
-                    tags: list[str] = json.loads(tags_raw)
-                except (json.JSONDecodeError, TypeError):
-                    continue
+            for file_path, tags in self._iter_tag_rows():
                 tags_lower = [t.lower() for t in tags]
                 if src_lower not in tags_lower:
                     continue
                 new_tags = [t for t in tags if t.lower() != src_lower]
                 if tgt_lower not in [t.lower() for t in new_tags]:
                     new_tags.append(tgt_lower)
-                self._conn.execute(
-                    "UPDATE processed_images SET tags = ? WHERE file_path = ?",
-                    (json.dumps(new_tags), file_path),
-                )
+                self._write_tags(file_path, new_tags)
                 updated += 1
         return updated
 
@@ -688,7 +726,7 @@ class ProgressDB:
         self._conn.commit()
         return cur.rowcount > 0
 
-    def iter_image_paths(self, batch_size: int = 1000) -> "Iterator[str]":
+    def iter_image_paths(self, batch_size: int = _DEFAULT_PATH_BATCH_SIZE) -> "Iterator[str]":
         """Yield every ``file_path`` from ``processed_images`` in batches.
 
         The drift-cleanup walk runs over a 22 k-row DB on the user's
@@ -1075,7 +1113,7 @@ class ProgressDB:
             },
         }
 
-    def get_all_judge_results(self, limit: int | None = 200) -> list[dict]:
+    def get_all_judge_results(self, limit: int | None = _DEFAULT_JUDGE_RESULTS_LIMIT) -> list[dict]:
         """Return all judge scores ordered by weighted_score descending.
 
         Args:
