@@ -151,20 +151,20 @@ def test_faces_hover_shows_and_hides_preview(page, base_url: str, faces_test_dat
     )
     thumb = card.locator(".face-thumb").first
 
-    # Preview div is created by JS and initially hidden
-    preview_selector = "div[style*='position:fixed'][style*='z-index:9999']"
-    assert page.locator(preview_selector).count() == 1, "Preview overlay element not found in DOM"
-    assert page.locator(preview_selector).evaluate("el => el.style.display") == "none", (
+    # Preview div is created by JS with a stable id and initially hidden
+    preview_sel = "#face-hover-preview"
+    assert page.locator(preview_sel).count() == 1, "Preview overlay #face-hover-preview missing"
+    assert page.locator(preview_sel).evaluate("el => el.style.display") == "none", (
         "Preview overlay should be hidden before hover"
     )
 
     # Hover → preview becomes visible
     thumb.hover()
-    page.wait_for_selector(preview_selector, state="visible", timeout=3000)
+    page.wait_for_selector(preview_sel, state="visible", timeout=3000)
 
     # Move to top-left corner → preview hides
     page.mouse.move(0, 0)
-    page.wait_for_selector(preview_selector, state="hidden", timeout=2000)
+    page.wait_for_selector(preview_sel, state="hidden", timeout=2000)
 
 
 def test_faces_preview_api_returns_jpeg(base_url: str, faces_test_data) -> None:

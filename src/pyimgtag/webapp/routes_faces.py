@@ -52,6 +52,7 @@ __MODAL_JS__
 <script>
 // Hover preview overlay
 const _preview = document.createElement('div');
+_preview.id = 'face-hover-preview';
 _preview.style.cssText = 'display:none;position:fixed;z-index:9999;pointer-events:none;'
   + 'border-radius:8px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.45);';
 document.body.appendChild(_preview);
