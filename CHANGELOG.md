@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.6] - 2026-05-29
+
+### Added
+- **Faces: empty-face placeholder** (#211): trusted persons with 0 scanned faces (Photos-imported before `faces scan` has run) now show *"No faces scanned yet — run faces scan to populate"* instead of a blank card.
+- **Faces: Dismiss faces to trash** (#211): in the Unassigned view, select faces and click "Dismiss (move to trash)" — dismissed faces get `ignored=1` and are excluded from the unassigned pool forever. New **Trash** filter tab shows all dismissed faces; select + "Restore selected" returns them to the unassigned pool. DB migration v10: `ALTER TABLE faces ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0`.
+- **Faces: Rename modal shows trusted person dropdown for merge** (#211): the Rename button (both main page and detail page) now shows a second control — *"Or merge into existing trusted person"* — populated with all trusted+labelled persons. Selecting one merges the current cluster into that person and navigates to their detail page. Selecting from the list also auto-fills the name input.
+
+### Fixed
+- **`faces scan` resume: zero-face images no longer re-processed** (#211): images where no face was detected were re-scanned on every run because nothing was recorded in the `faces` table to skip them. A new `face_scanned_images` table (migration v11) records every scanned path regardless of face count; subsequent `faces scan` runs skip those images immediately. First run after upgrade re-scans zero-face images once to populate the table.
+
 ## [0.16.5] - 2026-05-29
 
 ### Added
