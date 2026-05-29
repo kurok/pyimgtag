@@ -53,6 +53,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .person-name a{color:var(--text);text-decoration:none}
     .person-name a:hover{color:var(--accent);text-decoration:underline}
     .more-hint{font-size:11px;color:var(--muted);margin-bottom:8px}
+    .no-faces-hint{font-size:12px;color:var(--muted);font-style:italic;padding:4px 0 10px}
     .filter-bar{display:flex;gap:6px;padding:4px 32px 12px;align-items:center;flex-wrap:wrap}
     .filter-btn{padding:4px 14px;border-radius:var(--radius-sm);font-size:12px;font-weight:500;
                 border:1px solid var(--border);background:var(--surface);
@@ -87,6 +88,7 @@ __MODAL_JS__
   <button class="filter-btn" data-filter="trusted" onclick="setFilter('trusted')">Trusted</button>
   <button class="filter-btn" data-filter="auto" onclick="setFilter('auto')">Auto</button>
   <button class="filter-btn" data-filter="unassigned" onclick="setFilter('unassigned')">Unassigned</button>
+  <button class="filter-btn" data-filter="trash" onclick="setFilter('trash')">🗑 Trash</button>
 </div>
 <div class="pager" id="pager" style="display:none">
   <button id="btn-prev" onclick="goPage(-1)">\u2190 Previous</button>
@@ -105,12 +107,28 @@ __MODAL_JS__
     <button id="btn-new-person" disabled onclick="createNewPerson()">
       New person from selected
     </button>
+    <button id="btn-dismiss" disabled onclick="dismissSelected()" style="color:var(--muted)">
+      Dismiss (move to trash)
+    </button>
   </div>
   <div class="unassigned-grid" id="unassigned-grid"></div>
   <div class="pager" id="ua-pager" style="display:none">
     <button id="ua-prev" onclick="goUAPage(-1)">\u2190 Previous</button>
     <span id="ua-pager-info"></span>
     <button id="ua-next" onclick="goUAPage(1)">Next \u2192</button>
+  </div>
+</div>
+<div id="trash-section" style="display:none">
+  <div class="assign-bar">
+    <span id="trash-count">0 dismissed faces</span>
+    <button id="btn-restore-all" onclick="restoreSelected()">Restore selected</button>
+    <button id="btn-trash-clear" onclick="clearSelection()">Clear selection</button>
+  </div>
+  <div class="unassigned-grid" id="trash-grid"></div>
+  <div class="pager" id="tr-pager" style="display:none">
+    <button id="tr-prev" onclick="goTRPage(-1)">\u2190 Previous</button>
+    <span id="tr-pager-info"></span>
+    <button id="tr-next" onclick="goTRPage(1)">Next \u2192</button>
   </div>
 </div>
 <script>
@@ -142,21 +160,28 @@ let _total = 0;
 let _filter = 'all';
 let _uaOffset = 0;
 let _uaTotal = 0;
-let _selected = new Set();  // face ids selected in unassigned view
+let _trOffset = 0;
+let _trTotal = 0;
+let _selected = new Set();  // face ids selected in unassigned / trash view
 
 // ── Filter ──────────────────────────────────────────────────────────────────
 function setFilter(f) {
   _filter = f;
   _offset = 0;
   _uaOffset = 0;
+  _trOffset = 0;
   _selected.clear();
   document.querySelectorAll('.filter-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.filter === f));
   const isUA = f === 'unassigned';
-  document.getElementById('persons').style.display = isUA ? 'none' : '';
+  const isTR = f === 'trash';
+  document.getElementById('persons').style.display = (isUA || isTR) ? 'none' : '';
   document.getElementById('pager').style.display = 'none';
   document.getElementById('unassigned-section').style.display = isUA ? '' : 'none';
-  if (isUA) loadUnassigned(); else load();
+  document.getElementById('trash-section').style.display = isTR ? '' : 'none';
+  if (isUA) loadUnassigned();
+  else if (isTR) loadTrash();
+  else load();
 }
 
 function goPage(delta) {
@@ -257,9 +282,14 @@ function clearSelection() {
 
 function updateSelectionUI() {
   const n = _selected.size;
-  document.getElementById('sel-count').textContent = n + ' selected';
-  document.getElementById('btn-assign').disabled = n === 0;
-  document.getElementById('btn-new-person').disabled = n === 0;
+  if (_filter === 'unassigned') {
+    document.getElementById('sel-count').textContent = n + ' selected';
+    document.getElementById('btn-assign').disabled = n === 0;
+    document.getElementById('btn-new-person').disabled = n === 0;
+    document.getElementById('btn-dismiss').disabled = n === 0;
+  } else if (_filter === 'trash') {
+    document.getElementById('trash-count').textContent = n + ' selected';
+  }
 }
 
 async function openAssignModal() {
@@ -290,6 +320,65 @@ async function openAssignModal() {
   );
 }
 
+// ── Rename / merge modal ─────────────────────────────────────────────────────
+async function openRenameModal(personId, currentLabel, onDone) {
+  const allPersons = await fetch('__API_BASE__/api/persons').then(r => r.json());
+  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== personId);
+
+  const body = '<input class="inp" id="m-inp" placeholder="Type a new name…"'
+    + ' style="margin-bottom:8px;display:block;width:100%" />'
+    + '<label style="font-size:12px;color:var(--muted);display:block;margin:6px 0 4px">'
+    + 'Or merge into existing trusted person:</label>'
+    + '<select class="inp" id="m-merge-sel" style="display:block;width:100%">'
+    + '<option value="">— assign a new name only —</option></select>';
+
+  openModal(
+    'Rename / merge person',
+    'Type a new name or pick an existing trusted person to merge this cluster into.',
+    body,
+    'Apply', 'btn-primary',
+    async () => {
+      const sel = document.getElementById('m-merge-sel');
+      const targetId = sel && sel.value ? Number(sel.value) : null;
+      if (targetId) {
+        await fetch('__API_BASE__/api/persons/' + personId + '/merge/' + targetId,
+          {method: 'POST'});
+        closeModal();
+        if (typeof onDone === 'function') onDone(targetId);
+      } else {
+        const val = document.getElementById('m-inp').value.trim();
+        if (!val) return;
+        await fetch('__API_BASE__/api/persons/' + personId + '/label', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label: val}),
+        });
+        closeModal();
+        if (typeof onDone === 'function') onDone(null);
+      }
+    }
+  );
+
+  setTimeout(() => {
+    const inp = document.getElementById('m-inp');
+    const sel = document.getElementById('m-merge-sel');
+    if (inp) { inp.value = currentLabel || ''; inp.focus(); }
+    if (sel && targets.length) {
+      targets.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.label + ' (' + p.face_count + ' face'
+          + (p.face_count !== 1 ? 's' : '') + ')';
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => {
+        const t = targets.find(p => p.id === Number(sel.value));
+        if (t && inp) inp.value = t.label;
+      });
+    }
+  }, 50);
+}
+
 async function createNewPerson() {
   openModal(
     'Create person from selected faces',
@@ -309,6 +398,74 @@ async function createNewPerson() {
     }
   );
   setTimeout(() => document.getElementById('m-inp').focus(), 50);
+}
+
+async function dismissSelected() {
+  if (!_selected.size) return;
+  await Promise.all([..._selected].map(id =>
+    fetch('__API_BASE__/api/faces/' + id + '/ignore', {method: 'POST'})
+  ));
+  _selected.clear();
+  loadUnassigned();
+}
+
+// ── Trash ────────────────────────────────────────────────────────────────────
+function goTRPage(delta) {
+  _trOffset = Math.max(0, Math.min(_trOffset + delta * UA_PAGE_SIZE, _trTotal - 1));
+  _selected.clear();
+  loadTrash();
+}
+
+async function loadTrash() {
+  document.getElementById('status').textContent = 'Loading…';
+  const url = '__API_BASE__/api/faces/ignored?offset=' + _trOffset + '&limit=' + UA_PAGE_SIZE;
+  const data = await fetch(url).then(r => r.json());
+  _trTotal = data.total;
+  document.getElementById('status').textContent = _trTotal + ' dismissed face(s)';
+  document.getElementById('trash-count').textContent = '0 selected';
+
+  const grid = document.getElementById('trash-grid');
+  grid.innerHTML = '';
+  data.items.forEach(f => {
+    if (!f.thumb) return;
+    const img = document.createElement('img');
+    img.className = 'face-thumb selectable' + (_selected.has(f.id) ? ' selected' : '');
+    img.src = 'data:image/jpeg;base64,' + f.thumb;
+    img.dataset.faceId = f.id;
+    img.title = 'Click to select for restore';
+    img.style.opacity = '0.6';
+    img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
+    img.addEventListener('mouseleave', hidePreview);
+    img.addEventListener('click', () => {
+      hidePreview();
+      _selected.has(f.id) ? _selected.delete(f.id) : _selected.add(f.id);
+      img.classList.toggle('selected', _selected.has(f.id));
+      img.style.opacity = _selected.has(f.id) ? '1' : '0.6';
+      updateSelectionUI();
+    });
+    grid.appendChild(img);
+  });
+
+  const pager = document.getElementById('tr-pager');
+  if (_trTotal > UA_PAGE_SIZE) {
+    pager.style.display = 'flex';
+    const end = Math.min(_trOffset + UA_PAGE_SIZE, _trTotal);
+    document.getElementById('tr-pager-info').textContent =
+      (_trOffset + 1) + '–' + end + ' of ' + _trTotal;
+    document.getElementById('tr-prev').disabled = _trOffset === 0;
+    document.getElementById('tr-next').disabled = end >= _trTotal;
+  } else {
+    pager.style.display = 'none';
+  }
+}
+
+async function restoreSelected() {
+  if (!_selected.size) return;
+  await Promise.all([..._selected].map(id =>
+    fetch('__API_BASE__/api/faces/' + id + '/restore', {method: 'POST'})
+  ));
+  _selected.clear();
+  loadTrash();
 }
 
 function renderPerson(p, faces) {
@@ -349,8 +506,10 @@ function renderPerson(p, faces) {
   const sorted = faces.slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
   const facesGrid = document.createElement('div');
   facesGrid.className = 'faces-grid';
+  let thumbsShown = 0;
   sorted.slice(0, 8).forEach((f, i) => {
     if (!f.thumb) return;
+    thumbsShown++;
     const img = document.createElement('img');
     img.className = i === 0 ? 'face-thumb hero' : 'face-thumb';
     img.src = 'data:image/jpeg;base64,' + f.thumb;
@@ -367,6 +526,14 @@ function renderPerson(p, faces) {
     });
     facesGrid.appendChild(img);
   });
+  if (thumbsShown === 0) {
+    const hint = document.createElement('div');
+    hint.className = 'no-faces-hint';
+    hint.textContent = p.face_count === 0
+      ? 'No faces scanned yet — run faces scan to populate'
+      : 'Face images not available';
+    facesGrid.appendChild(hint);
+  }
   card.appendChild(facesGrid);
 
   const acts = document.createElement('div');
@@ -374,28 +541,12 @@ function renderPerson(p, faces) {
 
   const renBtn = document.createElement('button');
   renBtn.textContent = 'Rename';
-  renBtn.addEventListener('click', () => {
-    openModal(
-      'Rename person',
-      'Enter a new name for this person.',
-      '<input class="inp" id="m-inp" placeholder="Name" />',
-      'Rename', 'btn-primary',
-      async () => {
-        const val = document.getElementById('m-inp').value.trim();
-        if (!val) return;
-        await fetch('__API_BASE__/api/persons/' + p.id + '/label', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({label: val}),
-        });
-        closeModal();
-        load();
-      }
-    );
-    // Set value via DOM after modal renders — avoids XSS via innerHTML attribute
-    document.getElementById('m-inp').value = p.label || '';
-    setTimeout(() => document.getElementById('m-inp').focus(), 50);
-  });
+  renBtn.addEventListener('click', () =>
+    openRenameModal(p.id, p.label, targetId => {
+      if (targetId) window.location.href = '__API_BASE__/persons/' + targetId;
+      else load();
+    })
+  );
   acts.appendChild(renBtn);
 
   const delBtn = document.createElement('button');
@@ -586,26 +737,62 @@ function renderFaces(faces) {
   });
 }
 
-document.getElementById('rename-btn').addEventListener('click', () => {
+document.getElementById('rename-btn').addEventListener('click', async () => {
+  const allPersons = await fetch(_apiBase + '/api/persons').then(r => r.json());
+  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== _personId);
+
+  const body = '<input class="inp" id="m-inp" placeholder="Type a new name…"'
+    + ' style="margin-bottom:8px;display:block;width:100%" />'
+    + '<label style="font-size:12px;color:var(--muted);display:block;margin:6px 0 4px">'
+    + 'Or merge into existing trusted person:</label>'
+    + '<select class="inp" id="m-merge-sel" style="display:block;width:100%">'
+    + '<option value="">— assign a new name only —</option></select>';
+
   openModal(
-    'Rename person',
-    'Enter a new name for this person.',
-    '<input class="inp" id="m-inp" placeholder="Name" />',
-    'Rename', 'btn-primary',
+    'Rename / merge person',
+    'Type a new name or pick an existing trusted person to merge this cluster into.',
+    body,
+    'Apply', 'btn-primary',
     async () => {
-      const val = document.getElementById('m-inp').value.trim();
-      if (!val) return;
-      await fetch(_apiBase + '/api/persons/' + _personId + '/label', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({label: val}),
-      });
-      closeModal();
-      load();
+      const sel = document.getElementById('m-merge-sel');
+      const targetId = sel && sel.value ? Number(sel.value) : null;
+      if (targetId) {
+        await fetch(_apiBase + '/api/persons/' + _personId + '/merge/' + targetId,
+          {method: 'POST'});
+        closeModal();
+        window.location.href = _apiBase + '/persons/' + targetId;
+      } else {
+        const val = document.getElementById('m-inp').value.trim();
+        if (!val) return;
+        await fetch(_apiBase + '/api/persons/' + _personId + '/label', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label: val}),
+        });
+        closeModal();
+        load();
+      }
     }
   );
-  document.getElementById('m-inp').value = (_person && _person.label) || '';
-  setTimeout(() => document.getElementById('m-inp').focus(), 50);
+
+  setTimeout(() => {
+    const inp = document.getElementById('m-inp');
+    const sel = document.getElementById('m-merge-sel');
+    if (inp) { inp.value = (_person && _person.label) || ''; inp.focus(); }
+    if (sel && targets.length) {
+      targets.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.label + ' (' + p.face_count + ' face'
+          + (p.face_count !== 1 ? 's' : '') + ')';
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => {
+        const t = targets.find(tp => tp.id === Number(sel.value));
+        if (t && inp) inp.value = t.label;
+      });
+    }
+  }, 50);
 });
 
 document.getElementById('confirm-btn').addEventListener('click', async () => {
@@ -950,6 +1137,44 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     @router.delete("/api/persons/{person_id}")
     async def delete_person(person_id: int) -> dict:
         db.delete_person(person_id)
+        return {"ok": True}
+
+    @router.get("/api/faces/ignored")
+    async def list_ignored_faces(offset: int = 0, limit: int = 40) -> dict:
+        """Return a page of ignored (trashed) faces with thumbnails."""
+        import asyncio
+
+        limit = min(max(limit, 1), 200)
+        all_faces = db.get_ignored_faces()
+        total = len(all_faces)
+        page = all_faces[offset : offset + limit]
+
+        def _gen_thumbs() -> list[dict]:
+            return [
+                {
+                    **f,
+                    "thumb": face_thumbnail_b64(
+                        f["image_path"],
+                        f["bbox_x"],
+                        f["bbox_y"],
+                        f["bbox_w"],
+                        f["bbox_h"],
+                    ),
+                }
+                for f in page
+            ]
+
+        items = await asyncio.to_thread(_gen_thumbs)
+        return {"total": total, "items": items}
+
+    @router.post("/api/faces/{face_id}/ignore")
+    async def ignore_face(face_id: int) -> dict:
+        db.ignore_face(face_id)
+        return {"ok": True}
+
+    @router.post("/api/faces/{face_id}/restore")
+    async def restore_face(face_id: int) -> dict:
+        db.restore_face(face_id)
         return {"ok": True}
 
     @router.post("/api/faces/{face_id}/unassign")

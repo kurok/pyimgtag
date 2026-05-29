@@ -104,6 +104,17 @@ class ProgressDB:
         (9, "CREATE INDEX IF NOT EXISTS idx_pi_status ON processed_images(status)"),
         (9, "CREATE INDEX IF NOT EXISTS idx_pi_cleanup ON processed_images(cleanup_class)"),
         (9, "CREATE INDEX IF NOT EXISTS idx_pi_date ON processed_images(processed_at)"),
+        # 0.16.6: faces can be explicitly dismissed so auto-clustering skips them.
+        (10, "ALTER TABLE faces ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0"),
+        (10, "CREATE INDEX IF NOT EXISTS idx_faces_ignored ON faces(ignored)"),
+        # 0.16.6: track images already face-scanned so zero-face images are not
+        # re-scanned on every subsequent faces scan run.
+        (
+            11,
+            """CREATE TABLE IF NOT EXISTS face_scanned_images (
+                image_path TEXT PRIMARY KEY
+            )""",
+        ),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -878,6 +889,22 @@ class ProgressDB:
             is not None
         )
 
+    def mark_face_scanned(self, image_path: str) -> None:
+        """Record that an image has been fully face-scanned (even if 0 faces found)."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO face_scanned_images (image_path) VALUES (?)",
+            (image_path,),
+        )
+        self._conn.commit()
+
+    def is_face_scanned(self, image_path: str) -> bool:
+        """Return True if the image has already been face-scanned."""
+        return bool(
+            self._conn.execute(
+                "SELECT 1 FROM face_scanned_images WHERE image_path = ?", (image_path,)
+            ).fetchone()
+        )
+
     def get_faces_for_image(self, image_path: str) -> list[dict]:
         """Return all face rows for an image path."""
         rows = self._conn.execute(
@@ -1014,11 +1041,42 @@ class ProgressDB:
         self._conn.execute(f"DELETE FROM persons WHERE id IN ({placeholders})", auto_ids)  # nosec B608
         self._conn.commit()
 
-    def get_unassigned_faces(self) -> list[dict]:
-        """Return faces that have no person assignment."""
+    def ignore_face(self, face_id: int) -> None:
+        """Mark a face as ignored so it is excluded from auto-clustering."""
+        self._conn.execute(
+            "UPDATE faces SET ignored = 1, person_id = NULL WHERE id = ?", (face_id,)
+        )
+        self._conn.commit()
+
+    def restore_face(self, face_id: int) -> None:
+        """Remove the ignored flag from a face, returning it to the unassigned pool."""
+        self._conn.execute("UPDATE faces SET ignored = 0 WHERE id = ?", (face_id,))
+        self._conn.commit()
+
+    def get_ignored_faces(self) -> list[dict]:
+        """Return all faces marked as ignored (the trash bin)."""
         rows = self._conn.execute(
             "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
-            "FROM faces WHERE person_id IS NULL"
+            "FROM faces WHERE ignored = 1"
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "image_path": r[1],
+                "bbox_x": r[2],
+                "bbox_y": r[3],
+                "bbox_w": r[4],
+                "bbox_h": r[5],
+                "confidence": r[6],
+            }
+            for r in rows
+        ]
+
+    def get_unassigned_faces(self) -> list[dict]:
+        """Return faces that have no person assignment and are not ignored."""
+        rows = self._conn.execute(
+            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
+            "FROM faces WHERE person_id IS NULL AND ignored = 0"
         ).fetchall()
         return [
             {
