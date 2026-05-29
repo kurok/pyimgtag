@@ -951,8 +951,29 @@ class ProgressDB:
         return result
 
     def update_person_label(self, person_id: int, label: str) -> None:
-        """Update the display label for a person."""
-        self._conn.execute("UPDATE persons SET label = ? WHERE id = ?", (label, person_id))
+        """Update the display label for a person.
+
+        A non-empty label is treated as a manual confirmation — the person is
+        also marked ``confirmed=1, trusted=1`` so it survives re-clustering.
+        """
+        if label:
+            self._conn.execute(
+                "UPDATE persons SET label = ?, confirmed = 1, trusted = 1 WHERE id = ?",
+                (label, person_id),
+            )
+        else:
+            self._conn.execute("UPDATE persons SET label = ? WHERE id = ?", (label, person_id))
+        self._conn.commit()
+
+    def confirm_person(self, person_id: int) -> None:
+        """Mark a person cluster as confirmed and trusted.
+
+        Confirmed persons survive ``clear_auto_persons`` re-clustering and
+        their badge changes from AUTO → TRUSTED in the UI.
+        """
+        self._conn.execute(
+            "UPDATE persons SET confirmed = 1, trusted = 1 WHERE id = ?", (person_id,)
+        )
         self._conn.commit()
 
     def merge_persons(self, source_id: int, target_id: int) -> None:
