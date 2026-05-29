@@ -57,6 +57,7 @@ _preview.style.cssText = 'display:none;position:fixed;z-index:9999;pointer-event
 document.body.appendChild(_preview);
 const _previewImg = document.createElement('img');
 _previewImg.style.cssText = 'display:block;max-width:320px;max-height:320px;';
+_previewImg.addEventListener('error', hidePreview);
 _preview.appendChild(_previewImg);
 
 function showPreview(faceId, rect) {
@@ -266,41 +267,55 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         from fastapi.responses import Response
         from PIL import Image, ImageDraw
 
+        from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic
+
         face = db.get_face_by_id(face_id)
         if face is None:
             raise HTTPException(status_code=404, detail="Face not found")
+
+        image_path = face["image_path"]
         try:
-            img = Image.open(face["image_path"]).convert("RGB")
+            if is_heic(image_path):
+                image_path = str(convert_heic_to_jpeg(image_path))
+            img = Image.open(image_path).convert("RGB")
         except Exception:
             raise HTTPException(status_code=404, detail="Image not readable")
 
-        # Scale bounding box to actual image size (face_detection resizes to max_dim)
-        # The bbox is stored in resized coordinates; recover scale factor.
-        max_dim = 1280
-        w, h = img.size
-        scale = min(max_dim / w, max_dim / h, 1.0)
-        if scale < 1.0:
-            rw = int(w * scale)
+        # Scale bbox from detection space (max_dim=1280) to full-image coords.
+        # face_detection resizes images to 1280px on the long side before detecting,
+        # so all stored bbox values are in that coordinate space.
+        detect_max = 1280
+        iw, ih = img.size
+        if max(iw, ih) > detect_max:
+            det_scale = detect_max / max(iw, ih)
+            rw = int(iw * det_scale)
+            inv = iw / rw
+            bx = round(face["bbox_x"] * inv)
+            by = round(face["bbox_y"] * inv)
+            bw = round(face["bbox_w"] * inv)
+            bh = round(face["bbox_h"] * inv)
         else:
-            rw = w
-        factor = w / rw  # bbox was recorded at rw×rh, display at w×h
-
-        x = int(face["bbox_x"] * factor)
-        y = int(face["bbox_y"] * factor)
-        bw = int(face["bbox_w"] * factor)
-        bh = int(face["bbox_h"] * factor)
+            bx = face["bbox_x"]
+            by = face["bbox_y"]
+            bw = face["bbox_w"]
+            bh = face["bbox_h"]
 
         draw = ImageDraw.Draw(img)
-        lw = max(3, int(min(w, h) / 150))
-        draw.rectangle([x, y, x + bw, y + bh], outline="red", width=lw)
+        lw = max(2, round(max(bw, bh) / 30))
+        draw.rectangle([bx, by, bx + bw, by + bh], outline="red", width=lw)
 
-        # Downscale for preview if large
-        preview_max = 800
-        if max(w, h) > preview_max:
-            img.thumbnail((preview_max, preview_max), Image.Resampling.LANCZOS)
+        # Crop to the face region with generous padding so the preview is an
+        # enlarged face image rather than a tiny red box on a full photo.
+        pad = int(max(bw, bh) * 0.8)
+        left = max(0, bx - pad)
+        top = max(0, by - pad)
+        right = min(iw, bx + bw + pad)
+        bottom = min(ih, by + bh + pad)
+        cropped = img.crop((left, top, right, bottom))
+        cropped.thumbnail((400, 400), Image.Resampling.LANCZOS)
 
         buf = BytesIO()
-        img.save(buf, format="JPEG", quality=85)
+        cropped.save(buf, format="JPEG", quality=85)
         return Response(content=buf.getvalue(), media_type="image/jpeg")
 
     async def update_label(person_id: int, body: _LabelBody = Body(...)) -> dict:

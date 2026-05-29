@@ -49,3 +49,29 @@ class TestFaceThumbnailB64:
         path = self._make_image(tmp_path)
         result = face_thumbnail_b64(path, bbox_x=0, bbox_y=0, bbox_w=0, bbox_h=0)
         assert result is None
+
+    def test_bbox_scaled_for_large_image(self, tmp_path):
+        # Image is 4x the detection max (1280) on the long side.
+        # A face at detection-space coords (100, 100, 80, 80) should be
+        # scaled up to ~(400, 400, 320, 320) in full-image space.
+        # Paint a bright red face region at the expected full-image crop site
+        # and a black background everywhere else — if scaling is wrong the
+        # crop will hit the black background and return a near-black thumbnail.
+        full_w, full_h = 5120, 3840  # long side = 5120 → detect scale = 1280/5120 = 0.25
+        # det bbox (100, 100, 80, 80) → full-image coords ≈ (400, 400, 320, 320)
+        img = Image.new("RGB", (full_w, full_h), color=(0, 0, 0))
+        face_region = Image.new("RGB", (320, 320), color=(255, 0, 0))
+        img.paste(face_region, (400, 400))
+        path = tmp_path / "large.jpg"
+        img.save(str(path), "JPEG")
+
+        result = face_thumbnail_b64(str(path), bbox_x=100, bbox_y=100, bbox_w=80, bbox_h=80)
+        assert result is not None
+        data = base64.b64decode(result)
+        thumb = Image.open(io.BytesIO(data)).convert("RGB")
+        r_bytes = thumb.split()[0].tobytes()
+        avg_r = sum(r_bytes) / len(r_bytes)
+        # If bbox was correctly scaled the crop hits the red region → avg red > 80
+        # (JPEG compression reduces peak values slightly).
+        # If bbox was not scaled the crop hits the black background → avg red ≈ 0.
+        assert avg_r > 80, f"Expected bright red crop (avg_r={avg_r:.1f}), got dark — bbox not scaled"

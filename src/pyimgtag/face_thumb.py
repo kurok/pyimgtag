@@ -8,6 +8,10 @@ import math
 
 from PIL import Image
 
+# face_detection resizes images to this max dimension before detecting faces,
+# so all stored bbox coords are in that coordinate space.
+_DETECT_MAX_DIM = 1280
+
 
 def face_thumbnail_b64(
     image_path: str,
@@ -36,8 +40,27 @@ def face_thumbnail_b64(
         return None
 
     try:
-        with Image.open(image_path) as src:
+        from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic
+
+        if is_heic(image_path):
+            converted = convert_heic_to_jpeg(image_path)
+            src_path = str(converted)
+        else:
+            src_path = image_path
+
+        with Image.open(src_path) as src:
             iw, ih = src.size
+
+            # bbox coords are in detection space (max_dim=1280); scale to full image.
+            if max(iw, ih) > _DETECT_MAX_DIM:
+                det_scale = _DETECT_MAX_DIM / max(iw, ih)
+                rw = int(iw * det_scale)
+                inv = iw / rw
+                bbox_x = round(bbox_x * inv)
+                bbox_y = round(bbox_y * inv)
+                bbox_w = round(bbox_w * inv)
+                bbox_h = round(bbox_h * inv)
+
             pad_x = math.ceil(bbox_w * padding)
             pad_y = math.ceil(bbox_h * padding)
 
