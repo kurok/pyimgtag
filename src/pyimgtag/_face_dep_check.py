@@ -94,7 +94,9 @@ def _ensure_face_dep() -> ModuleType:
     """
     try:
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
+            warnings.filterwarnings(
+                "ignore", message="pkg_resources is deprecated", category=UserWarning
+            )
             import face_recognition_models  # noqa: F401
     except ModuleNotFoundError as exc:
         # Disambiguate "models package missing" vs. "models package
