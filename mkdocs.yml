@@ -39,3 +39,12 @@ nav:
   - Changelog: changelog.md
   - Contributing: contributing.md
   - Security: security.md
+
+# docs/ pages are thin wrappers that include root-level markdown files via
+# pymdownx.snippets (--8<-- "README.md" etc.). Those root files contain
+# cross-references like [CONTRIBUTING.md](CONTRIBUTING.md) which are valid
+# relative links on GitHub but resolve to absent paths under docs/. Suppress
+# the resulting "not found" link warnings so CI stays clean.
+validation:
+  links:
+    not_found: ignore
