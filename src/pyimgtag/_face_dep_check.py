@@ -16,6 +16,7 @@ the import graph until a face operation is actually requested.
 from __future__ import annotations
 
 import sys
+import warnings
 from types import ModuleType
 
 
@@ -92,7 +93,9 @@ def _ensure_face_dep() -> ModuleType:
         ImportError: If ``face_recognition`` itself is not installed.
     """
     try:
-        import face_recognition_models  # noqa: F401
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="pkg_resources")
+            import face_recognition_models  # noqa: F401
     except ModuleNotFoundError as exc:
         # Disambiguate "models package missing" vs. "models package
         # installed but its `from pkg_resources import …` fails".

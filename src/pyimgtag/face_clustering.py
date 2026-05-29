@@ -71,3 +71,25 @@ def cluster_faces(
         result[person_id] = fids
 
     return result
+
+
+def recluster_auto(
+    db: ProgressDB,
+    eps: float = _DEFAULT_EPS,
+    min_samples: int = _DEFAULT_MIN_SAMPLES,
+) -> dict[int, list[int]]:
+    """Clear auto-clustered persons and re-run clustering from scratch.
+
+    Trusted and confirmed persons are preserved. Use this for periodic
+    background re-clustering during a scan so the faces UI stays current.
+
+    Args:
+        db: ProgressDB instance.
+        eps: DBSCAN neighbourhood radius.
+        min_samples: Minimum faces to form a cluster.
+
+    Returns:
+        Same as :func:`cluster_faces`.
+    """
+    db.clear_auto_persons()
+    return cluster_faces(db, eps=eps, min_samples=min_samples)
