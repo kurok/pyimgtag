@@ -1048,6 +1048,25 @@ class ProgressDB:
         """Return total number of detected faces."""
         return self._conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0]
 
+    def get_face_by_id(self, face_id: int) -> dict | None:
+        """Return a single face record by id, or None if not found."""
+        row = self._conn.execute(
+            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
+            "FROM faces WHERE id = ?",
+            (face_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "image_path": row[1],
+            "bbox_x": row[2],
+            "bbox_y": row[3],
+            "bbox_w": row[4],
+            "bbox_h": row[5],
+            "confidence": row[6],
+        }
+
     def save_judge_result(self, result: "JudgeResult") -> None:
         """Persist a judge scoring result. Replaces any existing entry for the same file."""
         s = result.scores
