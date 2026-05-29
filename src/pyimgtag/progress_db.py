@@ -955,6 +955,17 @@ class ProgressDB:
         self._conn.execute("UPDATE persons SET label = ? WHERE id = ?", (label, person_id))
         self._conn.commit()
 
+    def confirm_person(self, person_id: int) -> None:
+        """Mark a person cluster as confirmed and trusted.
+
+        Confirmed persons survive ``clear_auto_persons`` re-clustering and
+        their badge changes from AUTO → TRUSTED in the UI.
+        """
+        self._conn.execute(
+            "UPDATE persons SET confirmed = 1, trusted = 1 WHERE id = ?", (person_id,)
+        )
+        self._conn.commit()
+
     def merge_persons(self, source_id: int, target_id: int) -> None:
         """Reassign all faces from source_id to target_id, then delete source_id."""
         if not self._conn.execute("SELECT 1 FROM persons WHERE id = ?", (target_id,)).fetchone():

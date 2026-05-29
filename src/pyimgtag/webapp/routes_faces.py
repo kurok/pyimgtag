@@ -26,10 +26,12 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
                    font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase}
     .badge-auto{background:rgba(0,0,0,.05);color:var(--muted);font-size:10px;
                 font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase}
-    .faces-grid{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}
+    .faces-grid{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px;align-items:flex-start}
     .face-thumb{width:60px;height:60px;object-fit:cover;border-radius:var(--radius-sm);
                 border:1px solid var(--border);cursor:pointer;transition:opacity .15s}
     .face-thumb:hover{opacity:.7}
+    .face-thumb.hero{width:100px;height:100px;border-width:2px;
+                     border-color:var(--accent);box-shadow:0 2px 8px rgba(0,0,0,.18)}
     .person-actions{display:flex;gap:6px;flex-wrap:wrap}
     .person-actions button{padding:5px 12px;border-radius:var(--radius-sm);font-size:12px;
                            font-weight:500;border:1px solid var(--border);
@@ -38,6 +40,9 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .person-actions button:hover{border-color:var(--accent);color:var(--accent)}
     .del-btn{color:var(--danger)!important;border-color:rgba(255,59,48,.3)!important}
     .del-btn:hover{background:rgba(255,59,48,.05)!important}
+    .confirm-btn{color:#1a7f50!important;border-color:rgba(52,199,89,.4)!important}
+    .confirm-btn:hover{background:rgba(52,199,89,.08)!important}
+    .confirm-btn:disabled{opacity:.5;cursor:default}
     .pager{display:flex;align-items:center;gap:10px;padding:8px 32px 4px;
            font-size:13px;color:var(--muted)}
     .pager button{padding:4px 12px;border-radius:var(--radius-sm);font-size:12px;
@@ -76,7 +81,7 @@ _preview.appendChild(_previewImg);
 function showPreview(faceId, rect) {
   _previewImg.src = '__API_BASE__/api/faces/' + faceId + '/preview';
   const left = Math.min(rect.right + 10, window.innerWidth - 340);
-  const top  = Math.max(rect.top, 8);
+  const top  = Math.min(Math.max(rect.top, 8), window.innerHeight - 340);
   _preview.style.left = left + 'px';
   _preview.style.top  = top  + 'px';
   _preview.style.display = 'block';
@@ -138,25 +143,28 @@ function renderPerson(p, faces) {
   meta.appendChild(cnt);
   card.appendChild(meta);
 
+  // Sort by confidence descending so the best face is first (shown as hero).
+  const sorted = faces.slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
   const facesGrid = document.createElement('div');
   facesGrid.className = 'faces-grid';
-  for (const f of faces.slice(0, 8)) {
-    if (!f.thumb) continue;
+  sorted.slice(0, 8).forEach((f, i) => {
+    if (!f.thumb) return;
     const img = document.createElement('img');
-    img.className = 'face-thumb';
+    img.className = i === 0 ? 'face-thumb hero' : 'face-thumb';
     img.src = 'data:image/jpeg;base64,' + f.thumb;
-    img.title = 'Click to unassign';
+    img.title = i === 0
+      ? 'Best match (confidence ' + (f.confidence ? f.confidence.toFixed(2) : '?') + ') — click to unassign'
+      : 'Click to unassign';
     img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
     img.addEventListener('mouseleave', hidePreview);
     img.addEventListener('click', async () => {
       hidePreview();
       await fetch('__API_BASE__/api/faces/' + f.id + '/unassign', {method: 'POST'});
-      // After an unassign the total may shrink; clamp offset so we stay on a valid page.
       _offset = Math.min(_offset, Math.max(0, _total - PAGE_SIZE - 1));
       load();
     });
     facesGrid.appendChild(img);
-  }
+  });
   card.appendChild(facesGrid);
 
   const acts = document.createElement('div');
@@ -205,6 +213,20 @@ function renderPerson(p, faces) {
     );
   });
   acts.appendChild(delBtn);
+
+  if (!p.trusted) {
+    const cfmBtn = document.createElement('button');
+    cfmBtn.className = 'confirm-btn';
+    cfmBtn.textContent = 'Confirm';
+    cfmBtn.title = 'Mark all faces in this cluster as correctly assigned (sets trusted)';
+    cfmBtn.addEventListener('click', async () => {
+      cfmBtn.disabled = true;
+      cfmBtn.textContent = 'Confirming…';
+      await fetch('__API_BASE__/api/persons/' + p.id + '/confirm', {method: 'POST'});
+      load();
+    });
+    acts.appendChild(cfmBtn);
+  }
 
   card.appendChild(acts);
   return card;
@@ -439,6 +461,11 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     @router.post("/api/faces/{face_id}/unassign")
     async def unassign_face(face_id: int) -> dict:
         db.unassign_face(face_id)
+        return {"ok": True}
+
+    @router.post("/api/persons/{person_id}/confirm")
+    async def confirm_person(person_id: int) -> dict:
+        db.confirm_person(person_id)
         return {"ok": True}
 
     return router
