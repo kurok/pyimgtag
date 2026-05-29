@@ -98,7 +98,7 @@ jobs:
       shell: bash
       run: |
         uv run pytest \
-          ${{ (matrix.os == 'ubuntu-latest') && '--cov' || '--no-cov' }} \
+          ${{ (matrix.os == 'ubuntu-latest') && '--cov' || '--no-cov -n0' }} \
           --junitxml=junit.xml -o junit_family=legacy
     - name: Upload coverage reports to Codecov
       if: matrix.os == 'ubuntu-latest'
