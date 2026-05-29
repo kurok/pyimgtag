@@ -36,3 +36,48 @@ def test_faces_router_mounted_at_root(tmp_path):
     r = client.get("/api/persons")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_with_faces_empty_db(tmp_path):
+    db = ProgressDB(db_path=tmp_path / "progress.db")
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+
+    with TestClient(app) as client:
+        r = client.get("/api/persons/with-faces")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"total": 0, "items": []}
+
+
+def test_with_faces_pagination(tmp_path):
+    """Offset and limit are respected; total reflects the full count."""
+    import sqlite3
+
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+
+    # Seed 12 persons directly so we can test pagination without face thumbnails.
+    con = sqlite3.connect(str(db_path))
+    for i in range(12):
+        con.execute(
+            "INSERT INTO persons (label, confirmed, source, trusted) VALUES (?,0,'auto',1)",
+            (f"Person {i}",),
+        )
+    con.commit()
+    con.close()
+
+    with TestClient(app) as client:
+        r = client.get("/api/persons/with-faces?offset=0&limit=10")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["total"] == 12
+        assert len(body["items"]) == 10
+
+        r2 = client.get("/api/persons/with-faces?offset=10&limit=10")
+        assert r2.status_code == 200
+        body2 = r2.json()
+        assert body2["total"] == 12
+        assert len(body2["items"]) == 2
