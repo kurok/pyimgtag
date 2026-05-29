@@ -241,6 +241,12 @@ def build_about_router() -> Any:
         from pyimgtag import __version__
 
         latest = _latest_version()
+        # If the cached PyPI version is older than what is installed, the cache
+        # is stale (user just upgraded). Force one fresh fetch to correct it.
+        if latest and _is_newer(__version__, latest):
+            _CACHE["value"] = None
+            _CACHE["at"] = 0.0
+            latest = _latest_version()
         update = bool(latest and _is_newer(latest, __version__))
         return {"installed": __version__, "latest": latest, "update": update}
 
