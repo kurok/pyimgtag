@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] - 2026-05-29
+
+### Fixed
+- **Add comment to empty `except` in `ollama_client` to satisfy CodeQL** (#195): CodeQL flagged a bare `except: pass` block; added an explanatory comment to suppress the alert without changing behaviour.
+
+### CI
+- **Fix `setup-uv` `enable-cache` input name and upgrade `actions/cache` to v5** (#194): corrects a deprecated input key in `pr-tests.yml` and `python-package.yml`; bumps `actions/cache` from v3/v4 to v5 across both workflows.
+
 ## [0.13.7] - 2026-05-18
 
 ### Security
