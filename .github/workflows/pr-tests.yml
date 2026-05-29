@@ -28,6 +28,7 @@ jobs:
           activate-environment: true
           enable-cache: "true"
           cache-dependency-glob: "pyproject.toml"
+          cache-suffix: ${{ github.job }}
 
       - name: Install Python dependencies
         run: |
