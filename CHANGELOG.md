@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2026-05-29
+
+### Performance
+- **Faces page: N+1 requests → 1 paginated request** (#203): the JS previously made one HTTP request per person sequentially; now a single `GET /api/persons/with-faces?offset=0&limit=10` returns a full page. All 10 persons' thumbnails are generated in parallel on the server (`asyncio.gather` + `asyncio.to_thread`), so page load time equals the slowest single person rather than the sum of all.
+- **Faces page: pagination** (#203): 10 persons per page with `← Previous | 1–10 of 31 | Next →` controls. Pager is hidden when total ≤ 10.
+- **Thumbnail and preview I/O off event loop** (#203): `get_person_faces` now uses `asyncio.to_thread` so image file I/O no longer blocks FastAPI for concurrent requests.
+
 ## [0.16.1] - 2026-05-29
 
 ### Fixed
