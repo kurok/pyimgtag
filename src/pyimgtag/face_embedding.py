@@ -85,17 +85,19 @@ def scan_and_store(
     """
     path_str = str(Path(image_path))
 
-    if db.get_faces_for_image(path_str):
+    # Skip images that were already scanned in a previous run (regardless of
+    # whether any faces were found — this is what allows incremental resumption).
+    if db.is_face_scanned(path_str):
         return 0
 
     faces = detect_faces(image_path, max_dim=max_dim, model=model)
-    if not faces:
-        return 0
 
-    embeddings = compute_embeddings(image_path, faces, max_dim=max_dim)
+    if faces:
+        embeddings = compute_embeddings(image_path, faces, max_dim=max_dim)
+        for i, detection in enumerate(faces):
+            embedding = embeddings[i] if i < len(embeddings) else None
+            db.insert_face(path_str, detection, embedding=embedding)
 
-    for i, detection in enumerate(faces):
-        embedding = embeddings[i] if i < len(embeddings) else None
-        db.insert_face(path_str, detection, embedding=embedding)
-
+    # Always mark as scanned so zero-face images are never re-processed.
+    db.mark_face_scanned(path_str)
     return len(faces)

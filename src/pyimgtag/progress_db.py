@@ -107,6 +107,14 @@ class ProgressDB:
         # 0.16.6: faces can be explicitly dismissed so auto-clustering skips them.
         (10, "ALTER TABLE faces ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0"),
         (10, "CREATE INDEX IF NOT EXISTS idx_faces_ignored ON faces(ignored)"),
+        # 0.16.6: track images already face-scanned so zero-face images are not
+        # re-scanned on every subsequent faces scan run.
+        (
+            11,
+            """CREATE TABLE IF NOT EXISTS face_scanned_images (
+                image_path TEXT PRIMARY KEY
+            )""",
+        ),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -879,6 +887,22 @@ class ProgressDB:
                 (label,),
             ).fetchone()
             is not None
+        )
+
+    def mark_face_scanned(self, image_path: str) -> None:
+        """Record that an image has been fully face-scanned (even if 0 faces found)."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO face_scanned_images (image_path) VALUES (?)",
+            (image_path,),
+        )
+        self._conn.commit()
+
+    def is_face_scanned(self, image_path: str) -> bool:
+        """Return True if the image has already been face-scanned."""
+        return bool(
+            self._conn.execute(
+                "SELECT 1 FROM face_scanned_images WHERE image_path = ?", (image_path,)
+            ).fetchone()
         )
 
     def get_faces_for_image(self, image_path: str) -> list[dict]:
