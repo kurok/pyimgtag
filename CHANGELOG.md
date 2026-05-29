@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.5] - 2026-05-29
+
+### Added
+- **Faces filter bar** (#209): `All | Trusted | Auto | Unassigned` toggle buttons. Trusted/Auto filter the person grid server-side; Unassigned switches to a dedicated face selection view.
+- **Unassigned faces view** (#209): 40 faces per page with multi-select (click to toggle, blue outline when selected). Actions: **Assign to person…** (dropdown of existing persons) or **New person from selected** (optional name; named persons are immediately trusted). Select all / Clear buttons for the current page. Paginated with prev/next.
+- New API: `GET /api/faces/unassigned?offset&limit` → `{total, items}` with thumbnails.
+- New API: `POST /api/faces/assign-batch` → assigns faces to an existing person or creates a new one.
+
 ## [0.16.4] - 2026-05-29
 
 ### Added
