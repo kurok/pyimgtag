@@ -209,6 +209,44 @@ class TestGeminiClient:
         with patch.object(client._session, "post", return_value=mock_resp):
             assert client.judge_image(jpg) is None
 
+    def test_tag_parses_response(self, jpg):
+        client = GeminiClient(api_key="g-key")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": json.dumps(_tag_payload())}]}}]
+        }
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._session, "post", return_value=mock_resp):
+            result = client.tag_image(jpg)
+        assert "sunset" in result.tags
+        assert result.summary == "Sunset over the beach."
+
+    def test_tag_returns_error_on_image_load_failure(self, jpg):
+        client = GeminiClient(api_key="g-key")
+        with patch("pyimgtag.cloud_clients.prepare_image_b64", side_effect=OSError("read error")):
+            result = client.tag_image(jpg)
+        assert result.error is not None
+        assert "Image load failed" in result.error
+
+
+# ---------------------------------------------------------------------------
+# close() method coverage
+# ---------------------------------------------------------------------------
+
+
+class TestClientClose:
+    def test_anthropic_close_does_not_raise(self):
+        client = AnthropicClient(api_key="x")
+        client.close()  # must not raise
+
+    def test_openai_close_does_not_raise(self):
+        client = OpenAIClient(api_key="x")
+        client.close()
+
+    def test_gemini_close_does_not_raise(self):
+        client = GeminiClient(api_key="g-key")
+        client.close()
+
 
 # ---------------------------------------------------------------------------
 # Factory

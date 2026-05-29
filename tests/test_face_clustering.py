@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 
@@ -142,3 +145,26 @@ class TestClusterFaces:
             # The face without embedding should not be in any cluster
             assert db.get_face_count() == 3
             assert len(all_fids) == 2
+
+
+class TestClusterFacesImportError:
+    """Test the ImportError guard when scikit-learn is absent."""
+
+    def test_raises_import_error_when_sklearn_missing(self, tmp_path):
+        """cluster_faces must raise ImportError with a pip-install hint when sklearn is absent."""
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            emb = np.ones(128)
+            _seed_faces(db, [emb, emb])
+
+            # Temporarily hide sklearn from sys.modules so the lazy import fails
+            saved = sys.modules.pop("sklearn.cluster", None)
+            sklearn_saved = sys.modules.pop("sklearn", None)
+            try:
+                with patch.dict("sys.modules", {"sklearn": None, "sklearn.cluster": None}):
+                    with pytest.raises(ImportError, match="scikit-learn"):
+                        cluster_faces(db)
+            finally:
+                if saved is not None:
+                    sys.modules["sklearn.cluster"] = saved
+                if sklearn_saved is not None:
+                    sys.modules["sklearn"] = sklearn_saved
