@@ -50,6 +50,9 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
                   color:var(--text);cursor:pointer;transition:all .15s}
     .pager button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
     .pager button:disabled{opacity:.35;cursor:default}
+    .person-name a{color:var(--text);text-decoration:none}
+    .person-name a:hover{color:var(--accent);text-decoration:underline}
+    .more-hint{font-size:11px;color:var(--muted);margin-bottom:8px}
   </style>
 </head>
 <body>
@@ -129,7 +132,10 @@ function renderPerson(p, faces) {
 
   const nameEl = document.createElement('div');
   nameEl.className = 'person-name';
-  nameEl.textContent = p.label || ('(unlabelled #' + p.id + ')');
+  const nameLink = document.createElement('a');
+  nameLink.href = '__API_BASE__/persons/' + p.id;
+  nameLink.textContent = p.label || ('(unlabelled #' + p.id + ')');
+  nameEl.appendChild(nameLink);
   card.appendChild(nameEl);
 
   const meta = document.createElement('div');
@@ -142,6 +148,17 @@ function renderPerson(p, faces) {
     p.face_count + ' face' + (p.face_count !== 1 ? 's' : ''));
   meta.appendChild(cnt);
   card.appendChild(meta);
+
+  // Show hint + link when there are more faces than displayed.
+  if (p.face_count > 8) {
+    const hint = document.createElement('div');
+    hint.className = 'more-hint';
+    const a = document.createElement('a');
+    a.href = '__API_BASE__/persons/' + p.id;
+    a.textContent = 'Showing 8 of ' + p.face_count + ' — click to see all';
+    hint.appendChild(a);
+    card.appendChild(hint);
+  }
 
   // Sort by confidence descending so the best face is first (shown as hero).
   const sorted = faces.slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
@@ -214,7 +231,9 @@ function renderPerson(p, faces) {
   });
   acts.appendChild(delBtn);
 
-  if (!p.trusted) {
+  // Only show Confirm when all faces are visible (face_count ≤ 8).
+  // For larger clusters, the detail page has the Confirm button.
+  if (!p.trusted && p.face_count <= 8) {
     const cfmBtn = document.createElement('button');
     cfmBtn.className = 'confirm-btn';
     cfmBtn.textContent = 'Confirm';
@@ -226,11 +245,205 @@ function renderPerson(p, faces) {
       load();
     });
     acts.appendChild(cfmBtn);
+  } else if (!p.trusted && p.face_count > 8) {
+    const viewBtn = document.createElement('button');
+    viewBtn.textContent = 'View all & confirm';
+    viewBtn.addEventListener('click', () => {
+      window.location.href = '__API_BASE__/persons/' + p.id;
+    });
+    acts.appendChild(viewBtn);
   }
 
   card.appendChild(acts);
   return card;
 }
+
+load();
+</script>
+</body>
+</html>"""
+
+
+_PERSON_DETAIL_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pyimgtag — Person</title>
+  <style>
+    __NAV_STYLES__
+    .detail-hdr{display:flex;align-items:center;gap:12px;padding:20px 32px 4px;flex-wrap:wrap}
+    .detail-hdr h1{font-size:20px;font-weight:700;color:var(--text);margin:0}
+    .detail-hdr .back{font-size:13px;color:var(--muted);text-decoration:none;
+                      padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm)}
+    .detail-hdr .back:hover{border-color:var(--accent);color:var(--accent)}
+    .detail-meta{padding:0 32px 12px;font-size:13px;color:var(--muted);
+                 display:flex;align-items:center;gap:8px}
+    .badge-trusted{background:rgba(52,199,89,.1);color:#1a7f50;font-size:10px;
+                   font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+    .badge-auto{background:rgba(0,0,0,.05);color:var(--muted);font-size:10px;
+                font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+    .detail-actions{display:flex;gap:8px;padding:0 32px 16px;flex-wrap:wrap}
+    .detail-actions button{padding:6px 16px;border-radius:var(--radius-sm);font-size:13px;
+                           font-weight:500;border:1px solid var(--border);
+                           background:var(--surface);color:var(--text);cursor:pointer;
+                           transition:all .15s}
+    .detail-actions button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+    .confirm-btn{color:#1a7f50!important;border-color:rgba(52,199,89,.4)!important}
+    .confirm-btn:hover:not(:disabled){background:rgba(52,199,89,.08)!important}
+    .confirm-btn:disabled{opacity:.5;cursor:default}
+    .del-btn{color:var(--danger)!important;border-color:rgba(255,59,48,.3)!important}
+    .del-btn:hover{background:rgba(255,59,48,.05)!important}
+    #faces-grid{display:flex;flex-wrap:wrap;gap:8px;padding:0 32px 32px;align-items:flex-start}
+    .face-thumb{width:80px;height:80px;object-fit:cover;border-radius:var(--radius-sm);
+                border:1px solid var(--border);cursor:pointer;transition:opacity .15s}
+    .face-thumb:hover{opacity:.7}
+    .face-thumb.hero{width:120px;height:120px;border-width:2px;
+                     border-color:var(--accent);box-shadow:0 2px 8px rgba(0,0,0,.18)}
+    #loading{padding:32px;color:var(--muted);font-size:14px}
+  </style>
+</head>
+<body>
+__NAV__
+__MODAL_HTML__
+__MODAL_JS__
+<div class="detail-hdr">
+  <a class="back" href="__API_BASE__/">← All Faces</a>
+  <h1 id="person-name">Loading…</h1>
+</div>
+<div class="detail-meta">
+  <span id="person-badge"></span>
+  <span id="person-count"></span>
+</div>
+<div class="detail-actions" id="actions" style="display:none">
+  <button id="rename-btn">Rename</button>
+  <button id="confirm-btn" class="confirm-btn">Confirm cluster</button>
+  <button id="delete-btn" class="del-btn">Delete person</button>
+</div>
+<div id="loading">Loading faces…</div>
+<div id="faces-grid"></div>
+<script>
+const _personId = __PERSON_ID__;
+const _apiBase  = '__API_BASE__';
+
+// Hover preview overlay
+const _preview = document.createElement('div');
+_preview.id = 'face-hover-preview';
+_preview.style.cssText = 'display:none;position:fixed;z-index:9999;pointer-events:none;'
+  + 'border-radius:8px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.45);';
+document.body.appendChild(_preview);
+const _previewImg = document.createElement('img');
+_previewImg.style.cssText = 'display:block;max-width:320px;max-height:320px;';
+_previewImg.addEventListener('error', () => { _preview.style.display = 'none'; });
+_preview.appendChild(_previewImg);
+
+function showPreview(faceId, rect) {
+  _previewImg.src = _apiBase + '/api/faces/' + faceId + '/preview';
+  const left = Math.min(rect.right + 10, window.innerWidth - 340);
+  const top  = Math.min(Math.max(rect.top, 8), window.innerHeight - 340);
+  _preview.style.left = left + 'px';
+  _preview.style.top  = top  + 'px';
+  _preview.style.display = 'block';
+}
+
+let _person = null;
+
+async function load() {
+  const [person, faces] = await Promise.all([
+    fetch(_apiBase + '/api/persons/' + _personId).then(r => r.json()),
+    fetch(_apiBase + '/api/persons/' + _personId + '/faces').then(r => r.json()),
+  ]);
+  _person = person;
+
+  document.getElementById('person-name').textContent =
+    person.label || ('(unlabelled #' + person.id + ')');
+  const badge = document.getElementById('person-badge');
+  badge.className = person.trusted ? 'badge-trusted' : 'badge-auto';
+  badge.textContent = person.trusted ? 'trusted' : 'auto';
+  document.getElementById('person-count').textContent =
+    faces.length + ' face' + (faces.length !== 1 ? 's' : '');
+
+  const cfmBtn = document.getElementById('confirm-btn');
+  cfmBtn.disabled = person.trusted;
+  cfmBtn.textContent = person.trusted ? 'Confirmed ✓' : 'Confirm cluster';
+
+  document.getElementById('actions').style.display = 'flex';
+  document.getElementById('loading').style.display = 'none';
+
+  renderFaces(faces);
+}
+
+function renderFaces(faces) {
+  const grid = document.getElementById('faces-grid');
+  grid.innerHTML = '';
+  const sorted = faces.slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  sorted.forEach((f, i) => {
+    if (!f.thumb) return;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block';
+
+    const img = document.createElement('img');
+    img.className = i === 0 ? 'face-thumb hero' : 'face-thumb';
+    img.src = 'data:image/jpeg;base64,' + f.thumb;
+    img.title = i === 0
+      ? 'Best match (conf ' + (f.confidence ? f.confidence.toFixed(2) : '?') + ') — click to unassign'
+      : 'Click to unassign';
+    img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
+    img.addEventListener('mouseleave', () => { _preview.style.display = 'none'; });
+    img.addEventListener('click', async () => {
+      _preview.style.display = 'none';
+      img.style.opacity = '0.3';
+      await fetch(_apiBase + '/api/faces/' + f.id + '/unassign', {method: 'POST'});
+      load();
+    });
+    wrap.appendChild(img);
+    grid.appendChild(wrap);
+  });
+}
+
+document.getElementById('rename-btn').addEventListener('click', () => {
+  openModal(
+    'Rename person',
+    'Enter a new name for this person.',
+    '<input class="inp" id="m-inp" placeholder="Name" />',
+    'Rename', 'btn-primary',
+    async () => {
+      const val = document.getElementById('m-inp').value.trim();
+      if (!val) return;
+      await fetch(_apiBase + '/api/persons/' + _personId + '/label', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({label: val}),
+      });
+      closeModal();
+      load();
+    }
+  );
+  document.getElementById('m-inp').value = (_person && _person.label) || '';
+  setTimeout(() => document.getElementById('m-inp').focus(), 50);
+});
+
+document.getElementById('confirm-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Confirming…';
+  await fetch(_apiBase + '/api/persons/' + _personId + '/confirm', {method: 'POST'});
+  load();
+});
+
+document.getElementById('delete-btn').addEventListener('click', () => {
+  openModal(
+    'Delete person',
+    'Delete this person record? Face crops are kept but unassigned.',
+    '',
+    'Delete', 'btn-danger-text',
+    async () => {
+      await fetch(_apiBase + '/api/persons/' + _personId, {method: 'DELETE'});
+      closeModal();
+      window.location.href = _apiBase + '/';
+    }
+  );
+});
 
 load();
 </script>
@@ -244,6 +457,20 @@ def render_faces_html(api_base: str = "") -> str:
 
     return (
         _HTML_TEMPLATE.replace("__API_BASE__", api_base)
+        .replace("__NAV__", render_nav("faces"))
+        .replace("__NAV_STYLES__", NAV_STYLES)
+        .replace("__MODAL_HTML__", MODAL_HTML)
+        .replace("__MODAL_JS__", MODAL_JS)
+    )
+
+
+def render_person_detail_html(person_id: int, api_base: str = "") -> str:
+    """Return the person detail page HTML."""
+    from pyimgtag.webapp.nav import MODAL_HTML, MODAL_JS, NAV_STYLES, render_nav
+
+    return (
+        _PERSON_DETAIL_TEMPLATE.replace("__PERSON_ID__", str(person_id))
+        .replace("__API_BASE__", api_base)
         .replace("__NAV__", render_nav("faces"))
         .replace("__NAV_STYLES__", NAV_STYLES)
         .replace("__MODAL_HTML__", MODAL_HTML)
@@ -284,6 +511,13 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     @router.get("/", response_class=HTMLResponse)
     async def index() -> str:
         return render_faces_html(api_base)
+
+    @router.get("/persons/{person_id}", response_class=HTMLResponse)
+    async def person_detail(person_id: int) -> str:
+        persons = db.get_persons()
+        if not any(p.person_id == person_id for p in persons):
+            raise HTTPException(status_code=404, detail="Person not found")
+        return render_person_detail_html(person_id, api_base)
 
     @router.get("/api/persons")
     async def list_persons() -> list[dict]:
@@ -354,6 +588,21 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
         items = list(await asyncio.gather(*[_person_entry(p) for p in page]))
         return {"total": total, "items": items}
+
+    @router.get("/api/persons/{person_id}")
+    async def get_person(person_id: int) -> dict:
+        persons = db.get_persons()
+        p = next((p for p in persons if p.person_id == person_id), None)
+        if p is None:
+            raise HTTPException(status_code=404, detail="Person not found")
+        return {
+            "id": p.person_id,
+            "label": p.label,
+            "confirmed": p.confirmed,
+            "source": p.source,
+            "trusted": p.trusted,
+            "face_count": len(p.face_ids),
+        }
 
     @router.get("/api/persons/{person_id}/faces")
     async def get_person_faces(person_id: int) -> list[dict]:
