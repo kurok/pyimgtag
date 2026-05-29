@@ -55,20 +55,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-        # Trim the matrix from 12 cells to 8. Removed cells:
-        #   - macos-latest / 3.11
-        #   - windows-latest / 3.11
-        #   - windows-latest / 3.12
-        # Linux covers all four minors; macOS keeps 3.12–3.14
-        # for the AppleScript / Photos-bridge stack; Windows keeps 3.13–3.14.
-        exclude:
-          - os: macos-latest
-            python-version: "3.11"
-          - os: windows-latest
-            python-version: "3.11"
-          - os: windows-latest
-            python-version: "3.12"
+        python-version: ["3.14"]
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
     - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
@@ -81,10 +68,10 @@ jobs:
       shell: bash
       run: |
         uv run pytest \
-          ${{ (matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14') && '--cov' || '--no-cov' }} \
+          ${{ (matrix.os == 'ubuntu-latest') && '--cov' || '--no-cov' }} \
           --junitxml=junit.xml -o junit_family=legacy
     - name: Upload coverage reports to Codecov
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+      if: matrix.os == 'ubuntu-latest'
       uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2  # v6.0.0
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
