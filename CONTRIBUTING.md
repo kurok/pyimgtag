@@ -7,7 +7,7 @@ Thank you for your interest in contributing to pyimgtag! This guide covers every
 ### Prerequisites
 
 - macOS (primary platform) or Linux
-- Python 3.11 or newer
+- Python 3.11 or newer (3.14 recommended)
 - Git
 - [Ollama](https://ollama.ai) (for running the tool, not required for tests)
 - Optional: `exiftool` (`brew install exiftool` on macOS)
@@ -221,7 +221,7 @@ Every push and PR triggers 5 parallel CI jobs:
 |---|---|
 | **lint** | `ruff format --check` + `ruff check` |
 | **pre-commit** | Trailing whitespace, EOF, YAML, JSON, merge conflicts, ruff |
-| **test** | Pytest matrix: (Ubuntu + macOS) x (Python 3.11, 3.12, 3.13), 85% coverage threshold |
+| **test** | Pytest matrix: Ubuntu x (3.11–3.14), macOS x (3.12–3.14), Windows x (3.13–3.14); 85% coverage threshold |
 | **typecheck** | mypy strict checking |
 | **security** | bandit + pip-audit (dependency vulnerabilities) |
 
