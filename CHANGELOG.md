@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-05-29
+
+### CI
+- **Restore `push: tags` trigger in publish workflow** (#196): `release: published` does not fire when a release is created by a GitHub Actions workflow (GITHUB_TOKEN cannot trigger further workflows), causing PyPI publish to silently not run. Restored `push: tags: v*` as the primary publish trigger; added `skip-existing: true` so a parallel `release: published` run does not fail with "file already exists".
+- **Fix setup-uv cache collisions and upgrade Docker actions to Node 24** (#195): added `cache-suffix: ${{ github.job }}` to all `setup-uv` steps so parallel jobs no longer race on the same cache key; upgraded `docker/setup-buildx-action` v3 → v4.1.0 and `docker/build-push-action` v6 → v7.2.0 (both now use Node 24 runtime).
+
 ## [0.15.1] - 2026-05-29
 
 ### Fixed
