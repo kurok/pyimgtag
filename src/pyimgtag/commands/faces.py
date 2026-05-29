@@ -348,8 +348,24 @@ def _handle_faces_ui(args: argparse.Namespace) -> int:
     app = create_unified_app(db_path=args.db)
     host = getattr(args, "host", "127.0.0.1")
     port = getattr(args, "port", 8766)
-    print(f"pyimgtag webapp: http://{host}:{port} (faces at /faces)", flush=True)
-    uvicorn.run(app, host=host, port=port)
+    url = f"http://{host}:{port}/faces"
+    print(f"pyimgtag faces UI: {url}", flush=True)
+
+    if not getattr(args, "no_browser", False):
+        import webbrowser
+
+        def _open() -> None:
+            import time
+
+            time.sleep(0.5)
+            try:
+                webbrowser.open(url)
+            except Exception:  # noqa: BLE001
+                pass
+
+        threading.Thread(target=_open, daemon=True).start()
+
+    uvicorn.run(app, host=host, port=port, log_level="warning")
     return 0
 
 
