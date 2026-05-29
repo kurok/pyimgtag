@@ -339,7 +339,8 @@ async function openRenameModal(personId, currentLabel, onDone) {
     'Apply', 'btn-primary',
     async () => {
       const sel = document.getElementById('m-merge-sel');
-      const targetId = sel && sel.value ? Number(sel.value) : null;
+      const _raw = sel && sel.value ? Number(sel.value) : null;
+      const targetId = (_raw && !isNaN(_raw)) ? _raw : null;
       if (targetId) {
         await fetch('__API_BASE__/api/persons/' + personId + '/merge/' + targetId,
           {method: 'POST'});
@@ -644,7 +645,7 @@ __NAV__
 __MODAL_HTML__
 __MODAL_JS__
 <div class="detail-hdr">
-  <a class="back" href="__API_BASE__/">← All Faces</a>
+  <a class="back" href="javascript:history.back()" onclick="if(!document.referrer)window.location.href='__API_BASE__/'">← All Faces</a>
   <h1 id="person-name">Loading…</h1>
 </div>
 <div class="detail-meta">
@@ -685,10 +686,16 @@ function showPreview(faceId, rect) {
 let _person = null;
 
 async function load() {
-  const [person, faces] = await Promise.all([
-    fetch(_apiBase + '/api/persons/' + _personId).then(r => r.json()),
-    fetch(_apiBase + '/api/persons/' + _personId + '/faces').then(r => r.json()),
+  const [personRes, facesRes] = await Promise.all([
+    fetch(_apiBase + '/api/persons/' + _personId),
+    fetch(_apiBase + '/api/persons/' + _personId + '/faces'),
   ]);
+  // Person no longer exists (deleted or merged into another) — go back to list.
+  if (!personRes.ok) {
+    window.location.href = _apiBase + '/';
+    return;
+  }
+  const [person, faces] = await Promise.all([personRes.json(), facesRes.json()]);
   _person = person;
 
   document.getElementById('person-name').textContent =
@@ -755,7 +762,8 @@ document.getElementById('rename-btn').addEventListener('click', async () => {
     'Apply', 'btn-primary',
     async () => {
       const sel = document.getElementById('m-merge-sel');
-      const targetId = sel && sel.value ? Number(sel.value) : null;
+      const _raw = sel && sel.value ? Number(sel.value) : null;
+      const targetId = (_raw && !isNaN(_raw)) ? _raw : null;
       if (targetId) {
         await fetch(_apiBase + '/api/persons/' + _personId + '/merge/' + targetId,
           {method: 'POST'});
