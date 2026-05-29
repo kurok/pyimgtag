@@ -317,10 +317,7 @@ class TestReadPillowGpsPath:
     def test_pillow_gps_path_extracts_lat_lon(self, tmp_path):
         """_read_pillow must parse GPS from the Pillow EXIF IFD when present."""
 
-        try:
-            import piexif
-        except ImportError:
-            pytest.skip("piexif not installed")
+        piexif = pytest.importorskip("piexif")
 
         from PIL import Image
 
@@ -347,10 +344,7 @@ class TestReadPillowGpsPath:
 
     def test_read_pillow_via_fallback_chain(self, tmp_path):
         """GPS is returned when exiftool and exifread are both unavailable."""
-        try:
-            import piexif
-        except ImportError:
-            pytest.skip("piexif not installed")
+        piexif = pytest.importorskip("piexif")
 
         from PIL import Image
 
