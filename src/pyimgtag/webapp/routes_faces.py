@@ -297,7 +297,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         # Downscale for preview if large
         preview_max = 800
         if max(w, h) > preview_max:
-            img.thumbnail((preview_max, preview_max), Image.LANCZOS)
+            img.thumbnail((preview_max, preview_max), Image.Resampling.LANCZOS)
 
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=85)
