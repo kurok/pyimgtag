@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from pyimgtag.preflight import (
+    check_cloud_backend,
     check_directory,
     check_exiftool,
     check_ollama,
@@ -211,3 +212,55 @@ class TestRunPreflight:
         assert len(results) == 4
         names = [r[0] for r in results]
         assert "Directory" in names
+
+    @patch("pyimgtag.preflight.subprocess.run")
+    @patch("pyimgtag.preflight.requests.get")
+    def test_with_photos_library(
+        self, mock_get: MagicMock, mock_run: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"models": [{"name": "gemma4:e4b"}]}
+        mock_resp.raise_for_status.return_value = None
+        mock_get.return_value = mock_resp
+
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["exiftool", "-ver"], returncode=0, stdout="12.76\n", stderr=""
+        )
+
+        originals = tmp_path / "originals"
+        originals.mkdir()
+        (originals / "photo.jpg").write_text("fake")
+
+        results = run_preflight(
+            "http://localhost:11434", "gemma4:e4b", str(tmp_path), "photos_library"
+        )
+
+        assert len(results) == 4
+        names = [r[0] for r in results]
+        assert "Photos library" in names
+
+
+class TestCheckCloudBackend:
+    def test_unknown_backend_returns_false(self) -> None:
+        ok, msg = check_cloud_backend("bogusbackend")
+        assert ok is False
+        assert "Unknown backend" in msg
+
+    def test_anthropic_key_present(self, monkeypatch) -> None:
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        ok, msg = check_cloud_backend("anthropic")
+        assert ok is True
+        assert "ANTHROPIC_API_KEY" in msg
+
+    def test_openai_key_absent(self, monkeypatch) -> None:
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        ok, msg = check_cloud_backend("openai")
+        assert ok is False
+        assert "OPENAI_API_KEY" in msg
+
+    def test_gemini_falls_back_to_gemini_api_key(self, monkeypatch) -> None:
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.setenv("GEMINI_API_KEY", "gm-fallback")
+        ok, msg = check_cloud_backend("gemini")
+        assert ok is True
+        assert "GEMINI_API_KEY" in msg

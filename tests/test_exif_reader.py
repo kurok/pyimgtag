@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pyimgtag.exif_reader import (
     _dms_to_decimal,
     _exifread_dms_to_decimal,
@@ -270,3 +272,100 @@ class TestReadPillow:
             result = _read_pillow(fake_img)
         assert result.date_original == "2026-01-01 00:00:00"
         assert result.has_gps is False
+
+
+class TestParsGpsIfd:
+    def test_valid_north_east(self):
+        gps_ifd = {
+            1: "N",
+            2: (48.0, 51.0, 29.0),
+            3: "E",
+            4: (2.0, 21.0, 7.0),
+        }
+        lat, lon, has_gps = _parse_gps_ifd(gps_ifd)
+        assert has_gps
+        assert lat is not None and lat > 48
+        assert lon is not None and lon > 2
+
+    def test_south_west_gives_negative(self):
+        gps_ifd = {
+            1: "S",
+            2: (33.0, 51.0, 54.0),
+            3: "W",
+            4: (70.0, 0.0, 0.0),
+        }
+        lat, lon, has_gps = _parse_gps_ifd(gps_ifd)
+        assert has_gps
+        assert lat is not None and lat < 0
+        assert lon is not None and lon < 0
+
+    def test_empty_dict_returns_false(self):
+        lat, lon, has_gps = _parse_gps_ifd({})
+        assert not has_gps
+        assert lat is None
+        assert lon is None
+
+    def test_missing_lat_dms_returns_false(self):
+        gps_ifd = {1: "N", 3: "E", 4: (2.0, 0.0, 0.0)}
+        lat, lon, has_gps = _parse_gps_ifd(gps_ifd)
+        assert not has_gps
+
+
+class TestReadPillowGpsPath:
+    """Tests for _read_pillow GPS extraction (lines 166-175)."""
+
+    def test_pillow_gps_path_extracts_lat_lon(self, tmp_path):
+        """_read_pillow must parse GPS from the Pillow EXIF IFD when present."""
+
+        piexif = pytest.importorskip("piexif")
+
+        from PIL import Image
+
+        from pyimgtag.exif_reader import _read_pillow
+
+        # Build a minimal JPEG with GPS EXIF using piexif
+        gps_ifd = {
+            piexif.GPSIFD.GPSLatitudeRef: b"N",
+            piexif.GPSIFD.GPSLatitude: ((37, 1), (46, 1), (30, 1)),
+            piexif.GPSIFD.GPSLongitudeRef: b"W",
+            piexif.GPSIFD.GPSLongitude: ((122, 1), (25, 1), (10, 1)),
+        }
+        exif_dict = {"GPS": gps_ifd, "0th": {}, "Exif": {}}
+        exif_bytes = piexif.dump(exif_dict)
+
+        img_path = tmp_path / "gps.jpg"
+        img = Image.new("RGB", (10, 10))
+        img.save(str(img_path), exif=exif_bytes)
+
+        result = _read_pillow(img_path)
+        assert result.has_gps
+        assert result.gps_lat is not None and result.gps_lat > 37
+        assert result.gps_lon is not None and result.gps_lon < -122
+
+    def test_read_pillow_via_fallback_chain(self, tmp_path):
+        """GPS is returned when exiftool and exifread are both unavailable."""
+        piexif = pytest.importorskip("piexif")
+
+        from PIL import Image
+
+        gps_ifd = {
+            piexif.GPSIFD.GPSLatitudeRef: b"N",
+            piexif.GPSIFD.GPSLatitude: ((51, 1), (30, 1), (0, 1)),
+            piexif.GPSIFD.GPSLongitudeRef: b"E",
+            piexif.GPSIFD.GPSLongitude: ((0, 1), (7, 1), (39, 1)),
+        }
+        exif_dict = {"GPS": gps_ifd, "0th": {}, "Exif": {}}
+        exif_bytes = piexif.dump(exif_dict)
+
+        img_path = tmp_path / "london.jpg"
+        img = Image.new("RGB", (10, 10))
+        img.save(str(img_path), exif=exif_bytes)
+
+        with (
+            patch("pyimgtag.exif_reader._read_exiftool", return_value=None),
+            patch("pyimgtag.exif_reader._read_exifread", return_value=None),
+        ):
+            result = read_exif(img_path)
+
+        assert result.has_gps
+        assert result.gps_lat is not None and result.gps_lat > 51

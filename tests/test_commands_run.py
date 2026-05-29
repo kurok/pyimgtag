@@ -891,3 +891,179 @@ class TestThreadedPauseGate:
         assert snap["recent"], "expected at least one recorded fresh-file event"
         assert "processed" in snap["counters"]
         run_registry.set_current(None)
+
+
+# ---------------------------------------------------------------------------
+# _write_metadata
+# ---------------------------------------------------------------------------
+
+
+class TestWriteMetadata:
+    """Unit tests for the _write_metadata helper (sidecar / direct / auto-fallback)."""
+
+    def _make_result(self, tmp_path, suffix=".jpg"):
+        from pyimgtag.models import ImageResult
+
+        p = tmp_path / f"photo{suffix}"
+        p.write_bytes(b"fake")
+        result = MagicMock(spec=ImageResult)
+        result.file_path = str(p)
+        result.tags = ["nature", "sky"]
+        return result
+
+    def _make_args(self, *, sidecar_only=False, metadata_format="auto"):
+        args = MagicMock()
+        args.sidecar_only = sidecar_only
+        args.metadata_format = metadata_format
+        return args
+
+    def test_sidecar_only_calls_write_xmp_sidecar(self, tmp_path):
+        from pyimgtag.commands.run import _write_metadata
+
+        result = self._make_result(tmp_path)
+        args = self._make_args(sidecar_only=True)
+
+        with patch("pyimgtag.exif_writer.write_xmp_sidecar", return_value=None) as mock_sidecar:
+            _write_metadata(result, "A description", args)
+
+        mock_sidecar.assert_called_once()
+
+    def test_unsupported_extension_falls_back_to_sidecar(self, tmp_path):
+        from pyimgtag.commands.run import _write_metadata
+
+        result = self._make_result(tmp_path, suffix=".cr2")
+        args = self._make_args(sidecar_only=False)
+
+        with (
+            patch("pyimgtag.exif_writer.write_xmp_sidecar", return_value=None) as mock_sidecar,
+            patch("pyimgtag.exif_writer.write_exif_description") as mock_exif,
+        ):
+            _write_metadata(result, "desc", args)
+
+        mock_sidecar.assert_called_once()
+        mock_exif.assert_not_called()
+
+    def test_supported_extension_calls_write_exif_description(self, tmp_path):
+        from pyimgtag.commands.run import _write_metadata
+
+        result = self._make_result(tmp_path, suffix=".jpg")
+        args = self._make_args(sidecar_only=False, metadata_format="xmp")
+
+        with patch("pyimgtag.exif_writer.write_exif_description", return_value=None) as mock_exif:
+            _write_metadata(result, "desc", args)
+
+        mock_exif.assert_called_once()
+
+    def test_write_exif_failure_prints_to_stderr(self, tmp_path, capsys):
+        from pyimgtag.commands.run import _write_metadata
+
+        result = self._make_result(tmp_path, suffix=".jpg")
+        args = self._make_args(sidecar_only=False)
+
+        with patch("pyimgtag.exif_writer.write_exif_description", return_value="exiftool died"):
+            _write_metadata(result, "desc", args)
+
+        captured = capsys.readouterr()
+        assert "EXIF write failed" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# _hydrate_from_db (resume-from-db path)
+# ---------------------------------------------------------------------------
+
+
+class TestHydrateFromDb:
+    """Tests for the _hydrate_from_db helper that loads cached ImageResults."""
+
+    def _make_args(self, *, date=None, date_from=None, date_to=None, skip_no_gps=False):
+        args = MagicMock()
+        args.date = date
+        args.date_from = date_from
+        args.date_to = date_to
+        args.skip_no_gps = skip_no_gps
+        return args
+
+    def test_returns_none_when_not_in_db(self, tmp_path):
+        from pyimgtag.commands.run import _hydrate_from_db
+        from pyimgtag.geocoder import ReverseGeocoder
+        from pyimgtag.progress_db import ProgressDB
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        geocoder = MagicMock(spec=ReverseGeocoder)
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            stats = {
+                "skipped_date": 0,
+                "skipped_no_gps": 0,
+                "geocode_failures": 0,
+                "resumed_from_db": 0,
+            }
+            result = _hydrate_from_db(img, "directory", self._make_args(), geocoder, stats, db)
+
+        assert result is None
+
+    def test_loads_result_from_db(self, tmp_path):
+        from pyimgtag.commands.run import _hydrate_from_db
+        from pyimgtag.geocoder import ReverseGeocoder
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        geocoder = MagicMock(spec=ReverseGeocoder)
+        geocoder.resolve.return_value = MagicMock(error=True)
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            stored = ImageResult(
+                file_path=str(img),
+                file_name=img.name,
+                tags=["sunset"],
+                scene_summary="A sunset",
+            )
+            db.mark_done(img, stored)
+
+            stats = {
+                "skipped_date": 0,
+                "skipped_no_gps": 0,
+                "geocode_failures": 0,
+                "resumed_from_db": 0,
+            }
+            with patch("pyimgtag.commands.run.read_exif") as mock_exif:
+                mock_exif.return_value = ExifData()
+                result = _hydrate_from_db(img, "directory", self._make_args(), geocoder, stats, db)
+
+        assert result is not None
+        assert "sunset" in result.tags
+        assert stats["resumed_from_db"] == 1
+
+    def test_exif_read_failure_sets_image_date_none(self, tmp_path):
+        from pyimgtag.commands.run import _hydrate_from_db
+        from pyimgtag.geocoder import ReverseGeocoder
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        geocoder = MagicMock(spec=ReverseGeocoder)
+        geocoder.resolve.return_value = MagicMock(error=True)
+
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            stored = ImageResult(
+                file_path=str(img),
+                file_name=img.name,
+                tags=["tree"],
+            )
+            db.mark_done(img, stored)
+
+            stats = {
+                "skipped_date": 0,
+                "skipped_no_gps": 0,
+                "geocode_failures": 0,
+                "resumed_from_db": 0,
+            }
+            with patch("pyimgtag.commands.run.read_exif", side_effect=OSError("read fail")):
+                result = _hydrate_from_db(img, "directory", self._make_args(), geocoder, stats, db)
+
+        assert result is not None
+        assert result.image_date is None

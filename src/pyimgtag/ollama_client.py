@@ -44,6 +44,14 @@ _MODEL_MAX_TOKENS: int = 1024
 # the file lands in the same folder the user invoked pyimgtag from.
 _DEFAULT_PARSE_ERROR_LOG = "pyimgtag-parse-errors.log"
 
+# JPEG quality used when compressing images before sending to the model.
+# 85 balances quality vs. payload size well for typical photo resolutions.
+_JPEG_QUALITY: int = 85
+
+# Length of the raw-response snippet included in parse-error messages so
+# callers can tell whether the reply was truncated, prose, or a refusal.
+_ERROR_SNIPPET_LEN: int = 160
+
 
 _PROMPT_FIELDS = """\
 Reply with ONLY a valid JSON object — no markdown, no explanation. Required fields:
@@ -150,24 +158,7 @@ class OllamaClient:
 
         prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
         try:
-            resp = self._session.post(
-                f"{self.base_url}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "user", "content": prompt, "images": [img_b64]},
-                    ],
-                    "format": "json",
-                    "stream": False,
-                    "think": False,
-                    "options": {
-                        "temperature": _MODEL_TEMPERATURE,
-                        "num_predict": _MODEL_MAX_TOKENS,
-                    },
-                },
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
+            resp = self._post_chat(prompt, img_b64)
         except requests.RequestException as e:
             return TagResult(error=f"Ollama request failed: {e}")
 
@@ -186,24 +177,7 @@ class OllamaClient:
             return None
 
         try:
-            resp = self._session.post(
-                f"{self.base_url}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "user", "content": _JUDGE_PROMPT, "images": [img_b64]},
-                    ],
-                    "format": "json",
-                    "stream": False,
-                    "think": False,
-                    "options": {
-                        "temperature": _MODEL_TEMPERATURE,
-                        "num_predict": _MODEL_MAX_TOKENS,
-                    },
-                },
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
+            resp = self._post_chat(_JUDGE_PROMPT, img_b64)
         except requests.RequestException:
             return None
 
@@ -212,6 +186,31 @@ class OllamaClient:
             return _parse_judge_response(text)
         except (KeyError, ValueError, AttributeError):
             return None
+
+    def _post_chat(self, prompt: str, img_b64: str) -> requests.Response:
+        """Send a single chat request to Ollama and return the raw Response.
+
+        Raises :class:`requests.RequestException` on network/HTTP failure.
+        """
+        resp = self._session.post(
+            f"{self.base_url}/api/chat",
+            json={
+                "model": self.model,
+                "messages": [
+                    {"role": "user", "content": prompt, "images": [img_b64]},
+                ],
+                "format": "json",
+                "stream": False,
+                "think": False,
+                "options": {
+                    "temperature": _MODEL_TEMPERATURE,
+                    "num_predict": _MODEL_MAX_TOKENS,
+                },
+            },
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        return resp
 
     def _prepare_image(self, file_path: str) -> str:
         """Backwards-compatible wrapper around :func:`prepare_image_b64`."""
@@ -257,7 +256,7 @@ def prepare_image_b64(file_path: str, max_dim: int) -> str:
                     (int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS
                 )
             buf = io.BytesIO()
-            converted.save(buf, format="JPEG", quality=85)
+            converted.save(buf, format="JPEG", quality=_JPEG_QUALITY)
             return base64.b64encode(buf.getvalue()).decode("ascii")
     finally:
         if temp_jpeg is not None:
@@ -284,7 +283,16 @@ def _validated_enum(value: object, allowed: frozenset[str]) -> str | None:
     return None
 
 
-def _parse_response(text: str) -> TagResult:
+def _parse_model_json(text: str, kind: str) -> dict | None:
+    """Three-phase JSON extraction shared by tag and judge parsers.
+
+    1. Direct ``json.loads``.
+    2. Markdown code-fence strip, then ``json.loads``.
+    3. Character-scan with optional truncation repair.
+
+    Returns the parsed dict, or ``None`` (and appends to the parse-error
+    log) if all three phases fail.
+    """
     raw = text.strip()
     parsed = _try_json(raw)
     if parsed is None:
@@ -294,11 +302,18 @@ def _parse_response(text: str) -> TagResult:
     if parsed is None:
         parsed = _extract_first_json_object(raw)
     if parsed is None:
+        _log_parse_error(raw, kind=kind)
+    return parsed
+
+
+def _parse_response(text: str) -> TagResult:
+    raw = text.strip()
+    parsed = _parse_model_json(raw, kind="tag")
+    if parsed is None:
         # Include a short prefix of the model's actual reply so the user can
         # tell whether it was truncated, prose, or a refusal — much more
         # diagnostic than the bare "Could not parse JSON" alone.
-        snippet = raw[:160] + ("…" if len(raw) > 160 else "")
-        _log_parse_error(raw, kind="tag")
+        snippet = raw[:_ERROR_SNIPPET_LEN] + ("…" if len(raw) > _ERROR_SNIPPET_LEN else "")
         return TagResult(
             raw_response=raw,
             error=f"Could not parse JSON from model response: {snippet!r}",
@@ -355,16 +370,8 @@ def _parse_judge_response(text: str) -> JudgeScores | None:
     same overall ``score`` so existing weighted/core/visible computations
     keep returning the same integer the model picked.
     """
-    raw = text.strip()
-    parsed = _try_json(raw)
+    parsed = _parse_model_json(text.strip(), kind="judge")
     if parsed is None:
-        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
-        if m:
-            parsed = _try_json(m.group(1))
-    if parsed is None:
-        parsed = _extract_first_json_object(raw)
-    if parsed is None:
-        _log_parse_error(raw, kind="judge")
         return None
 
     def _clamp_score(val: object, default: int = 5) -> int:
@@ -440,15 +447,17 @@ def _extract_first_json_object(text: str) -> dict | None:
     i = 0
     while i < len(text):
         if text[i] == "{":
+            # Phase 1: standard decode from this position.
             try:
                 obj, _ = decoder.raw_decode(text, i)
                 if isinstance(obj, dict):
                     return obj
             except (json.JSONDecodeError, ValueError):
-                # Try to repair from this opening brace through end-of-text.
-                repaired = _repair_truncated_json(text[i:])
-                if repaired is not None:
-                    return repaired
+                pass
+            # Phase 2: attempt truncation repair on the suffix.
+            repaired = _repair_truncated_json(text[i:])
+            if repaired is not None:
+                return repaired
         i += 1
     return None
 
