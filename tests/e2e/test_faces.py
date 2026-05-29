@@ -124,7 +124,9 @@ def test_faces_person_card_renders_with_thumbnail(page, base_url: str, faces_tes
         timeout=5000,
     )
 
-    card = page.locator(".person-card", has=page.locator(".person-name", has_text="E2E Test Person"))
+    card = page.locator(
+        ".person-card", has=page.locator(".person-name", has_text="E2E Test Person")
+    )
     assert card.count() == 1, "E2E test person card not found on /faces/"
 
     thumb = card.locator(".face-thumb").first
@@ -144,7 +146,9 @@ def test_faces_hover_shows_and_hides_preview(page, base_url: str, faces_test_dat
         timeout=5000,
     )
 
-    card = page.locator(".person-card", has=page.locator(".person-name", has_text="E2E Test Person"))
+    card = page.locator(
+        ".person-card", has=page.locator(".person-name", has_text="E2E Test Person")
+    )
     thumb = card.locator(".face-thumb").first
 
     # Preview div is created by JS and initially hidden
@@ -156,17 +160,11 @@ def test_faces_hover_shows_and_hides_preview(page, base_url: str, faces_test_dat
 
     # Hover → preview becomes visible
     thumb.hover()
-    page.wait_for_function(
-        "document.querySelector(\"div[style*='position:fixed'][style*='z-index:9999']\").style.display !== 'none'",
-        timeout=3000,
-    )
+    page.wait_for_selector(preview_selector, state="visible", timeout=3000)
 
     # Move to top-left corner → preview hides
     page.mouse.move(0, 0)
-    page.wait_for_function(
-        "document.querySelector(\"div[style*='position:fixed'][style*='z-index:9999']\").style.display === 'none'",
-        timeout=2000,
-    )
+    page.wait_for_selector(preview_selector, state="hidden", timeout=2000)
 
 
 def test_faces_preview_api_returns_jpeg(base_url: str, faces_test_data) -> None:

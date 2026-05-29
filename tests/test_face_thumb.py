@@ -74,4 +74,6 @@ class TestFaceThumbnailB64:
         # If bbox was correctly scaled the crop hits the red region → avg red > 80
         # (JPEG compression reduces peak values slightly).
         # If bbox was not scaled the crop hits the black background → avg red ≈ 0.
-        assert avg_r > 80, f"Expected bright red crop (avg_r={avg_r:.1f}), got dark — bbox not scaled"
+        assert avg_r > 80, (
+            f"Expected bright red crop (avg_r={avg_r:.1f}), got dark — bbox not scaled"
+        )
