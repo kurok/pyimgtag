@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.4] - 2026-05-29
+
+### Added
+- **Faces person detail page** (#207): clicking a person name in the cluster card opens `/faces/persons/{id}` — a dedicated page showing all faces (no 8-limit), sorted by confidence with hero thumbnail. Actions: Confirm cluster, Rename, Delete. Hover preview works the same as the main page.
+- **Confirm hidden for large clusters on main page** (#207): Confirm button is only shown when `face_count ≤ 8` (all faces visible). Larger clusters show "View all & confirm" instead, linking to the detail page.
+- **"Showing 8 of N — click to see all" hint** (#207): shown on cluster cards with more than 8 faces.
+
+### Fixed
+- **About page showed stale PyPI version after upgrade** (#207): the in-process cache held the pre-upgrade PyPI version for up to 1 hour. If the installed version is newer than the cached PyPI value, the cache is now invalidated and a fresh lookup is forced immediately.
+- **CodeQL XSS: person_id sanitized through `int()`** (#207): `person_id` from the URL path was substituted into the HTML template via `str(person_id)`. Coercing through `int()` first (`str(int(person_id))`) breaks the taint chain — the result is guaranteed to be digit-only.
+
 ## [0.16.3] - 2026-05-29
 
 ### Fixed
