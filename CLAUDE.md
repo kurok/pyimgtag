@@ -4,7 +4,7 @@ macOS image tagger using local Ollama Gemma vision model with EXIF GPS reverse g
 
 ## Tech Stack
 
-- Python 3.11+, requests, Pillow
+- Python 3.11–3.14, requests, Pillow
 - Ollama HTTP API (gemma4:e4b default model)
 - Nominatim reverse geocoding with disk cache
 - Optional: pillow-heif (HEIC), exiftool (reliable HEIC EXIF)
@@ -110,7 +110,7 @@ Enforced by GitHub ruleset:
 - Stale reviews dismissed on new push — re-approval needed
 - All review threads resolved before merge
 - Required linear history — squash or rebase only, no merge commits
-- Status check: `test (ubuntu-latest, 3.12)` must pass
+- Status check: `test (ubuntu-latest, 3.14)` must pass
 - CodeQL analysis must pass
 
 PR description must use the repo template (`.github/pull_request_template.md`):
@@ -158,7 +158,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 
 1. quality — ruff format check + lint + mypy (combined, uv install)
 2. pre-commit — hooks
-3. test — matrix (ubuntu + macos) x (py3.11, 3.12, 3.13); coverage only on ubuntu/3.12
+3. test — matrix: ubuntu x (3.11–3.14), macos x (3.12–3.14), windows x (3.13–3.14); coverage only on ubuntu/3.14
 4. security — bandit + pip-audit
 5. docker — build + smoke tests
 

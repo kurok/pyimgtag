@@ -8,7 +8,7 @@ pyimgtag core features (AI tagging, geocoding, HEIC/RAW conversion, duplicate de
 
 ### Prerequisites
 
-- Python 3.11+ (system Python or [pyenv](https://github.com/pyenv/pyenv))
+- Python 3.11+ (3.14 recommended; system Python or [pyenv](https://github.com/pyenv/pyenv))
 - [Homebrew](https://brew.sh) for system dependencies:
 
 ```bash
@@ -98,7 +98,7 @@ Apple Photos library access requires Full Disk Access:
 
 ### Prerequisites
 
-- Python 3.11+ (distro packages or [pyenv](https://github.com/pyenv/pyenv))
+- Python 3.11+ (3.14 recommended; distro packages or [pyenv](https://github.com/pyenv/pyenv))
 - exiftool:
 
     **Ubuntu/Debian:**
@@ -200,7 +200,7 @@ pyimgtag run --input-dir ~/Pictures/export --output-json results.json
 
 ### Prerequisites
 
-- Python 3.11+ from [python.org](https://www.python.org/downloads/) — check **"Add Python to PATH"** during installation
+- Python 3.11+ (3.14 recommended) from [python.org](https://www.python.org/downloads/) — check **"Add Python to PATH"** during installation
 - Ollama from [ollama.com](https://ollama.com/download)
 
     After installing, pull the model:

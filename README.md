@@ -43,7 +43,7 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.11–3.14
 - [Ollama](https://ollama.ai) installed and running
 - Gemma 4 model pulled: `ollama pull gemma4:e4b`
 
