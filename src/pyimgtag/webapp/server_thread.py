@@ -58,5 +58,11 @@ class DashboardServer:
         return False
 
     def stop(self, timeout: float = 3.0) -> None:
+        """Signal uvicorn to exit and join the daemon thread.
+
+        Waits up to ``timeout`` seconds for the thread to finish. Returns
+        without error even if it has not exited; the thread is a daemon and
+        dies with the process.
+        """
         self._server.should_exit = True
         self._thread.join(timeout=timeout)

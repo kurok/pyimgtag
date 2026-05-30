@@ -40,6 +40,10 @@ def hamming_distance(hash1: str, hash2: str) -> int:
 
     Returns:
         Integer hamming distance between the two hashes.
+
+    Raises:
+        ValueError: If hash1 or hash2 is not a valid hex hash string parseable
+            by imagehash.hex_to_hash().
     """
     h1 = imagehash.hex_to_hash(hash1)
     h2 = imagehash.hex_to_hash(hash2)

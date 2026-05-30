@@ -61,7 +61,16 @@ def compute_scores(scores: JudgeScores) -> tuple[int, int, int]:
 
 
 def strongest(scores: JudgeScores, n: int = 3) -> list[str]:
-    """Return the n criterion keys with the highest scores."""
+    """Return the n criterion keys with the highest scores.
+
+    Args:
+        scores: Per-criterion JudgeScores to rank.
+        n: Number of top criterion keys to return.
+
+    Returns:
+        Criterion key names ordered highest-to-lowest score; length is
+        min(n, number of criteria).
+    """
     d = {k: float(getattr(scores, k)) for k in WEIGHTS}
     return sorted(d, key=lambda k: d[k], reverse=True)[:n]
 

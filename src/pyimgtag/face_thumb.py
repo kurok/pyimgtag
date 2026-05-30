@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import math
 
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 # face_detection resizes images to this max dimension before detecting faces,
 # so all stored bbox coords are in that coordinate space.
@@ -73,7 +76,8 @@ def face_thumbnail_b64(
                 return None
 
             cropped = src.crop((left, top, right, bottom)).convert("RGB")
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — thumbnail rendering must never crash the faces UI
+        logger.debug("face thumbnail failed for %s: %s", image_path, exc)
         return None
 
     thumb = cropped.resize((size, size), Image.Resampling.LANCZOS)

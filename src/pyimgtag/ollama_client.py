@@ -150,7 +150,17 @@ class OllamaClient:
         self._session = requests.Session()
 
     def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
-        """Tag an image using the vision model.  One call per image."""
+        """Tag an image using the vision model.  One call per image.
+
+        Args:
+            file_path: Path to the image to tag.
+            context: Optional EXIF/geocoding hints with keys ``date``, ``city``,
+                ``region``, ``country``, ``lat``, ``lon`` used to enrich the prompt.
+
+        Returns:
+            A TagResult. Failures (image load, request, parse) are returned as
+            ``TagResult(error=...)`` rather than raised.
+        """
         try:
             img_b64 = self._prepare_image(file_path)
         except (OSError, ValueError, RuntimeError) as e:

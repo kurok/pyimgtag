@@ -108,7 +108,7 @@ def extract_raw_thumbnail(
             # Empty stdout = tag absent, try next
 
         raise RuntimeError(f"No embedded JPEG found in {input_path}")
-    except Exception:
+    except Exception:  # noqa: BLE001 — clean up the owned temp dir on any failure, then re-raise
         if _owned_temp_dir is not None:
             shutil.rmtree(_owned_temp_dir, ignore_errors=True)
         raise
@@ -167,7 +167,7 @@ def convert_raw_with_rawpy(
 
         image = Image.fromarray(rgb)
         image.save(output_path, format="JPEG", quality=85)
-    except Exception:
+    except Exception:  # noqa: BLE001 — clean up the owned temp dir on any failure, then re-raise
         if _owned_temp_dir is not None:
             shutil.rmtree(_owned_temp_dir, ignore_errors=True)
         raise

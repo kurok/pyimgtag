@@ -96,7 +96,8 @@ def write_exif_description(
         keywords: List of keyword strings. Skipped when None or empty.
         fmt: Metadata standard to write. One of ``"auto"``, ``"xmp"``,
             ``"iptc"``, or ``"exif"``. ``"auto"`` writes all compatible
-            fields (default).
+            fields (default). An unrecognized value writes none of the
+            description/keyword fields (only date fields are restored).
         merge: When True, existing keywords are preserved and new keywords
             are added alongside them. When False (default), existing
             keywords are cleared before writing.

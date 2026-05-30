@@ -511,6 +511,15 @@ def _check_for_update() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse argv, dispatch to the selected subcommand, and return its exit code.
+
+    Args:
+        argv: Argument list; defaults to ``sys.argv[1:]`` when ``None``.
+
+    Returns:
+        Process exit code; 1 when no subcommand or an unknown one is given,
+        otherwise the handler's exit code.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 

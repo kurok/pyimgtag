@@ -9,7 +9,11 @@ from pyimgtag.models import ExifData
 
 
 def parse_date(date_str: str) -> datetime:
-    """Parse a ``YYYY-MM-DD`` string into a :class:`datetime`."""
+    """Parse a ``YYYY-MM-DD`` string into a :class:`datetime`.
+
+    Raises:
+        ValueError: If date_str is not in YYYY-MM-DD format.
+    """
     return datetime.strptime(date_str, "%Y-%m-%d")
 
 

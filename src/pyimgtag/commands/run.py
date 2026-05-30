@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import shutil
 import subprocess
 import sys
@@ -12,7 +13,7 @@ from typing import Any
 
 from pyimgtag import run_registry
 from pyimgtag.applescript_writer import read_keywords_from_photos
-from pyimgtag.cloud_clients import CloudClientError, make_image_client
+from pyimgtag.cloud_clients import CloudClientError, ImageClient, make_image_client
 from pyimgtag.exif_reader import read_exif
 from pyimgtag.filters import passes_date_filter
 from pyimgtag.geocoder import ReverseGeocoder
@@ -22,6 +23,8 @@ from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
 from pyimgtag.preflight import check_ollama
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.scanner import scan_directory, scan_photos_library
+
+logger = logging.getLogger(__name__)
 
 _FDA_SETTINGS_URL = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
 
@@ -161,7 +164,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if backend == "ollama":
         # Constructed directly so tests that patch
         # ``pyimgtag.commands.run.OllamaClient`` keep working.
-        ollama = OllamaClient(
+        ollama: ImageClient = OllamaClient(
             model=args.model or "gemma4:e4b",
             base_url=args.ollama_url,
             max_dim=args.max_dim,
@@ -410,7 +413,8 @@ def _process_one(
 
     try:
         exif = read_exif(file_path)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — EXIF is best-effort; never block tagging
+        logger.debug("EXIF read failed for %s: %s", file_path, exc)
         exif = ExifData()
     result.image_date = exif.date_original
     result.gps_lat = exif.gps_lat
@@ -531,7 +535,8 @@ def _hydrate_from_db(
 
     try:
         exif = read_exif(file_path)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — EXIF is best-effort; never block tagging
+        logger.debug("EXIF read failed for %s: %s", file_path, exc)
         exif = ExifData()
     result.image_date = exif.date_original
     result.gps_lat = exif.gps_lat

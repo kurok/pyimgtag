@@ -94,6 +94,17 @@ def scan_and_store(
 
     if faces:
         embeddings = compute_embeddings(image_path, faces, max_dim=max_dim)
+        if len(embeddings) != len(faces):
+            # Positional alignment between faces[i] and embeddings[i] only holds
+            # when the counts match; a short result means some faces are stored
+            # without an embedding. Surface it instead of failing silently.
+            logger.warning(
+                "embedding count %d != face count %d for %s; "
+                "faces beyond the encoded count are stored without embeddings",
+                len(embeddings),
+                len(faces),
+                path_str,
+            )
         for i, detection in enumerate(faces):
             embedding = embeddings[i] if i < len(embeddings) else None
             db.insert_face(path_str, detection, embedding=embedding)

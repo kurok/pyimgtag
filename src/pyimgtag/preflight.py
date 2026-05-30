@@ -32,6 +32,13 @@ def check_cloud_backend(backend: str) -> tuple[bool, str]:
 
     No network call is made — this verifies only that the user has set the
     expected env var, which surfaces the most common misconfiguration.
+
+    Args:
+        backend: One of ``"anthropic"``, ``"openai"``, or ``"gemini"``.
+
+    Returns:
+        Tuple of ``(success, message)``; ``success`` is False for an unknown
+        backend or when no matching API key env var is set.
     """
     env_vars = {
         "anthropic": ("ANTHROPIC_API_KEY",),
@@ -82,6 +89,9 @@ def check_exiftool() -> tuple[bool, str]:
             text=True,
             timeout=5,
         )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or "no output"
+            return (False, f"exiftool check failed (exit {result.returncode}): {detail}")
         version = result.stdout.strip()
         return (True, f"exiftool {version} is installed")
     except FileNotFoundError:

@@ -22,6 +22,12 @@ def scan_directory(
         path: Directory to scan.
         extensions: File extensions to include (without dots).
         recursive: When True (default), scan subdirectories recursively.
+
+    Returns:
+        Sorted list of matching image file paths.
+
+    Raises:
+        FileNotFoundError: Path is not an existing directory.
     """
     exts = extensions or DEFAULT_EXTENSIONS
     root = Path(path).expanduser().resolve()

@@ -13,6 +13,13 @@ _RECENT_CAPACITY = 25
 
 
 class RunState(str, Enum):
+    """Lifecycle of a run: STARTING -> RUNNING -> (PAUSING -> PAUSED -> RUNNING).
+
+    COMPLETED, FAILED, and INTERRUPTED are terminal (see ``_TERMINAL``). The
+    PAUSING -> PAUSED move happens lazily inside ``wait_if_paused``, not in
+    ``request_pause``.
+    """
+
     STARTING = "starting"
     RUNNING = "running"
     PAUSING = "pausing"
@@ -156,14 +163,17 @@ class RunSession:
     # -- counters & progress ---------------------------------------------
 
     def set_counter(self, key: str, value: int) -> None:
+        """Set the named counter to an absolute value."""
         with self._lock:
             self._counters[key] = value
 
     def increment(self, key: str, by: int = 1) -> None:
+        """Add ``by`` to the named counter, defaulting it to 0 if unset."""
         with self._lock:
             self._counters[key] = self._counters.get(key, 0) + by
 
     def set_current(self, path: str | None) -> None:
+        """Record the item currently being processed, or ``None`` when idle."""
         with self._lock:
             self._current_item = path
 
@@ -174,6 +184,7 @@ class RunSession:
         error: str | None = None,
         detail: str | None = None,
     ) -> None:
+        """Append a processed item to the recent ring buffer, tracking errors."""
         entry: dict[str, Any] = {
             "path": path,
             "status": status,
@@ -191,6 +202,12 @@ class RunSession:
     # -- snapshot ---------------------------------------------------------
 
     def snapshot(self) -> dict[str, Any]:
+        """Return a consistent copy of the session for the dashboard JSON.
+
+        Keys: ``run_id``, ``command``, ``state``, ``counters``,
+        ``current_item``, ``started_at``, ``last_error``, ``web_url``,
+        ``recent``.
+        """
         with self._lock:
             return {
                 "run_id": self.run_id,

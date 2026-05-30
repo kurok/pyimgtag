@@ -125,6 +125,23 @@ class TestCheckExiftool:
         assert "https://exiftool.org for install instructions" in msg  # cross-platform hint
         assert "brew install" not in msg  # no macOS-only hint
 
+    @patch("pyimgtag.preflight.subprocess.run")
+    def test_present_but_broken_returns_fail(self, mock_run: MagicMock) -> None:
+        # exiftool exists but '-ver' exits nonzero (broken install / lib error);
+        # the gate must not green-light it with a blank version.
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["exiftool", "-ver"],
+            returncode=2,
+            stdout="",
+            stderr="Can't locate Image/ExifTool.pm",
+        )
+
+        ok, msg = check_exiftool()
+        assert ok is False
+        assert "exit 2" in msg
+        assert "Image/ExifTool.pm" in msg
+        assert "is installed" not in msg
+
 
 class TestCheckPhotosLibrary:
     def test_valid_structure(self, tmp_path: Path) -> None:

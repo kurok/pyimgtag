@@ -1,11 +1,23 @@
-"""Faces UI routes as a reusable APIRouter factory."""
+"""Faces UI routes as a reusable APIRouter factory.
+
+Exposes the faces management surfaces: the persons grid (with face
+thumbnails), unassigned-faces and trash assignment, person rename and merge,
+and per-face preview rendering. ``render_person_detail_html`` coerces the
+incoming ``person_id`` through ``int()`` to eliminate the URL XSS taint path —
+keep that coercion when refactoring.
+"""
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from fastapi.responses import Response
+
     from pyimgtag.progress_db import ProgressDB
+
+logger = logging.getLogger(__name__)
 
 _HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
@@ -1071,7 +1083,13 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         return {"ok": True, "person_id": target_id}
 
     @router.get("/api/faces/{face_id}/preview")
-    async def face_preview(face_id: int):  # type: ignore[return]
+    async def face_preview(face_id: int) -> Response:
+        """Render a cropped, bbox-annotated preview JPEG for one detected face.
+
+        Raises:
+            HTTPException: 404 if the face id is unknown or the source image
+                cannot be read/decoded.
+        """
         from io import BytesIO
 
         from fastapi.responses import Response
@@ -1088,8 +1106,14 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
             if is_heic(image_path):
                 image_path = str(convert_heic_to_jpeg(image_path))
             img = Image.open(image_path).convert("RGB")
-        except Exception:
-            raise HTTPException(status_code=404, detail="Image not readable")
+        except Exception as exc:  # noqa: BLE001 — PIL/HEIC decode can fail many ways
+            logger.warning(
+                "face preview: could not read image %s for face %s: %s",
+                image_path,
+                face_id,
+                exc,
+            )
+            raise HTTPException(status_code=404, detail="Image not readable") from exc
 
         # Scale bbox from detection space (max_dim=1280) to full-image coords.
         # face_detection resizes images to 1280px on the long side before detecting,

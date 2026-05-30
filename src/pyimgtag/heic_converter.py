@@ -1,4 +1,11 @@
-"""HEIC to JPEG conversion using macOS sips command."""
+"""HEIC to JPEG conversion using macOS sips command.
+
+This backend is macOS-only: it shells out to the system ``sips`` binary and is
+unavailable elsewhere. Callers should guard with :func:`sips_available` before
+invoking :func:`convert_heic_to_jpeg`, which raises ``RuntimeError`` when sips
+is missing or the conversion fails. When no ``output_dir`` is supplied a
+temporary directory is created and is always cleaned up if conversion fails.
+"""
 
 from __future__ import annotations
 
@@ -56,25 +63,28 @@ def convert_heic_to_jpeg(
     output_path = output_dir / (input_path.stem + ".jpg")
 
     try:
-        proc = subprocess.run(
-            ["sips", "-s", "format", "jpeg", str(input_path), "--out", str(output_path)],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired as exc:
-        if _owned_temp_dir is not None:
-            shutil.rmtree(_owned_temp_dir, ignore_errors=True)
-        raise RuntimeError(f"sips conversion timed out for {input_path}") from exc
+        try:
+            proc = subprocess.run(
+                ["sips", "-s", "format", "jpeg", str(input_path), "--out", str(output_path)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"sips conversion timed out for {input_path}") from exc
+
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"sips conversion failed (rc={proc.returncode}): {proc.stderr.strip()}"
+            )
+
+        if not output_path.is_file():
+            raise RuntimeError(f"sips did not produce output file: {output_path}")
     except Exception:
+        # Any failure after we created the temp dir (timeout, non-zero exit,
+        # missing output, or an unexpected error) must not leak it.
         if _owned_temp_dir is not None:
             shutil.rmtree(_owned_temp_dir, ignore_errors=True)
         raise
-
-    if proc.returncode != 0:
-        raise RuntimeError(f"sips conversion failed (rc={proc.returncode}): {proc.stderr.strip()}")
-
-    if not output_path.is_file():
-        raise RuntimeError(f"sips did not produce output file: {output_path}")
 
     return output_path
