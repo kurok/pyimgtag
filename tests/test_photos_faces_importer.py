@@ -187,6 +187,36 @@ class TestImportPhotosPersons:
             # Still only one person row
             assert len(db.get_persons()) == 1
 
+    def test_reimport_links_faces_scanned_after_initial_import(self, tmp_path):
+        with self._make_db(tmp_path) as db:
+            library = MagicMock()
+            library.photos.return_value = [_mock_photo("uuid99", ["Alice"])]
+
+            # First import: no faces in DB yet — person created with 0 faces.
+            with _photoscript_only(library):
+                imported, _ = import_photos_persons(db)
+            assert imported == 1
+            persons = db.get_persons()
+            assert len(persons[0].face_ids) == 0
+
+            # Faces scan runs — adds a face for Alice's photo.
+            det = FaceDetection(
+                image_path="/photos/uuid99.jpg",
+                bbox_x=0,
+                bbox_y=0,
+                bbox_w=50,
+                bbox_h=50,
+                confidence=0.9,
+            )
+            db.insert_face("/photos/uuid99.jpg", det)
+
+            # Second import: person already exists, but should link the new face.
+            with _photoscript_only(library):
+                imported2, _ = import_photos_persons(db)
+            assert imported2 == 0  # no new person created
+            persons = db.get_persons()
+            assert len(persons[0].face_ids) == 1  # face now linked
+
     def test_photo_in_multiple_persons(self, tmp_path):
         """A photo tagged with multiple names contributes to every person.
 

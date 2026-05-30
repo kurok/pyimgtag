@@ -876,7 +876,7 @@ class ProgressDB:
         (``abc123.jpg``) by using two LIKE patterns.
         """
         rows = self._conn.execute(
-            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
+            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence, person_id "
             "FROM faces WHERE image_path LIKE ? OR image_path LIKE ?",
             (f"%/{uuid}.%", f"{uuid}.%"),
         ).fetchall()
@@ -889,6 +889,7 @@ class ProgressDB:
                 "bbox_w": r[4],
                 "bbox_h": r[5],
                 "confidence": r[6],
+                "person_id": r[7],
             }
             for r in rows
         ]
@@ -902,6 +903,14 @@ class ProgressDB:
             ).fetchone()
             is not None
         )
+
+    def get_photos_person_id(self, label: str) -> int | None:
+        """Return the person_id for an already-imported Photos.app person, or None."""
+        row = self._conn.execute(
+            "SELECT id FROM persons WHERE label = ? AND source = 'photos'",
+            (label,),
+        ).fetchone()
+        return row[0] if row else None
 
     def mark_face_scanned(self, image_path: str) -> None:
         """Record that an image has been fully face-scanned (even if 0 faces found)."""
