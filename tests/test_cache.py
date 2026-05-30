@@ -41,3 +41,13 @@ class TestDiskCache:
                 c.set("k", {"v": 1})
         tmp = path.with_suffix(".tmp")
         assert not tmp.exists()
+
+    def test_atomic_write_cleans_up_tmp_on_write_text_failure(self, tmp_path):
+        """A failure during write_text (non-OSError) must still clean up the .tmp file."""
+        path = tmp_path / "cache.json"
+        c = DiskCache(path)
+        with patch("pathlib.Path.write_text", side_effect=RuntimeError("disk quota")):
+            with pytest.raises(RuntimeError, match="disk quota"):
+                c.set("k", {"v": 1})
+        tmp = path.with_suffix(".tmp")
+        assert not tmp.exists()

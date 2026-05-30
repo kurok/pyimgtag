@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import struct
 import subprocess
 from datetime import datetime
 from pathlib import Path

@@ -907,7 +907,9 @@ class ProgressDB:
             ),
         )
         self._conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        if cur.lastrowid is None:
+            raise RuntimeError("INSERT into faces did not return a row id")
+        return cur.lastrowid
 
     def get_faces_by_uuid(self, uuid: str) -> list[dict]:
         """Return all face rows whose image path stem matches the given UUID.
@@ -1013,7 +1015,9 @@ class ProgressDB:
             (label, 1 if confirmed else 0, source, 1 if trusted else 0),
         )
         self._conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        if cur.lastrowid is None:
+            raise RuntimeError("INSERT into persons did not return a row id")
+        return cur.lastrowid
 
     def get_persons(self) -> list[PersonCluster]:
         """Return all persons with their assigned face ids."""

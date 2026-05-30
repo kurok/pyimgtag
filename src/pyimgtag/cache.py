@@ -10,7 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 class DiskCache:
-    """Key-value cache backed by a JSON file."""
+    """Key-value cache backed by a JSON file.
+
+    Not thread-safe. Callers that share a DiskCache across threads must
+    provide their own lock. Concurrent writers may produce a corrupt JSON file.
+    """
 
     def __init__(self, cache_path: str | Path) -> None:
         """Open the cache at ``cache_path``, loading it into memory.
@@ -47,8 +51,8 @@ class DiskCache:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self._path.with_suffix(".tmp")
         try:
-            tmp.write_text(json.dumps(self._data, ensure_ascii=False))
+            tmp.write_text(json.dumps(self._data, ensure_ascii=False), encoding="utf-8")
             tmp.replace(self._path)
-        except OSError:
+        except Exception:
             tmp.unlink(missing_ok=True)
             raise

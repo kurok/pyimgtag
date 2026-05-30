@@ -64,6 +64,8 @@ def test_maybe_start_dashboard_falls_back_on_import_error(capsys, tmp_path):
 
 def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_path, monkeypatch):
     """When DashboardServer.start() returns False, the 'not yet ready' message should print."""
+    from unittest.mock import MagicMock, patch
+
     from pyimgtag import run_registry
     from pyimgtag.main import build_parser
     from pyimgtag.webapp.bootstrap import start_dashboard_for
@@ -93,7 +95,10 @@ def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_pat
 
     monkeypatch.setattr(server_thread, "DashboardServer", _FakeServer)
 
-    session, dashboard = start_dashboard_for(args, command="run")
+    # create_unified_app requires fastapi which may not be installed in dev;
+    # stub it out so the dashboard bootstrap path reaches DashboardServer.
+    with patch("pyimgtag.webapp.unified_app.create_unified_app", return_value=MagicMock()):
+        session, dashboard = start_dashboard_for(args, command="run")
     try:
         assert session is not None
         assert dashboard is not None
@@ -105,6 +110,8 @@ def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_pat
 
 def test_maybe_start_dashboard_webbrowser_failure_prints_warning(capsys, tmp_path, monkeypatch):
     """A webbrowser.open() failure must be caught and surfaced as a stderr warning."""
+    from unittest.mock import MagicMock, patch
+
     from pyimgtag import run_registry
     from pyimgtag.main import build_parser
     from pyimgtag.webapp import server_thread
@@ -133,10 +140,13 @@ def test_maybe_start_dashboard_webbrowser_failure_prints_warning(capsys, tmp_pat
         "webbrowser.open", lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("boom"))
     )
 
-    try:
-        session, dashboard = start_dashboard_for(args, command="run")
-        err = capsys.readouterr().err
-        assert "could not open browser" in err
-        assert session is not None
-    finally:
-        run_registry.set_current(None)
+    # create_unified_app requires fastapi which may not be installed in dev;
+    # stub it out so the webbrowser path is reached.
+    with patch("pyimgtag.webapp.unified_app.create_unified_app", return_value=MagicMock()):
+        try:
+            session, dashboard = start_dashboard_for(args, command="run")
+            err = capsys.readouterr().err
+            assert "could not open browser" in err
+            assert session is not None
+        finally:
+            run_registry.set_current(None)

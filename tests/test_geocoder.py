@@ -119,3 +119,38 @@ class TestFetchErrors:
     def test_close_session(self, tmp_path):
         geo = ReverseGeocoder(cache_dir=tmp_path)
         geo.close()  # must not raise
+
+
+class TestCacheBehaviour:
+    def test_cache_hit_skips_network(self, tmp_path):
+        """Second resolve with same coords must not call the network."""
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"address": {"city": "Paris", "country": "France"}}
+        mock_resp.raise_for_status.return_value = None
+
+        with patch.object(geo._session, "get", return_value=mock_resp) as mock_get:
+            with patch("time.sleep"):
+                geo.resolve(48.85, 2.35)
+                geo.resolve(48.85, 2.35)  # same coords → same rounded key
+
+        assert mock_get.call_count == 1
+
+    def test_stale_cached_dict_refetches(self, tmp_path):
+        """A cached entry with unexpected keys falls back to a network fetch."""
+        from pyimgtag.cache import DiskCache
+
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        # Inject a malformed cache entry (unknown field 'city_id' triggers TypeError).
+        key = "48.85,2.35"
+        geo._cache._data[key] = {"city_id": 999, "nearest_place": "Paris"}
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"address": {"city": "Paris", "country": "France"}}
+        mock_resp.raise_for_status.return_value = None
+
+        with patch.object(geo._session, "get", return_value=mock_resp):
+            with patch("time.sleep"):
+                result = geo.resolve(48.85, 2.35)
+
+        assert result.error is None

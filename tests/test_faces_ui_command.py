@@ -18,11 +18,18 @@ def _make_args(tmp_path):
 
 def test_faces_ui_success_path_invokes_uvicorn(tmp_path, capsys):
     """Happy path: mocks uvicorn.run; verifies the unified app is served on the right port."""
+    import sys
+    import types
+
     from pyimgtag.commands.faces import _handle_faces_ui
 
     args = _make_args(tmp_path)
+    mock_run = MagicMock()
+    fake_uvicorn = types.ModuleType("uvicorn")
+    fake_uvicorn.run = mock_run  # type: ignore[attr-defined]
+
     with (
-        patch("uvicorn.run") as mock_run,
+        patch.dict(sys.modules, {"uvicorn": fake_uvicorn}),
         patch("pyimgtag.webapp.unified_app.create_unified_app") as mock_create,
     ):
         mock_create.return_value = MagicMock(name="fastapi-app")

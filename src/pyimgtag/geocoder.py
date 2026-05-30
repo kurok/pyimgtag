@@ -45,7 +45,10 @@ class ReverseGeocoder:
         key = f"{round(lat, _CACHE_PRECISION)},{round(lon, _CACHE_PRECISION)}"
         cached = self._cache.get(key)
         if cached is not None:
-            return GeoResult(**cached)
+            try:
+                return GeoResult(**cached)
+            except TypeError:
+                pass  # stale cache entry with unexpected keys — re-fetch
 
         result = self._fetch(lat, lon)
         if result.error is None:
