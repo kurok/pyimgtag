@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.10] - 2026-05-30
+
+### Fixed
+- **Trusted persons showed 0 faces after `faces scan`** (#220): `import-photos` was fully idempotent — when a Photos.app person already existed it skipped face assignment entirely. Running `import-photos` before `faces scan` left trusted persons with 0 faces permanently. Re-running `import-photos` after scan now links newly-detected unassigned faces to existing trusted persons. Face assignments also no longer overwrite existing ones.
+
 ## [0.16.9] - 2026-05-30
 
 ### Fixed
