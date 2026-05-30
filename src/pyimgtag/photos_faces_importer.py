@@ -491,6 +491,30 @@ def _collect_via_photoscript(emit: Callable[[str], None]) -> dict[str, list[str]
     return name_to_uuids
 
 
+def _assign_faces_to_person(db: ProgressDB, person_id: int, uuids: list[str]) -> int:
+    """Assign unambiguous unassigned faces for *uuids* to *person_id*.
+
+    Only faces with ``person_id IS NULL`` are touched so existing assignments
+    are never overwritten.  Returns the number of multi-face photos that could
+    not be auto-assigned (skipped count).
+    """
+    skipped = 0
+    for uuid in uuids:
+        faces = db.get_faces_by_uuid(uuid)
+        unassigned = [f for f in faces if f["person_id"] is None]
+        if len(unassigned) == 1:
+            db.set_person_id(unassigned[0]["id"], person_id)
+        elif len(unassigned) > 1:
+            logger.warning(
+                "Photos person id=%d: photo %s has %d unassigned faces — skipping auto-assign",
+                person_id,
+                uuid,
+                len(unassigned),
+            )
+            skipped += 1
+    return skipped
+
+
 def _materialize_persons(
     db: ProgressDB,
     name_to_uuids: dict[str, list[str]],
@@ -501,26 +525,18 @@ def _materialize_persons(
     skipped = 0
 
     for name, uuids in name_to_uuids.items():
-        # Idempotent: a previous import for this name leaves the row in
-        # place; the second import is a no-op.
         if db.has_photos_person(name):
+            # Person already exists — check local DB for newly-scanned faces
+            # that can now be assigned (covers the case where import-photos ran
+            # before faces scan and left the person with 0 faces).
+            existing_id = db.get_photos_person_id(name)
+            if existing_id is not None:
+                skipped += _assign_faces_to_person(db, existing_id, uuids)
             continue
 
         person_id = db.create_person(label=name, confirmed=True, source="photos", trusted=True)
         imported += 1
-
-        for uuid in uuids:
-            faces = db.get_faces_by_uuid(uuid)
-            if len(faces) == 1:
-                db.set_person_id(faces[0]["id"], person_id)
-            elif len(faces) > 1:
-                logger.warning(
-                    "Photos person %r: photo %s has %d detected faces — skipping auto-assign",
-                    name,
-                    uuid,
-                    len(faces),
-                )
-                skipped += 1
+        skipped += _assign_faces_to_person(db, person_id, uuids)
 
     emit(
         f"[faces] import complete: {imported} new person(s), {skipped} multi-face photo(s) skipped"
