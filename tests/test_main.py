@@ -1278,3 +1278,54 @@ class TestFacesScanWebFlags:
 
         args = build_parser().parse_args(["faces", "scan", "--input-dir", "/tmp", "--no-web"])
         assert args.no_web is True
+
+
+class TestSubcommandHelp:
+    """Every top-level subcommand exposes a documented ``-h`` page: an overview
+    description plus a worked-example block, not just the bare flag list."""
+
+    _SUBCOMMANDS = [
+        "run",
+        "status",
+        "reprocess",
+        "preflight",
+        "cleanup",
+        "cleanup-drift",
+        "review",
+        "faces",
+        "query",
+        "judge",
+        "tags",
+    ]
+
+    @pytest.mark.parametrize("sub", _SUBCOMMANDS)
+    def test_subcommand_help_has_examples(self, sub, capsys):
+        parser = build_parser()
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args([sub, "-h"])
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        # Each subcommand's -h must show a runnable example block...
+        assert "Examples:" in out, f"`{sub} -h` is missing an Examples block"
+        # ...with at least one concrete invocation of that subcommand.
+        assert f"pyimgtag {sub}" in out, f"`{sub} -h` has no `pyimgtag {sub} ...` example"
+
+    @pytest.mark.parametrize("sub", _SUBCOMMANDS)
+    def test_subcommand_help_has_description(self, sub):
+        # The description (distinct from the one-line summary) is wired up via
+        # _SUBCOMMAND_HELP and rendered at the top of `<sub> -h`.
+        from pyimgtag.main import _SUBCOMMAND_HELP
+
+        summary, description, epilog = _SUBCOMMAND_HELP[sub]
+        assert description and description != summary
+        assert epilog.strip().startswith("Examples:")
+
+    def test_top_level_summaries_preserved(self, capsys):
+        # Adding per-subcommand descriptions must not drop the one-line
+        # summaries from the top-level `pyimgtag -h` listing.
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["-h"])
+        out = capsys.readouterr().out
+        assert "Tag images (default workhorse)" in out
+        assert "Manage tags across the image database" in out
