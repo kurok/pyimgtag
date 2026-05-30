@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-05-30
+
+### Added
+- **`--skip-existing` flag for `run`** (#223): fast-skips photos already complete in the progress DB so repeat runs over the same source don't re-open or re-process finished rows. Inactive in `--dry-run` (the progress DB is not opened) and warns when combined with write-back, since complete rows are skipped without writing.
+
+### Fixed
+- **`heic_converter` temp-dir leak** (#222): a non-zero `sips` exit or missing output raised `RuntimeError` without removing the temporary directory it created. The post-run checks are now inside the cleanup guard.
+- **`geocoder` uncaught `AttributeError` on odd payloads** (#222): a non-dict Nominatim response made `data.get(...)` raise and escape `resolve()`'s "always returns a `GeoResult`" contract. Non-dict payloads and invalid JSON now degrade to an error `GeoResult`.
+- **`preflight` reported a broken exiftool as installed** (#222): `check_exiftool` ignored a non-zero exit and returned success with a blank version. It now fails with the exit code and stderr.
+- **`review` / `faces ui` crashed on a busy port** (#222): an `OSError` (EADDRINUSE) from `uvicorn.run` escaped as an unhandled traceback; both now print an actionable message and exit 1.
+
+### Changed
+- **`cloud_clients`** (#222): response-shape error messages include a bounded snippet of the actual payload, and `make_image_client` is typed with an `ImageClient` `Protocol` instead of `Any`.
+- **Observability** (#222): added debug/warning breadcrumbs on previously-silent best-effort paths (cache load, `ProgressDB.mark_done` stat failures, partial face embeddings, face/thumbnail decode, background clustering).
+
+### Documentation
+- **Public-API docstrings** (#222): added/expanded Google-style docstrings across the package (output writers, CLI entry point, `cmd_judge`, `ProgressDB`, `RunState`/`RunSession`, scanner, filters, dedup, face clustering, judge scorer, server thread, and the vision clients), and derived the Nominatim `User-Agent` from `__version__` instead of a stale literal.
+
 ## [0.16.10] - 2026-05-30
 
 ### Fixed
