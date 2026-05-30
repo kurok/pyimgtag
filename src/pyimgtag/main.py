@@ -13,8 +13,183 @@ from pyimgtag.webapp.config import add_web_flags
 _DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
 
 
+# Per-subcommand help. Each entry is (summary, description, epilog):
+#   - summary:     the one-liner shown under ``pyimgtag -h``
+#   - description: the overview shown at the top of ``pyimgtag <name> -h``
+#   - epilog:      a worked-example block shown at the bottom of ``pyimgtag <name> -h``
+# The example blocks rely on a raw formatter (see ``_sub``) to keep their line breaks.
+_SUBCOMMAND_HELP: dict[str, tuple[str, str, str]] = {
+    "run": (
+        "Tag images (default workhorse)",
+        "Tag images with the local vision model and EXIF GPS reverse geocoding.\n"
+        "Each image gets tags, a scene summary, and rich metadata; results can be\n"
+        "written back to Apple Photos (macOS) or to image EXIF/XMP sidecars.",
+        """\
+Examples:
+  # Tag every image in an exported folder
+  pyimgtag run --input-dir ~/Pictures/export
+
+  # Tag an Apple Photos library and write keywords + description back (macOS)
+  pyimgtag run --photos-library ~/Pictures/Photos.photoslibrary --write-back
+
+  # Resume a large library, reusing cached model results for unchanged files
+  pyimgtag run --photos-library LIB --resume-from-db
+
+  # Fastest resume: fully skip photos already complete in the DB
+  pyimgtag run --photos-library LIB --skip-existing
+
+  # Use a hosted backend instead of local Ollama
+  pyimgtag run --input-dir DIR --backend anthropic --api-key sk-...
+""",
+    ),
+    "status": (
+        "Show progress stats from the DB",
+        "Print counts of processed images by status (ok / error) from the progress\ndatabase.",
+        """\
+Examples:
+  pyimgtag status
+  pyimgtag status --db ./my-run.db
+""",
+    ),
+    "reprocess": (
+        "Reset DB entries so photos get re-tagged",
+        "Clear processed-image rows so the next run re-tags them. Omit --status to\n"
+        "reset everything, or pass --status error to retry only failed images.",
+        """\
+Examples:
+  # Retry only the images that errored last run
+  pyimgtag reprocess --status error
+
+  # Reset the whole database
+  pyimgtag reprocess
+""",
+    ),
+    "preflight": (
+        "Run preflight checks for prerequisites and exit",
+        "Check that prerequisites are in place (Ollama reachable, model pulled,\n"
+        "exiftool installed, source path readable) and exit without tagging.",
+        """\
+Examples:
+  pyimgtag preflight
+  pyimgtag preflight --model gemma4:e4b --input-dir ~/Pictures/export
+""",
+    ),
+    "cleanup": (
+        "List photos flagged for cleanup (delete/review) and exit",
+        "List photos the model flagged for cleanup. Shows 'delete' candidates by\n"
+        "default; add --include-review to also list 'review' candidates.",
+        """\
+Examples:
+  pyimgtag cleanup
+  pyimgtag cleanup --include-review
+""",
+    ),
+    "cleanup-drift": (
+        "Find DB rows whose backing file is gone (and, on macOS, photos that "
+        "Apple Photos no longer indexes). Use --prune to actually delete them.",
+        "Find progress-DB rows whose backing file is gone (and, on macOS, photos\n"
+        "Apple Photos no longer indexes). Lists dead rows by default; use --prune\n"
+        "to delete them from the database.",
+        """\
+Examples:
+  # Dry run: list the dead rows (default behaviour)
+  pyimgtag cleanup-drift
+
+  # Actually delete the dead rows from the DB
+  pyimgtag cleanup-drift --prune
+""",
+    ),
+    "review": (
+        "Launch the local review UI (requires pyimgtag[review])",
+        "Start the local web UI to browse, filter, and edit tagged images.\n"
+        "Requires the [review] extra: pip install 'pyimgtag[review]'.",
+        """\
+Examples:
+  pyimgtag review
+  pyimgtag review --port 9000 --no-browser
+""",
+    ),
+    "faces": (
+        "Face detection, clustering, and tagging",
+        "Detect faces, cluster them into people, review/label the clusters, and\n"
+        "write person keywords back to images. Requires the [face] extra. Run the\n"
+        "sub-actions in order: scan -> cluster -> review -> apply.",
+        """\
+Examples:
+  pyimgtag faces scan --input-dir ~/Pictures/export
+  pyimgtag faces cluster --eps 0.5 --min-samples 2
+  pyimgtag faces review
+  pyimgtag faces apply --write-exif
+  pyimgtag faces ui            # web UI for naming and merging people
+
+Run 'pyimgtag faces <action> -h' for action-specific options.
+""",
+    ),
+    "query": (
+        "Query images with advanced filters",
+        "Query tagged images with filters (tag, city, country, scene category,\n"
+        "text presence, cleanup class, status) and print them as a table, JSON,\n"
+        "or bare file paths.",
+        """\
+Examples:
+  pyimgtag query --tag sunset --country US
+  pyimgtag query --scene-category outdoor_travel --format paths
+  pyimgtag query --status error --format json
+""",
+    ),
+    "judge": (
+        "Score photos with the professional photo-judge rubric",
+        "Score photos 1-10 with the photo-judge rubric and print a ranked list.\n"
+        "Optionally write the score back to Apple Photos as a keyword.",
+        """\
+Examples:
+  pyimgtag judge --input-dir ~/Pictures/export --min-score 7
+  pyimgtag judge --photos-library LIB --sort-by score --verbose
+""",
+    ),
+    "tags": (
+        "Manage tags across the image database",
+        "List, rename, delete, or merge tags across all images in the database.",
+        """\
+Examples:
+  pyimgtag tags list
+  pyimgtag tags rename beach seaside
+  pyimgtag tags merge seaside beach
+  pyimgtag tags delete blurry --dry-run
+
+Run 'pyimgtag tags <action> -h' for action-specific options.
+""",
+    ),
+}
+
+
+def _sub(subparsers: Any, name: str) -> argparse.ArgumentParser:
+    """Register a top-level subcommand with a documented ``-h`` page.
+
+    Looks up the summary, description, and worked-example epilog from
+    :data:`_SUBCOMMAND_HELP` and wires up
+    :class:`argparse.RawDescriptionHelpFormatter` so the example block's line
+    breaks survive into the rendered help.
+
+    Args:
+        subparsers: The subparsers action returned by ``add_subparsers``.
+        name: The subcommand name; must be a key in :data:`_SUBCOMMAND_HELP`.
+
+    Returns:
+        The created :class:`argparse.ArgumentParser` for the subcommand.
+    """
+    summary, description, epilog = _SUBCOMMAND_HELP[name]
+    return subparsers.add_parser(
+        name,
+        help=summary,
+        description=description,
+        epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
 def _add_run_subcommand(subparsers: Any) -> None:
-    run_p = subparsers.add_parser("run", help="Tag images (default workhorse)")
+    run_p = _sub(subparsers, "run")
     src = run_p.add_mutually_exclusive_group(required=False)
     src.add_argument("--input-dir", help="Path to an exported image folder")
     src.add_argument("--photos-library", help="Path to an Apple Photos library package")
@@ -167,21 +342,17 @@ def _add_run_subcommand(subparsers: Any) -> None:
 
 
 def _add_status_reprocess_preflight_subcommands(subparsers: Any) -> None:
-    status_p = subparsers.add_parser("status", help="Show progress stats from the DB")
+    status_p = _sub(subparsers, "status")
     status_p.add_argument("--db", help=_DEFAULT_DB_HELP)
 
-    reprocess_p = subparsers.add_parser(
-        "reprocess", help="Reset DB entries so photos get re-tagged"
-    )
+    reprocess_p = _sub(subparsers, "reprocess")
     reprocess_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     reprocess_p.add_argument(
         "--status",
         help="Only reset entries with this status (e.g. 'error'). Omit to reset everything.",
     )
 
-    preflight_p = subparsers.add_parser(
-        "preflight", help="Run preflight checks for prerequisites and exit"
-    )
+    preflight_p = _sub(subparsers, "preflight")
     preflight_p.add_argument(
         "--ollama-url",
         default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
@@ -196,9 +367,7 @@ def _add_status_reprocess_preflight_subcommands(subparsers: Any) -> None:
 
 
 def _add_cleanup_subcommands(subparsers: Any) -> None:
-    cleanup_p = subparsers.add_parser(
-        "cleanup", help="List photos flagged for cleanup (delete/review) and exit"
-    )
+    cleanup_p = _sub(subparsers, "cleanup")
     cleanup_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     cleanup_p.add_argument(
         "--include-review",
@@ -206,13 +375,7 @@ def _add_cleanup_subcommands(subparsers: Any) -> None:
         help="Also show photos flagged as 'review' (default: delete only)",
     )
 
-    drift_p = subparsers.add_parser(
-        "cleanup-drift",
-        help=(
-            "Find DB rows whose backing file is gone (and, on macOS, photos that "
-            "Apple Photos no longer indexes). Use --prune to actually delete them."
-        ),
-    )
+    drift_p = _sub(subparsers, "cleanup-drift")
     drift_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     drift_mode = drift_p.add_mutually_exclusive_group()
     drift_mode.add_argument(
@@ -230,9 +393,7 @@ def _add_cleanup_subcommands(subparsers: Any) -> None:
 
 
 def _add_review_subcommand(subparsers: Any) -> None:
-    review_p = subparsers.add_parser(
-        "review", help="Launch the local review UI (requires pyimgtag[review])"
-    )
+    review_p = _sub(subparsers, "review")
     review_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     review_p.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
     review_p.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765)")
@@ -242,7 +403,7 @@ def _add_review_subcommand(subparsers: Any) -> None:
 
 
 def _add_faces_subcommand(subparsers: Any) -> None:
-    faces_p = subparsers.add_parser("faces", help="Face detection, clustering, and tagging")
+    faces_p = _sub(subparsers, "faces")
     faces_sub = faces_p.add_subparsers(dest="faces_action")
 
     faces_scan = faces_sub.add_parser("scan", help="Detect faces and compute embeddings")
@@ -313,7 +474,7 @@ def _add_faces_subcommand(subparsers: Any) -> None:
 
 
 def _add_query_subcommand(subparsers: Any) -> None:
-    query_p = subparsers.add_parser("query", help="Query images with advanced filters")
+    query_p = _sub(subparsers, "query")
     query_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     query_p.add_argument("--tag", help="Filter by tag (case-insensitive substring match)")
     query_text_grp = query_p.add_mutually_exclusive_group()
@@ -340,10 +501,7 @@ def _add_query_subcommand(subparsers: Any) -> None:
 
 
 def _add_judge_subcommand(subparsers: Any) -> None:
-    judge_p = subparsers.add_parser(
-        "judge",
-        help="Score photos with the professional photo-judge rubric",
-    )
+    judge_p = _sub(subparsers, "judge")
     judge_src = judge_p.add_mutually_exclusive_group(required=False)
     judge_src.add_argument("--input-dir", metavar="DIR", help="Directory of images to judge")
     judge_src.add_argument(
@@ -447,7 +605,7 @@ def _add_judge_subcommand(subparsers: Any) -> None:
 
 
 def _add_tags_subcommand(subparsers: Any) -> None:
-    tags_p = subparsers.add_parser("tags", help="Manage tags across the image database")
+    tags_p = _sub(subparsers, "tags")
     tags_sub = tags_p.add_subparsers(dest="tags_action")
 
     tags_list_p = tags_sub.add_parser("list", help="List all tags with image counts")
