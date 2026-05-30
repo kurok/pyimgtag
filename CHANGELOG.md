@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-05-30
+
+### Added
+- **`run --skip-existing`** (#223): fully skip any unchanged photo already complete in the DB (status ok + non-empty tags) — no EXIF re-read, geocoding, write-back, or DB rewrite. The fast path for resuming a large, mostly-tagged library, where `--resume-from-db` was slow because it re-read EXIF (an exiftool subprocess per photo), re-geocoded, and — with `--write-back` — re-wrote keywords to Apple Photos via an osascript subprocess per photo. The skip decision is one indexed SELECT plus one `stat()` via the new `ProgressDB.is_complete_cached()`. Takes precedence over `--resume-from-db` and forces the linear path. Cached photos are intentionally not (re)written even with `--write-back`/`--write-exif`; a startup notice makes this explicit.
+
 ## [0.16.10] - 2026-05-30
 
 ### Fixed
