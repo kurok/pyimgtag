@@ -84,6 +84,7 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         session.mark_running()
 
     interrupted = False
+    errors = 0
     try:
         with ProgressDB(db_path=args.db) as db:
             stop_event = threading.Event()
@@ -98,9 +99,30 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
                         session.wait_if_paused()
                         session.set_current(str(file_path))
 
-                    count = scan_and_store(
-                        file_path, db, max_dim=args.max_dim, model=args.detection_model
-                    )
+                    try:
+                        count = scan_and_store(
+                            file_path, db, max_dim=args.max_dim, model=args.detection_model
+                        )
+                    except OSError as exc:
+                        import errno as _errno
+
+                        if exc.errno == _errno.ENOSPC:
+                            print(
+                                "\nError: disk full — no space left on device."
+                                " Free up space and re-run; already-scanned images"
+                                " will be skipped automatically.",
+                                file=sys.stderr,
+                            )
+                            interrupted = True
+                            break
+                        print(f"  {file_path.name}: skipped ({exc})", file=sys.stderr)
+                        errors += 1
+                        continue
+                    except Exception as exc:
+                        print(f"  {file_path.name}: skipped ({exc})", file=sys.stderr)
+                        errors += 1
+                        continue
+
                     scanned += 1
                     if count > 0:
                         total_faces += count
@@ -120,7 +142,11 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
                 stop_event.set()
                 cluster_thread.join()
 
-        print(f"\nScanned {scanned} images, detected {total_faces} faces.", file=sys.stderr)
+        err_suffix = f", {errors} error(s) skipped" if errors else ""
+        print(
+            f"\nScanned {scanned} images, detected {total_faces} faces{err_suffix}.",
+            file=sys.stderr,
+        )
         if session is not None and not interrupted:
             session.mark_completed()
     finally:
