@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.8] - 2026-05-30
+
+### Fixed
+- **`faces scan` crashed on per-file errors** (#215): any exception during file processing (e.g. `OSError: [Errno 28] No space left on device` when HEIC conversion runs out of temp space) terminated the entire scan session with a traceback. Per-file processing is now wrapped in try/except: disk-full (`ENOSPC`) prints a clear message and stops cleanly; all other errors print `filename: skipped (reason)` and continue to the next file. The final summary line includes the error count: `Scanned N images, detected M faces, K error(s) skipped.`
+
 ## [0.16.7] - 2026-05-30
 
 ### Fixed
