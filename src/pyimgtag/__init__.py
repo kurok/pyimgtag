@@ -1,5 +1,5 @@
 """pyimgtag — Tag macOS Photos library images using local Gemma model."""
 
-__version__ = "0.17.2"
+__version__ = "0.17.3"
 
 __all__ = ["__version__"]

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.3] - 2026-05-30
+
+### Security
+- **Resolve all open CodeQL code-scanning alerts** (#230):
+  - `py/log-injection` (#155, #159): the faces preview and person-detail log calls included request-influenced values. The preview log now strips CR/LF from the image path, face id, and error text; the person-detail breadcrumb is now a static message with no request value.
+  - `py/ineffectual-statement` (#156–#158): the `ImageClient` Protocol method bodies used bare `...`, flagged as no-effect statements. Replaced with one-line docstrings (valid Protocol stubs that also document the contract). No behavior change.
+
 ## [0.17.2] - 2026-05-30
 
 ### Fixed
