@@ -138,8 +138,6 @@ class TestCacheBehaviour:
 
     def test_stale_cached_dict_refetches(self, tmp_path):
         """A cached entry with unexpected keys falls back to a network fetch."""
-        from pyimgtag.cache import DiskCache
-
         geo = ReverseGeocoder(cache_dir=tmp_path)
         # Inject a malformed cache entry (unknown field 'city_id' triggers TypeError).
         key = "48.85,2.35"
