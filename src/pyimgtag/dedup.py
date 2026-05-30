@@ -45,8 +45,11 @@ def hamming_distance(hash1: str, hash2: str) -> int:
         ValueError: If hash1 or hash2 is not a valid hex hash string parseable
             by imagehash.hex_to_hash().
     """
-    h1 = imagehash.hex_to_hash(hash1)
-    h2 = imagehash.hex_to_hash(hash2)
+    try:
+        h1 = imagehash.hex_to_hash(hash1)
+        h2 = imagehash.hex_to_hash(hash2)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid perceptual hash: {exc}") from exc
     return int(h1 - h2)
 
 

@@ -100,3 +100,17 @@ class TestFindDuplicateGroups:
 
     def test_single_record(self):
         assert find_duplicate_groups([("/a/img.png", "abcd1234abcd1234")]) == []
+
+
+class TestHammingDistanceEdgeCases:
+    def test_invalid_hash_raises_value_error(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid perceptual hash"):
+            hamming_distance("not-hex!", "d4c4d4e4f4a4b4c4")
+
+    def test_empty_string_raises_value_error(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid perceptual hash"):
+            hamming_distance("", "d4c4d4e4f4a4b4c4")
