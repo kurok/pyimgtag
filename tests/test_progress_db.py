@@ -1734,6 +1734,53 @@ class TestResumeDBAPIs:
             db.mark_done(img, self._make_result(img, tags=[]))
             assert db.has_usable_model_result(img) is False
 
+    def test_is_complete_cached_true_for_fresh_ok_with_tags(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db.mark_done(img, self._make_result(img))
+            assert db.is_complete_cached(img) is True
+
+    def test_is_complete_cached_false_when_not_in_db(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.is_complete_cached(img) is False
+
+    def test_is_complete_cached_false_when_file_changed(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db.mark_done(img, self._make_result(img))
+            img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00extra_bytes")
+            assert db.is_complete_cached(img) is False
+
+    def test_is_complete_cached_false_when_status_not_ok(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            err = self._make_result(img)
+            err.processing_status = "error"
+            err.error_message = "boom"
+            db.mark_done(img, err)
+            assert db.is_complete_cached(img) is False
+
+    def test_is_complete_cached_false_when_tags_empty(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db.mark_done(img, self._make_result(img, tags=[]))
+            assert db.is_complete_cached(img) is False
+
+    def test_is_complete_cached_false_when_file_deleted(self, tmp_path):
+        """Complete DB row but the underlying file is gone -> stat() OSError -> False."""
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db.mark_done(img, self._make_result(img))
+            img.unlink()
+            assert db.is_complete_cached(img) is False
+
     def test_update_missing_fields_fills_nulls(self, tmp_path):
         img = tmp_path / "photo.jpg"
         img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")

@@ -1448,6 +1448,35 @@ class ProgressDB:
             significance=significance,
         )
 
+    def is_complete_cached(self, file_path: Path) -> bool:
+        """Return True if the DB has a fresh, successful row with non-empty tags.
+
+        Combines the freshness (size+mtime), status, and non-empty-tags checks
+        into a single query so the skip decision costs one SELECT plus one
+        ``stat()`` — the fast path used by ``run --skip-existing`` to bypass
+        EXIF, geocoding, and write-back for already-processed photos.
+        """
+        row = self._conn.execute(
+            "SELECT file_size, file_mtime, status, tags FROM processed_images WHERE file_path = ?",
+            (str(file_path),),
+        ).fetchone()
+        if row is None:
+            return False
+        size, mtime, status, tags_raw = row
+        if status != "ok":
+            return False
+        try:
+            tags: list[str] = json.loads(tags_raw) if tags_raw else []
+        except (json.JSONDecodeError, TypeError):
+            tags = []
+        if not tags:
+            return False
+        try:
+            stat = file_path.stat()
+        except OSError:
+            return False
+        return size == stat.st_size and mtime == stat.st_mtime
+
     def has_usable_model_result(self, file_path: Path) -> bool:
         """Return True if the DB has a fresh row with non-empty tags."""
         if not self.is_fresh(file_path):
