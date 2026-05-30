@@ -46,11 +46,14 @@ class ImageClient(Protocol):
     concrete class.
     """
 
-    def tag_image(self, file_path: str, context: dict | None = None) -> TagResult: ...
+    def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
+        """Tag an image and return a :class:`TagResult`."""
 
-    def judge_image(self, file_path: str) -> JudgeScores | None: ...
+    def judge_image(self, file_path: str) -> JudgeScores | None:
+        """Score an image and return :class:`JudgeScores`, or None on failure."""
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Release any underlying resources (e.g. an HTTP session)."""
 
 
 # Sensible defaults for each provider. Users can override with --model.

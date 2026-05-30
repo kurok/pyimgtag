@@ -915,7 +915,9 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
             # rendered (auto-clustering deletes and recreates persons, so cards
             # can point at ids that no longer exist). Bounce back to the faces
             # list instead of dumping a raw "Person not found" JSON body.
-            logger.debug("person %s no longer exists; redirecting to faces list", person_id)
+            # Static message (no request value) keeps this breadcrumb free of
+            # any log-injection vector.
+            logger.debug("requested person no longer exists; redirecting to faces list")
             return RedirectResponse(url=f"{api_base}/", status_code=303)
         return HTMLResponse(render_person_detail_html(person_id, api_base))
 
@@ -1112,11 +1114,13 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                 image_path = str(convert_heic_to_jpeg(image_path))
             img = Image.open(image_path).convert("RGB")
         except Exception as exc:  # noqa: BLE001 — PIL/HEIC decode can fail many ways
+            # Strip CR/LF from the request-influenced values so they cannot
+            # forge extra log lines (CodeQL py/log-injection).
             logger.warning(
                 "face preview: could not read image %s for face %s: %s",
-                image_path,
-                face_id,
-                exc,
+                str(image_path).replace("\n", " ").replace("\r", " "),
+                str(face_id).replace("\n", " ").replace("\r", " "),
+                str(exc).replace("\n", " ").replace("\r", " "),
             )
             raise HTTPException(status_code=404, detail="Image not readable") from exc
 
