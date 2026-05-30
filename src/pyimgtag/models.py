@@ -110,7 +110,8 @@ class ImageResult:
         """Build a human-readable description from summary, location, and date.
 
         Example: "Golden hour sunset over the Pacific. San Francisco, California, US. April 2026."
-        Returns None if no summary is available.
+        Returns None if no summary is available. A malformed image_date is silently ignored
+        (the date segment is omitted), so this never raises on a bad date.
         """
         if not self.scene_summary:
             return None

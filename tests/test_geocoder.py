@@ -85,6 +85,37 @@ class TestFetchErrors:
         assert "Geocoding failed" in result.error
         assert result.nearest_place is None
 
+    def test_non_dict_payload_returns_error(self, tmp_path):
+        # Nominatim normally returns an object; a JSON list must not crash
+        # resolve() with an AttributeError but degrade to an error GeoResult.
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = ["unexpected", "list"]
+        mock_resp.raise_for_status.return_value = None
+        with patch.object(geo._session, "get", return_value=mock_resp):
+            with patch("time.sleep"):
+                result = geo.resolve(48.85, 2.35)
+        assert result.error is not None
+        assert "unexpected payload" in result.error
+        assert result.nearest_place is None
+
+    def test_invalid_json_returns_error(self, tmp_path):
+        # requests' Response.json() raises requests.exceptions.JSONDecodeError
+        # (a subclass of BOTH RequestException and ValueError) on a malformed
+        # body. Use the real type so this proves the decode branch is actually
+        # reached and not shadowed by the network error handler above it.
+        import requests as req
+
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        mock_resp = MagicMock()
+        mock_resp.json.side_effect = req.exceptions.JSONDecodeError("Expecting value", "doc", 0)
+        mock_resp.raise_for_status.return_value = None
+        with patch.object(geo._session, "get", return_value=mock_resp):
+            with patch("time.sleep"):
+                result = geo.resolve(48.85, 2.35)
+        assert result.error is not None
+        assert "invalid JSON" in result.error
+
     def test_close_session(self, tmp_path):
         geo = ReverseGeocoder(cache_dir=tmp_path)
         geo.close()  # must not raise

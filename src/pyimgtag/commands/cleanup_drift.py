@@ -22,6 +22,11 @@ def cmd_cleanup_drift(args: argparse.Namespace) -> int:
     by the Edit panel so script wrappers can pin one shape:
     ``N rows in DB · K with missing file · L deleted`` (or
     ``would delete``).
+
+    Returns:
+        Always ``0``; a degraded Photos.app probe
+        (``report.photos_probe_error`` set) is reported as a note on
+        stderr, not signalled via the exit code.
     """
     # ``--dry-run`` is the default behaviour. ``--prune`` is the only
     # way to actually delete rows; the mutex group guards against

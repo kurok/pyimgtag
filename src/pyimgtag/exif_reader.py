@@ -32,6 +32,15 @@ def read_exif(file_path: str | Path) -> ExifData:
     """Read EXIF GPS and date from an image file.
 
     Tries backends in order: exiftool → exifread → Pillow.
+
+    Args:
+        file_path: Path to the image file.
+
+    Returns:
+        An :class:`ExifData`. This never raises on a bad or missing file: every
+        backend degrades, and the final Pillow tier returns an ExifData with
+        only a file-derived date. Fields are left None when nothing is
+        recoverable.
     """
     path = Path(file_path)
     result = _read_exiftool(path)
@@ -120,7 +129,7 @@ def _read_exifread(path: Path) -> ExifData | None:
             date_iso = _get_file_date(path)
 
         return ExifData(gps_lat=lat, gps_lon=lon, date_original=date_iso, has_gps=has_gps)
-    except Exception:
+    except Exception:  # noqa: BLE001 — best-effort tier; any failure falls through to Pillow
         return None
 
 
@@ -173,7 +182,7 @@ def _read_pillow(path: Path) -> ExifData:
                 date_iso = _get_file_date(path)
 
             return ExifData(gps_lat=lat, gps_lon=lon, date_original=date_iso, has_gps=has_gps)
-    except Exception:
+    except Exception:  # noqa: BLE001 — last-resort backend; degrade to a file-date-only result
         return ExifData(date_original=_get_file_date(path))
 
 

@@ -22,7 +22,7 @@ reads its provider-conventional environment variable (e.g.
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 
@@ -35,6 +35,23 @@ from pyimgtag.ollama_client import (
     _parse_response,
     prepare_image_b64,
 )
+
+
+class ImageClient(Protocol):
+    """Structural type implemented by every vision-model client.
+
+    Both the local :class:`pyimgtag.ollama_client.OllamaClient` and the cloud
+    clients in this module satisfy it, so callers (and mypy) can treat the value
+    returned by :func:`make_image_client` uniformly without importing each
+    concrete class.
+    """
+
+    def tag_image(self, file_path: str, context: dict | None = None) -> TagResult: ...
+
+    def judge_image(self, file_path: str) -> JudgeScores | None: ...
+
+    def close(self) -> None: ...
+
 
 # Sensible defaults for each provider. Users can override with --model.
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
@@ -92,6 +109,19 @@ class AnthropicClient:
         )
 
     def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
+        """Tag an image via the provider vision API.
+
+        Args:
+            file_path: Path to the image file.
+            context: Optional EXIF/geocoding hints (``date``, ``city``,
+                ``region``, ``country``, ``lat``, ``lon``) used to enrich the
+                prompt.
+
+        Returns:
+            A :class:`TagResult`. Failures (image load, request, empty or
+            malformed response) are reported in ``TagResult.error`` rather than
+            raised.
+        """
         try:
             img_b64 = prepare_image_b64(file_path, self.max_dim)
         except (OSError, ValueError, RuntimeError) as e:
@@ -105,6 +135,11 @@ class AnthropicClient:
         return _parse_response(text)
 
     def judge_image(self, file_path: str) -> JudgeScores | None:
+        """Score an image with the photo-judge rubric.
+
+        Returns None on any failure (image load, request, or parse) — unlike
+        :meth:`tag_image`, which reports failures via ``TagResult.error``.
+        """
         try:
             img_b64 = prepare_image_b64(file_path, self.max_dim)
         except (OSError, ValueError, RuntimeError):
@@ -121,6 +156,16 @@ class AnthropicClient:
         *,
         on_error_msg: str | None,
     ) -> str | TagResult | None:
+        """POST the prompt and image, and return the model's text response.
+
+        Tri-modal return contract used by :meth:`tag_image` / :meth:`judge_image`:
+
+        - ``str``: the model text, on success.
+        - :class:`TagResult` with ``error`` set: on HTTP or response-shape
+          failure when ``on_error_msg`` is provided (the ``tag_image`` path).
+        - ``None``: on the same failures when ``on_error_msg`` is ``None`` (the
+          ``judge_image`` path, which swallows failures into a ``None`` score).
+        """
         payload: dict[str, Any] = {
             "model": self.model,
             "max_tokens": _CLOUD_MAX_TOKENS,
@@ -154,7 +199,8 @@ class AnthropicClient:
         try:
             return data["content"][0]["text"]
         except (KeyError, IndexError, TypeError):
-            return TagResult(error="anthropic response shape unexpected") if on_error_msg else None
+            detail = f"anthropic response shape unexpected: {str(data)[:160]!r}"
+            return TagResult(error=detail) if on_error_msg else None
 
     def close(self) -> None:
         self._session.close()
@@ -185,6 +231,19 @@ class OpenAIClient:
         )
 
     def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
+        """Tag an image via the provider vision API.
+
+        Args:
+            file_path: Path to the image file.
+            context: Optional EXIF/geocoding hints (``date``, ``city``,
+                ``region``, ``country``, ``lat``, ``lon``) used to enrich the
+                prompt.
+
+        Returns:
+            A :class:`TagResult`. Failures (image load, request, empty or
+            malformed response) are reported in ``TagResult.error`` rather than
+            raised.
+        """
         try:
             img_b64 = prepare_image_b64(file_path, self.max_dim)
         except (OSError, ValueError, RuntimeError) as e:
@@ -198,6 +257,11 @@ class OpenAIClient:
         return _parse_response(text)
 
     def judge_image(self, file_path: str) -> JudgeScores | None:
+        """Score an image with the photo-judge rubric.
+
+        Returns None on any failure (image load, request, or parse) — unlike
+        :meth:`tag_image`, which reports failures via ``TagResult.error``.
+        """
         try:
             img_b64 = prepare_image_b64(file_path, self.max_dim)
         except (OSError, ValueError, RuntimeError):
@@ -214,6 +278,16 @@ class OpenAIClient:
         *,
         on_error_msg: str | None,
     ) -> str | TagResult | None:
+        """POST the prompt and image, and return the model's text response.
+
+        Tri-modal return contract used by :meth:`tag_image` / :meth:`judge_image`:
+
+        - ``str``: the model text, on success.
+        - :class:`TagResult` with ``error`` set: on HTTP or response-shape
+          failure when ``on_error_msg`` is provided (the ``tag_image`` path).
+        - ``None``: on the same failures when ``on_error_msg`` is ``None`` (the
+          ``judge_image`` path, which swallows failures into a ``None`` score).
+        """
         payload: dict[str, Any] = {
             "model": self.model,
             "max_tokens": _CLOUD_MAX_TOKENS,
@@ -244,7 +318,8 @@ class OpenAIClient:
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError):
-            return TagResult(error="openai response shape unexpected") if on_error_msg else None
+            detail = f"openai response shape unexpected: {str(data)[:160]!r}"
+            return TagResult(error=detail) if on_error_msg else None
 
     def close(self) -> None:
         self._session.close()
@@ -270,6 +345,19 @@ class GeminiClient:
         self._session.headers.update({"Content-Type": "application/json"})
 
     def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
+        """Tag an image via the provider vision API.
+
+        Args:
+            file_path: Path to the image file.
+            context: Optional EXIF/geocoding hints (``date``, ``city``,
+                ``region``, ``country``, ``lat``, ``lon``) used to enrich the
+                prompt.
+
+        Returns:
+            A :class:`TagResult`. Failures (image load, request, empty or
+            malformed response) are reported in ``TagResult.error`` rather than
+            raised.
+        """
         try:
             img_b64 = prepare_image_b64(file_path, self.max_dim)
         except (OSError, ValueError, RuntimeError) as e:
@@ -283,6 +371,11 @@ class GeminiClient:
         return _parse_response(text)
 
     def judge_image(self, file_path: str) -> JudgeScores | None:
+        """Score an image with the photo-judge rubric.
+
+        Returns None on any failure (image load, request, or parse) — unlike
+        :meth:`tag_image`, which reports failures via ``TagResult.error``.
+        """
         try:
             img_b64 = prepare_image_b64(file_path, self.max_dim)
         except (OSError, ValueError, RuntimeError):
@@ -299,6 +392,16 @@ class GeminiClient:
         *,
         on_error_msg: str | None,
     ) -> str | TagResult | None:
+        """POST the prompt and image, and return the model's text response.
+
+        Tri-modal return contract used by :meth:`tag_image` / :meth:`judge_image`:
+
+        - ``str``: the model text, on success.
+        - :class:`TagResult` with ``error`` set: on HTTP or response-shape
+          failure when ``on_error_msg`` is provided (the ``tag_image`` path).
+        - ``None``: on the same failures when ``on_error_msg`` is ``None`` (the
+          ``judge_image`` path, which swallows failures into a ``None`` score).
+        """
         payload: dict[str, Any] = {
             "contents": [
                 {
@@ -328,7 +431,8 @@ class GeminiClient:
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError, TypeError):
-            return TagResult(error="gemini response shape unexpected") if on_error_msg else None
+            detail = f"gemini response shape unexpected: {str(data)[:160]!r}"
+            return TagResult(error=detail) if on_error_msg else None
 
     def close(self) -> None:
         self._session.close()
@@ -355,7 +459,7 @@ def make_image_client(
     timeout: int = 120,
     api_key: str | None = None,
     api_base: str | None = None,
-) -> Any:
+) -> ImageClient:
     """Build a vision-model client for *backend*.
 
     Args:
@@ -370,7 +474,8 @@ def make_image_client(
             backends it points at the API endpoint root.
 
     Returns:
-        A client object exposing ``tag_image`` and ``judge_image``.
+        An :class:`ImageClient` exposing ``tag_image``, ``judge_image``, and
+        ``close``.
 
     Raises:
         ValueError: If *backend* is unrecognised.

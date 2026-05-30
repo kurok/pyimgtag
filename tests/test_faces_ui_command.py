@@ -40,6 +40,25 @@ def test_faces_ui_success_path_invokes_uvicorn(tmp_path, capsys):
     assert "/faces" in out
 
 
+def test_faces_ui_port_in_use_returns_1(tmp_path, capsys):
+    """A busy port (OSError from uvicorn.run) must print a helpful message and return 1."""
+    from pyimgtag.commands.faces import _handle_faces_ui
+
+    args = _make_args(tmp_path)
+    with (
+        patch("uvicorn.run", side_effect=OSError("[Errno 48] Address already in use")) as mock_run,
+        patch("pyimgtag.webapp.unified_app.create_unified_app") as mock_create,
+    ):
+        mock_create.return_value = MagicMock(name="fastapi-app")
+        rc = _handle_faces_ui(args)
+
+    assert rc == 1
+    mock_run.assert_called_once()
+    err = capsys.readouterr().err
+    assert "could not start faces UI" in err
+    assert "127.0.0.1:8766" in err
+
+
 def test_faces_ui_uvicorn_missing_returns_1(tmp_path, capsys, monkeypatch):
     """ImportError on uvicorn must print a helpful message and return 1."""
     import builtins

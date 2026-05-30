@@ -11,11 +11,14 @@ from pathlib import Path
 
 import requests
 
+from pyimgtag import __version__
 from pyimgtag.cache import DiskCache
 from pyimgtag.models import GeoResult
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
-_USER_AGENT = "pyimgtag/0.1.0 (https://github.com/kurok/pyimgtag)"
+# Nominatim's usage policy requires an identifying User-Agent; keep the version
+# in sync with the package so OSM operators see the real release.
+_USER_AGENT = f"pyimgtag/{__version__} (https://github.com/kurok/pyimgtag)"
 _CACHE_PRECISION = 2
 _MIN_INTERVAL = 1.1  # seconds — Nominatim usage policy
 
@@ -59,19 +62,32 @@ class ReverseGeocoder:
 
     def _fetch(self, lat: float, lon: float) -> GeoResult:
         self._rate_limit()
+        params: dict[str, str | float | int] = {
+            "lat": lat,
+            "lon": lon,
+            "format": "json",
+            "zoom": 10,
+            "addressdetails": 1,
+        }
         try:
-            params: dict[str, str | float | int] = {
-                "lat": lat,
-                "lon": lon,
-                "format": "json",
-                "zoom": 10,
-                "addressdetails": 1,
-            }
             resp = self._session.get(_NOMINATIM_URL, params=params, timeout=10)
             resp.raise_for_status()
-            data = resp.json()
         except requests.RequestException as e:
             return GeoResult(error=f"Geocoding failed: {e}")
+
+        # Decode in a separate block: requests' JSONDecodeError subclasses both
+        # RequestException and ValueError, so catching it here (after the network
+        # try) gives a distinct, actionable message instead of "Geocoding failed".
+        try:
+            data = resp.json()
+        except ValueError as e:
+            return GeoResult(error=f"Geocoding returned invalid JSON for {lat},{lon}: {e}")
+
+        if not isinstance(data, dict):
+            # Nominatim normally returns a JSON object; a list or scalar would
+            # make the addr.get(...) calls below raise AttributeError and escape
+            # resolve()'s documented "always returns a GeoResult" contract.
+            return GeoResult(error=f"Geocoding returned unexpected payload for {lat},{lon}")
 
         addr = data.get("address", {})
         return GeoResult(

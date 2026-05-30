@@ -486,8 +486,10 @@ def _make_thumbnail(image_path: str, size: int) -> bytes | None:
             data = buf.getvalue()
     except (OSError, UnidentifiedImageError):
         pass  # nosec B110 — fall through to sips fallback below
-    except Exception:  # noqa: BLE001 — catch-all for PIL/HEIC decode failures
-        pass  # nosec B110
+    except Exception as exc:  # noqa: BLE001 — catch-all for PIL/HEIC decode failures
+        # Best-effort: fall through to the sips path / placeholder, but leave a
+        # breadcrumb so a systemic decode regression is discoverable in debug logs.
+        logger.debug("thumbnail decode failed for %s: %s", image_path, exc)
 
     # PIL failed (likely HEIC without pillow-heif installed) — try macOS sips.
     if data is None and image_path.lower().endswith((".heic", ".heif")):
@@ -583,6 +585,12 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         path: str = Query(..., description="Absolute path to the image file"),
         size: int = Query(default=200, ge=50, le=4000),
     ) -> Response:
+        """Return a cached JPEG thumbnail for an image in the progress DB.
+
+        ``path`` is used purely as a DB lookup key — the request value never
+        reaches ``Image.open``; the read uses the DB-stored path. Returns 404
+        when the row is missing or the image cannot be decoded.
+        """
         import asyncio
 
         # Use the request value purely as a DB lookup key; the actual

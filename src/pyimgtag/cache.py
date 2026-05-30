@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class DiskCache:
     """Key-value cache backed by a JSON file."""
 
     def __init__(self, cache_path: str | Path) -> None:
+        """Open the cache at ``cache_path``, loading it into memory.
+
+        The file is read eagerly on construction. A missing, unreadable, or
+        corrupt file is treated as an empty cache (its contents are discarded)
+        rather than raising — the cache is non-critical.
+        """
         self._path = Path(cache_path)
         self._data: dict = {}
         self._load()
@@ -18,14 +27,19 @@ class DiskCache:
         if self._path.exists():
             try:
                 self._data = json.loads(self._path.read_text())
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError) as e:
+                # Non-critical cache: drop the unreadable contents and carry on,
+                # but leave a breadcrumb so a recurring corruption is findable.
+                logger.debug("discarding unreadable cache %s: %s", self._path, e)
                 self._data = {}
 
     def get(self, key: str) -> dict | None:
+        """Return the cached dict for ``key``, or None if absent or not a dict."""
         v = self._data.get(key)
         return v if isinstance(v, dict) else None
 
     def set(self, key: str, value: dict) -> None:
+        """Store ``value`` under ``key`` and persist the cache via atomic replace."""
         self._data[key] = value
         self._save()
 

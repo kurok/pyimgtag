@@ -145,6 +145,18 @@ class TestAnthropicClient:
             result = client.tag_image(jpg)
         assert "anthropic request failed" in (result.error or "")
 
+    def test_tag_returns_error_on_unexpected_shape(self, jpg):
+        client = AnthropicClient(api_key="x")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"type": "error", "error": {"message": "overloaded"}}
+        mock_resp.raise_for_status = MagicMock()
+        with patch.object(client._session, "post", return_value=mock_resp):
+            result = client.tag_image(jpg)
+        # The fixed prefix is preserved and a snippet of the real payload is
+        # appended so the user can see what the provider actually returned.
+        assert "anthropic response shape unexpected" in (result.error or "")
+        assert "overloaded" in (result.error or "")
+
 
 # ---------------------------------------------------------------------------
 # OpenAI

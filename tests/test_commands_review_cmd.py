@@ -50,3 +50,15 @@ class TestCmdReview:
         assert result == 1
         err = capsys.readouterr().err
         assert "missing dep" in err
+
+    def test_serve_port_in_use_returns_1(self, capsys):
+        from pyimgtag.commands.review_cmd import cmd_review
+
+        fake_module = MagicMock()
+        fake_module.serve = MagicMock(side_effect=OSError("[Errno 48] Address already in use"))
+        with patch.dict(sys.modules, {"pyimgtag.review_server": fake_module}):
+            result = cmd_review(self._args())
+        assert result == 1
+        err = capsys.readouterr().err
+        assert "could not start review server" in err
+        assert "127.0.0.1:5000" in err

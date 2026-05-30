@@ -53,7 +53,7 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
         """
         from pyimgtag import __version__
 
-        return {"ok": True, "version": __version__, "db": str(db._path)}
+        return {"ok": True, "version": __version__, "db": str(db.path)}
 
     app.include_router(build_dashboard_router())
     app.include_router(build_review_router(db, api_base="/review"), prefix="/review")

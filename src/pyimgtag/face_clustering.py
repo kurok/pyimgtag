@@ -35,6 +35,9 @@ def cluster_faces(
     Returns:
         Mapping of ``person_id -> [face_id, ...]`` for every cluster
         created.  Noise faces are **not** included.
+
+    Raises:
+        ImportError: If scikit-learn is not installed (the [face] extra).
     """
     import numpy as np
 
@@ -90,6 +93,9 @@ def recluster_auto(
 
     Returns:
         Same as :func:`cluster_faces`.
+
+    Raises:
+        ImportError: If scikit-learn is not installed (the [face] extra).
     """
     db.clear_auto_persons()
     return cluster_faces(db, eps=eps, min_samples=min_samples)

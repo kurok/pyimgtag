@@ -24,4 +24,12 @@ def cmd_review(args: argparse.Namespace) -> int:
     except ImportError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    except OSError as exc:
+        # Most commonly the port is already in use (EADDRINUSE); surface an
+        # actionable message instead of an unhandled traceback.
+        print(
+            f"Error: could not start review server on {args.host}:{args.port}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     return 0

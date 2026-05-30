@@ -15,11 +15,13 @@ _current: RunSession | None = None
 
 
 def set_current(session: RunSession | None) -> None:
+    """Replace the active :class:`RunSession` (``None`` clears it); thread-safe."""
     global _current
     with _lock:
         _current = session
 
 
 def get_current() -> RunSession | None:
+    """Return the current active :class:`RunSession`, or ``None``; thread-safe."""
     with _lock:
         return _current

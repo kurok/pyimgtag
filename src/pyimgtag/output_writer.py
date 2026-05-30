@@ -37,6 +37,11 @@ _CSV_FIELDS = [
 
 
 def write_json(results: list[ImageResult], output_path: str | Path) -> None:
+    """Write results as a pretty-printed JSON array to output_path.
+
+    Raises:
+        OSError: If writing the file fails.
+    """
     try:
         Path(output_path).write_text(
             json.dumps([asdict(r) for r in results], indent=2, ensure_ascii=False, default=str)
@@ -46,6 +51,13 @@ def write_json(results: list[ImageResult], output_path: str | Path) -> None:
 
 
 def write_csv(results: list[ImageResult], output_path: str | Path) -> None:
+    """Write results as CSV to output_path using only the fixed _CSV_FIELDS columns.
+
+    Tags are serialized as a ';'-joined string.
+
+    Raises:
+        OSError: If writing the file fails.
+    """
     try:
         with open(output_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
@@ -59,4 +71,5 @@ def write_csv(results: list[ImageResult], output_path: str | Path) -> None:
 
 
 def result_to_jsonl(result: ImageResult) -> str:
+    """Serialize one ImageResult as a single JSON line (no trailing newline; caller adds it)."""
     return json.dumps(asdict(result), ensure_ascii=False, default=str)

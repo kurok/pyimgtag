@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import struct
 from collections import defaultdict
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     import numpy as np
 
     from pyimgtag.models import JudgeResult
+
+logger = logging.getLogger(__name__)
 
 # Default limit for get_all_judge_results; kept as a named constant so it
 # is easy to find and change in one place.
@@ -119,6 +122,21 @@ class ProgressDB:
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
+        """Open (creating if needed) the SQLite progress database.
+
+        Args:
+            db_path: Path to the database file. When ``None``, defaults to
+                ``~/.cache/pyimgtag/progress.db``.
+
+        The parent directory is created if missing, the connection is opened
+        with ``check_same_thread=False`` (a background thread may read while the
+        main thread writes) in WAL journal mode, and the schema plus any pending
+        versioned migrations run on open.
+
+        Raises:
+            sqlite3.DatabaseError: If the file is not a usable database or a
+                migration cannot be applied.
+        """
         if db_path is None:
             db_path = Path.home() / ".cache" / "pyimgtag" / "progress.db"
         self._path = Path(db_path)
@@ -126,6 +144,11 @@ class ProgressDB:
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._create_table()
+
+    @property
+    def path(self) -> Path:
+        """Filesystem path to the backing SQLite database file."""
+        return self._path
 
     def _create_table(self) -> None:
         self._conn.execute(
@@ -171,7 +194,7 @@ class ProgressDB:
                             raise
                 self._conn.execute(f"PRAGMA user_version = {int(target_ver)}")  # nosec B608
                 self._conn.execute(f"RELEASE migrate_v{int(target_ver)}")  # nosec B608
-            except Exception:
+            except Exception:  # noqa: BLE001 — roll back savepoint on any failure, then re-raise
                 self._conn.execute(f"ROLLBACK TO migrate_v{int(target_ver)}")  # nosec B608
                 raise
         self._conn.commit()
@@ -197,12 +220,19 @@ class ProgressDB:
         return row[0] == stat.st_size and row[1] == stat.st_mtime
 
     def mark_done(self, file_path: Path, result: ImageResult) -> None:
-        """Record a processed image result."""
+        """Record a processed image result.
+
+        If ``file_path.stat()`` fails (permission error, vanished file), the
+        stored size/mtime fall back to ``0``/``0.0``. Such a row can never match
+        a real file in :meth:`is_processed`, so the file would be re-processed on
+        every subsequent run; the failure is logged at debug level.
+        """
         try:
             stat = file_path.stat()
             size = stat.st_size
             mtime = stat.st_mtime
-        except OSError:
+        except OSError as e:
+            logger.debug("stat() failed for %s; recording size/mtime as 0: %s", file_path, e)
             size = 0
             mtime = 0.0
         self._conn.execute(
@@ -851,7 +881,17 @@ class ProgressDB:
         detection: FaceDetection,
         embedding: np.ndarray | None = None,
     ) -> int:
-        """Insert a detected face. Returns the new face row id."""
+        """Insert a detected face.
+
+        Args:
+            image_path: Path to the source image.
+            detection: Bounding box and confidence for the face.
+            embedding: Optional face encoding — a 1-D float64 numpy array
+                (128-d in practice) stored as a packed float64 blob.
+
+        Returns:
+            The new face row id.
+        """
         blob = self._embedding_to_blob(embedding) if embedding is not None else None
         cur = self._conn.execute(
             """INSERT INTO faces (image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence, embedding)
@@ -1028,7 +1068,14 @@ class ProgressDB:
         self._conn.commit()
 
     def merge_persons(self, source_id: int, target_id: int) -> None:
-        """Reassign all faces from source_id to target_id, then delete source_id."""
+        """Reassign all faces from source_id to target_id, then delete source_id.
+
+        A non-existent ``source_id`` is a no-op (the UPDATE/DELETE simply affect
+        zero rows).
+
+        Raises:
+            ValueError: If ``target_id`` does not exist.
+        """
         if not self._conn.execute("SELECT 1 FROM persons WHERE id = ?", (target_id,)).fetchone():
             raise ValueError(f"merge target person {target_id} does not exist")
         self._conn.execute(
@@ -1478,7 +1525,12 @@ class ProgressDB:
         return size == stat.st_size and mtime == stat.st_mtime
 
     def has_usable_model_result(self, file_path: Path) -> bool:
-        """Return True if the DB has a fresh row with non-empty tags."""
+        """Return True if the DB has a fresh row with non-empty tags.
+
+        A tags value that is not valid JSON is treated as no tags, so a row
+        with a corrupt tags blob is reported as not usable (returns False)
+        rather than raising.
+        """
         if not self.is_fresh(file_path):
             return False
         row = self._conn.execute(
@@ -1490,7 +1542,7 @@ class ProgressDB:
         try:
             tags: list[str] = json.loads(row[0]) if row[0] else []
         except (json.JSONDecodeError, TypeError):
-            tags = []
+            tags = []  # malformed JSON -> treat as no tags
         return len(tags) > 0
 
     def update_missing_fields(self, file_path: Path, result: ImageResult) -> None:
@@ -1524,10 +1576,16 @@ class ProgressDB:
         self._conn.commit()
 
     def __enter__(self) -> "ProgressDB":
+        """Enter the context manager, returning this instance."""
         return self
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        """Exit the context manager, closing the connection via :meth:`close`."""
         self.close()
 
     def close(self) -> None:
+        """Close the underlying SQLite connection.
+
+        The instance must not be used afterwards.
+        """
         self._conn.close()

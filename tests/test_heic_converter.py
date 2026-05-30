@@ -166,3 +166,52 @@ class TestConvertHeicToJpeg:
 
         with pytest.raises(RuntimeError, match="sips did not produce output file"):
             convert_heic_to_jpeg(input_file, output_dir=tmp_path / "out")
+
+    @patch("pyimgtag.heic_converter.sips_available", return_value=True)
+    @patch("pyimgtag.heic_converter.tempfile.mkdtemp")
+    @patch("pyimgtag.heic_converter.subprocess.run")
+    def test_nonzero_returncode_cleans_up_owned_temp_dir(
+        self,
+        mock_run: MagicMock,
+        mock_mkdtemp: MagicMock,
+        mock_sips: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        # When no output_dir is given, a temp dir is created and owned; a
+        # failing sips run must not leak it.
+        owned = tmp_path / "pyimgtag_heic_owned"
+        owned.mkdir()
+        mock_mkdtemp.return_value = str(owned)
+        mock_run.return_value = MagicMock(returncode=1, stderr="Error: invalid format")
+
+        input_file = tmp_path / "bad.heic"
+        input_file.write_bytes(b"corrupt data")
+
+        with pytest.raises(RuntimeError, match="sips conversion failed"):
+            convert_heic_to_jpeg(input_file)
+
+        assert not owned.exists(), "owned temp dir leaked after non-zero sips exit"
+
+    @patch("pyimgtag.heic_converter.sips_available", return_value=True)
+    @patch("pyimgtag.heic_converter.tempfile.mkdtemp")
+    @patch("pyimgtag.heic_converter.subprocess.run")
+    def test_missing_output_cleans_up_owned_temp_dir(
+        self,
+        mock_run: MagicMock,
+        mock_mkdtemp: MagicMock,
+        mock_sips: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        owned = tmp_path / "pyimgtag_heic_owned"
+        owned.mkdir()
+        mock_mkdtemp.return_value = str(owned)
+        # sips returns 0 but produces no output file.
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
+
+        input_file = tmp_path / "photo.heic"
+        input_file.write_bytes(b"fake data")
+
+        with pytest.raises(RuntimeError, match="sips did not produce output file"):
+            convert_heic_to_jpeg(input_file)
+
+        assert not owned.exists(), "owned temp dir leaked when sips produced no output"

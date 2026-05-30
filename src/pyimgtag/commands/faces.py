@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import threading
 from pathlib import Path
@@ -16,6 +17,8 @@ try:
     from pyimgtag.face_embedding import scan_and_store
 except ImportError:
     scan_and_store = None  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
 
 _CLUSTER_INTERVAL_S = 30
 
@@ -118,7 +121,7 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
                         print(f"  {file_path.name}: skipped ({exc})", file=sys.stderr)
                         errors += 1
                         continue
-                    except Exception as exc:
+                    except Exception as exc:  # noqa: BLE001 — one bad image must not abort batch
                         print(f"  {file_path.name}: skipped ({exc})", file=sys.stderr)
                         errors += 1
                         continue
@@ -181,20 +184,20 @@ def _start_cluster_thread(
 
     eps = getattr(args, "eps", 0.5)
     min_samples = getattr(args, "min_samples", 2)
-    db_path = db._path
+    db_path = db.path
 
     def _loop() -> None:
         with ProgressDB(db_path=db_path) as thread_db:
             while not stop_event.wait(timeout=_CLUSTER_INTERVAL_S):
                 try:
                     recluster_auto(thread_db, eps=eps, min_samples=min_samples)
-                except Exception:  # nosec B110
-                    pass
+                except Exception:  # noqa: BLE001 — background clustering must not crash the scan
+                    logger.debug("background recluster failed", exc_info=True)
             # Final pass after scan finishes
             try:
                 recluster_auto(thread_db, eps=eps, min_samples=min_samples)
-            except Exception:  # nosec B110
-                pass
+            except Exception:  # noqa: BLE001 — background clustering must not crash the scan
+                logger.debug("final background recluster failed", exc_info=True)
 
     t = threading.Thread(target=_loop, daemon=True, name="faces-cluster-bg")
     t.start()
@@ -395,7 +398,13 @@ def _handle_faces_ui(args: argparse.Namespace) -> int:
 
         threading.Thread(target=_open, daemon=True).start()
 
-    uvicorn.run(app, host=host, port=port, log_level="warning")
+    try:
+        uvicorn.run(app, host=host, port=port, log_level="warning")
+    except OSError as exc:
+        # Most commonly the port is already in use (EADDRINUSE); surface an
+        # actionable message instead of an unhandled traceback.
+        print(f"Error: could not start faces UI on {host}:{port}: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
