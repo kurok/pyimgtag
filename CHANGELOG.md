@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.7] - 2026-05-30
+
+### Fixed
+- **Faces detail page showed "(unlabelled #undefined)"** (#213): `load()` called `.json()` without checking `response.ok`, so a 404 (person deleted or merged) produced `{"detail":"not found"}` with no `id` field, rendered as "(unlabelled #undefined)". Now redirects to the faces list if the person no longer exists.
+- **"← All Faces" always returned to page 1** (#213): the back link used a hardcoded `href` to the faces root. Changed to `history.back()` so it returns to the exact page, filter, and offset the user came from. Falls back to the faces root if there is no browser history.
+- **NaN guard in rename/merge modal** (#213): added `!isNaN()` check on the parsed target person id to prevent edge cases where a stale select value produces `NaN`.
+
 ## [0.16.6] - 2026-05-29
 
 ### Added
