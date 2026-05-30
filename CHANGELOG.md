@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.9] - 2026-05-30
+
+### Fixed
+- **`delete_image_rows` non-atomic row count** (#217): the before/after `COUNT(*)` sandwich was non-atomic (another writer between the two counts could return a wrong value) and `executemany` only reports the last statement's `rowcount`. Replaced with a single `DELETE … WHERE file_path IN (…)` whose `.rowcount` is accurate and atomic.
+- **`get_cleanup_candidates` silently swallowed exceptions** (#217): a blanket `except sqlite3.Error: return []` masked disk-full, corruption, and schema errors as empty results. Removed — real errors now propagate to the caller.
+- **`get_persons` N+1 query pattern** (#217): one `SELECT id FROM faces WHERE person_id = ?` per person in a Python loop caused O(N) DB round-trips. Replaced with a single `SELECT person_id, id FROM faces WHERE person_id IS NOT NULL` + `defaultdict` grouping, eliminating all extra queries.
+- **`iter_image_paths` OFFSET pagination** (#217): `LIMIT/OFFSET` caused full-table re-scans per page and could skip or duplicate rows when concurrent deletes occurred in WAL mode. Replaced with a keyset cursor (`WHERE file_path > last_seen ORDER BY file_path`) — O(log N) per page and correct under concurrent writes.
+- **`get_stats` SQLite-specific `SUM(bool)` idiom** (#217): `SUM(status='ok')` relies on SQLite boolean-as-integer coercion and is non-standard. Replaced with three explicit `SELECT COUNT(*) WHERE status = ?` queries — portable and unambiguous.
+- **`_migrate` partial-migration crash safety** (#217): each version's DDL statements and `PRAGMA user_version` update are now wrapped in `SAVEPOINT … RELEASE / ROLLBACK TO` so a crash mid-version rolls back atomically instead of leaving the DB in a partially-migrated state.
+
 ## [0.16.8] - 2026-05-30
 
 ### Fixed
