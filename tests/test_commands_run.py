@@ -1067,3 +1067,267 @@ class TestHydrateFromDb:
 
         assert result is not None
         assert result.image_date is None
+
+
+class TestSkipExisting:
+    """--skip-existing fully skips unchanged photos already complete in the DB.
+
+    No EXIF re-read, geocoding, AppleScript write-back, or DB rewrite — the
+    fast path for resuming a large, mostly-tagged library.
+    """
+
+    def _seed_complete_row(self, db_path: Path, img: Path) -> None:
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        with ProgressDB(db_path=db_path) as db:
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name=img.name,
+                    tags=["sunset", "beach"],
+                    scene_summary="A sunny day",
+                    processing_status="ok",
+                ),
+            )
+
+    def _parse(self, tmp_path: Path, *, photos: bool, extra: list[str]) -> object:
+        from pyimgtag.main import build_parser
+
+        parser = build_parser()
+        src = ["--photos-library", str(tmp_path)] if photos else ["--input-dir", str(tmp_path)]
+        return parser.parse_args(
+            [
+                "run",
+                *src,
+                "--extensions",
+                "jpg",
+                "--no-web",
+                "--db",
+                str(tmp_path / "progress.db"),
+                *extra,
+            ]
+        )
+
+    def test_skip_existing_skips_complete_row_without_exif_or_ollama(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        self._seed_complete_row(tmp_path / "progress.db", img)
+        args = self._parse(tmp_path, photos=False, extra=["--skip-existing"])
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif") as mock_exif,
+        ):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mock_client.tag_image.assert_not_called()  # never re-tagged
+        mock_exif.assert_not_called()  # no per-file exiftool subprocess
+
+    def test_skip_existing_processes_uncached_file(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "fresh.jpg"
+        img.write_bytes(b"x")  # no DB row
+        args = self._parse(tmp_path, photos=False, extra=["--skip-existing"])
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["nature"], summary="")
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mock_client.tag_image.assert_called_once()
+
+    def test_skip_existing_retags_changed_file(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        self._seed_complete_row(tmp_path / "progress.db", img)
+        img.write_bytes(b"changed-bytes-now-bigger")  # size/mtime differ from DB row
+        args = self._parse(tmp_path, photos=False, extra=["--skip-existing"])
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["nature"], summary="")
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mock_client.tag_image.assert_called_once()  # changed file is re-tagged
+
+    def test_skip_existing_no_writeback_for_complete_photo(self, tmp_path: Path) -> None:
+        """The core perf guarantee: skipped photos trigger no AppleScript write-back."""
+        from pyimgtag.commands.run import cmd_run
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        self._seed_complete_row(tmp_path / "progress.db", img)
+        args = self._parse(tmp_path, photos=True, extra=["--skip-existing", "--write-back"])
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif") as mock_exif,
+            patch("pyimgtag.applescript_writer.write_to_photos") as mock_write,
+        ):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mock_client.tag_image.assert_not_called()
+        mock_exif.assert_not_called()
+        mock_write.assert_not_called()  # no per-photo osascript write-back
+
+    def test_without_skip_existing_resume_still_reads_exif(self, tmp_path: Path) -> None:
+        """Control: --resume-from-db (no --skip-existing) still hydrates (reads EXIF).
+
+        Demonstrates that --skip-existing is what bypasses the expensive path.
+        """
+        from pyimgtag.commands.run import cmd_run
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        self._seed_complete_row(tmp_path / "progress.db", img)
+        args = self._parse(tmp_path, photos=False, extra=["--resume-from-db"])
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()) as mock_exif,
+        ):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mock_client.tag_image.assert_not_called()  # cached, not re-tagged
+        mock_exif.assert_called_once()  # but EXIF IS re-read (the slow path)
+
+    def test_skip_existing_is_noop_under_no_cache(self, tmp_path: Path) -> None:
+        """--no-cache disables the DB, so --skip-existing cannot skip — file is tagged."""
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        self._seed_complete_row(tmp_path / "progress.db", img)  # row exists but ignored
+        args = self._parse(tmp_path, photos=False, extra=["--skip-existing", "--no-cache"])
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.return_value = TagResult(tags=["nature"], summary="")
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mock_client.tag_image.assert_called_once()  # skip disabled with no DB
+
+    def test_skip_existing_bypasses_threaded_resume_path(self, tmp_path: Path) -> None:
+        """--skip-existing forces the linear path even with --resume-threaded.
+
+        If the threaded re-hydration worker ran, it would call read_exif via
+        _hydrate_from_db. Asserting read_exif is NOT called proves the linear
+        skip path ran instead.
+        """
+        from pyimgtag.commands.run import cmd_run
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        self._seed_complete_row(tmp_path / "progress.db", img)
+        args = self._parse(
+            tmp_path,
+            photos=False,
+            extra=["--skip-existing", "--resume-from-db", "--resume-threaded"],
+        )
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif") as mock_exif,
+        ):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mock_client.tag_image.assert_not_called()
+        mock_exif.assert_not_called()  # threaded hydration worker did not run
+
+    def test_skip_existing_reports_count_in_summary(self, tmp_path: Path, capsys) -> None:
+        """The skipped_existing counter is reflected in the run summary."""
+        from pyimgtag.commands.run import cmd_run
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        self._seed_complete_row(tmp_path / "progress.db", img)
+        args = self._parse(tmp_path, photos=False, extra=["--skip-existing"])
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        assert "Skipped (exists): 1" in capsys.readouterr().err
+
+    def test_skip_existing_skips_before_keyword_read(self, tmp_path: Path) -> None:
+        """A complete row is skipped before any Photos keyword read (--skip-if-tagged)."""
+        from pyimgtag.commands.run import cmd_run
+
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"x")
+        self._seed_complete_row(tmp_path / "progress.db", img)
+        args = self._parse(tmp_path, photos=True, extra=["--skip-existing", "--skip-if-tagged"])
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif") as mock_exif,
+            patch("pyimgtag.commands.run.read_keywords_from_photos") as mock_kw,
+        ):
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mock_client.tag_image.assert_not_called()
+        mock_exif.assert_not_called()
+        mock_kw.assert_not_called()  # no osascript keyword read for skipped photo

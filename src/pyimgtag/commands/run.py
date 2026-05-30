@@ -112,6 +112,21 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             file=sys.stderr,
         )
 
+    skip_existing_arg = getattr(args, "skip_existing", False)
+    if skip_existing_arg and (args.write_back or args.write_exif or args.sidecar_only):
+        print(
+            "Note: --skip-existing skips photos already complete in the DB WITHOUT "
+            "writing back to Photos/EXIF/sidecar. To (re)write metadata for cached "
+            "photos, run without --skip-existing.",
+            file=sys.stderr,
+        )
+
+    if skip_existing_arg and args.dry_run:
+        print(
+            "Info: --skip-existing is inactive in --dry-run mode (the progress DB is not opened)",
+            file=sys.stderr,
+        )
+
     extensions = {e.strip().lstrip(".").lower() for e in args.extensions.split(",")}
 
     backend = getattr(args, "backend", "ollama")
@@ -198,7 +213,11 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     interrupted = False
     try:
         use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
-        use_threaded = use_resume and getattr(args, "resume_threaded", False)
+        skip_existing = getattr(args, "skip_existing", False) and not args.no_cache
+        # --skip-existing fully skips complete rows in the linear path, so the
+        # threaded re-hydration worker (which exists only to enrich cached
+        # rows) must not run — skip wins.
+        use_threaded = use_resume and getattr(args, "resume_threaded", False) and not skip_existing
 
         if use_threaded and progress_db is not None:
             import queue as _queue
@@ -386,6 +405,19 @@ def _process_one(
             return None
     except OSError:
         stats["skipped_no_local"] += 1
+        return None
+
+    # --skip-existing: fully skip unchanged photos already complete in the DB
+    # (status ok + non-empty tags) before any EXIF read, geocoding, or
+    # write-back. This is the fast path for resuming a large, mostly-tagged
+    # library; it takes precedence over the --resume-from-db re-enrichment pass.
+    if (
+        getattr(args, "skip_existing", False)
+        and not getattr(args, "no_cache", False)
+        and progress_db is not None
+        and progress_db.is_complete_cached(file_path)
+    ):
+        stats["skipped_existing"] += 1
         return None
 
     if progress_db is not None and progress_db.is_processed(file_path):
@@ -624,6 +656,7 @@ def _new_stats(scanned: int) -> dict[str, int]:
         "skipped_no_gps": 0,
         "skipped_no_local": 0,
         "skipped_cached": 0,
+        "skipped_existing": 0,
         "skipped_dedup": 0,
         "skipped_tagged": 0,
         "model_failures": 0,
@@ -698,6 +731,7 @@ def _print_summary(stats: dict) -> None:
     print(f"  Skipped (no GPS): {stats['skipped_no_gps']}", file=sys.stderr)
     print(f"  Skipped (no file):{stats['skipped_no_local']}", file=sys.stderr)
     print(f"  Skipped (cached): {stats['skipped_cached']}", file=sys.stderr)
+    print(f"  Skipped (exists): {stats['skipped_existing']}", file=sys.stderr)
     print(f"  Skipped (dedup):  {stats['skipped_dedup']}", file=sys.stderr)
     print(f"  Skipped (tagged): {stats['skipped_tagged']}", file=sys.stderr)
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)

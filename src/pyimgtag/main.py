@@ -97,6 +97,17 @@ def _add_run_subcommand(subparsers: Any) -> None:
         ),
     )
     run_p.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help=(
+            "Fully skip any unchanged photo that already has a usable result in the DB "
+            "(status ok + non-empty tags): no EXIF re-read, geocoding, write-back, or DB "
+            "rewrite. Fastest way to resume a large, mostly-tagged library. Note: cached "
+            "photos are NOT (re)written even with --write-back/--write-exif. Takes "
+            "precedence over --resume-from-db. Ignored when --no-cache is set."
+        ),
+    )
+    run_p.add_argument(
         "--resume-from-db",
         action="store_true",
         help=(
