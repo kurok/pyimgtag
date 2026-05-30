@@ -888,7 +888,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     """
     try:
         from fastapi import APIRouter, Body, HTTPException
-        from fastapi.responses import HTMLResponse
+        from fastapi.responses import HTMLResponse, RedirectResponse
         from pydantic import BaseModel
     except ImportError as exc:
         raise ImportError(
@@ -907,12 +907,17 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     async def index() -> str:
         return render_faces_html(api_base)
 
-    @router.get("/persons/{person_id}", response_class=HTMLResponse)
-    async def person_detail(person_id: int) -> str:
+    @router.get("/persons/{person_id}")
+    async def person_detail(person_id: int) -> Response:
         persons = db.get_persons()
         if not any(p.person_id == person_id for p in persons):
-            raise HTTPException(status_code=404, detail="Person not found")
-        return render_person_detail_html(person_id, api_base)
+            # The person was deleted or re-clustered away since the grid was
+            # rendered (auto-clustering deletes and recreates persons, so cards
+            # can point at ids that no longer exist). Bounce back to the faces
+            # list instead of dumping a raw "Person not found" JSON body.
+            logger.debug("person %s no longer exists; redirecting to faces list", person_id)
+            return RedirectResponse(url=f"{api_base}/", status_code=303)
+        return HTMLResponse(render_person_detail_html(person_id, api_base))
 
     @router.get("/api/persons")
     async def list_persons() -> list[dict]:
