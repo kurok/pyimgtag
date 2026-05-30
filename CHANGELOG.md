@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.2] - 2026-05-30
+
+### Fixed
+- **Faces UI: "Person not found" on a deleted/re-clustered person** (#228): opening `/faces/persons/<id>` for a person no longer in the DB dumped a raw `{"detail":"Person not found"}` JSON body. Auto-clustering deletes and recreates persons (`clear_auto_persons` + re-insert), so a grid card can link to an id that was since re-clustered away (the large person ids users see, e.g. 160765, are a symptom of that churn). The page route now redirects (303) back to the faces grid instead of raising a 404, so a stale card link lands the user on a fresh list.
+
 ## [0.17.1] - 2026-05-30
 
 ### Documentation
