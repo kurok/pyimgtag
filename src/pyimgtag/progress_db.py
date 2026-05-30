@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import struct
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -158,17 +159,21 @@ class ProgressDB:
             return
         for target_ver in pending_versions:
             stmts = [sql for ver, sql in self._MIGRATIONS if ver == target_ver]
-            for sql in stmts:
-                try:
-                    self._conn.execute(sql)
-                except sqlite3.OperationalError as exc:
-                    # Tolerate "duplicate column name" so re-running migrations
-                    # on an already-migrated DB is safe.
-                    if "duplicate column name" not in str(exc).lower():
-                        raise
-            if not isinstance(target_ver, int):
-                raise TypeError(f"Migration version must be int, got {type(target_ver)}")
-            self._conn.execute(f"PRAGMA user_version = {target_ver}")  # nosec B608
+            self._conn.execute(f"SAVEPOINT migrate_v{int(target_ver)}")  # nosec B608
+            try:
+                for sql in stmts:
+                    try:
+                        self._conn.execute(sql)
+                    except sqlite3.OperationalError as exc:
+                        # Tolerate "duplicate column name" so re-running migrations
+                        # on an already-migrated DB is safe.
+                        if "duplicate column name" not in str(exc).lower():
+                            raise
+                self._conn.execute(f"PRAGMA user_version = {int(target_ver)}")  # nosec B608
+                self._conn.execute(f"RELEASE migrate_v{int(target_ver)}")  # nosec B608
+            except Exception:
+                self._conn.execute(f"ROLLBACK TO migrate_v{int(target_ver)}")  # nosec B608
+                raise
         self._conn.commit()
 
     def is_processed(self, file_path: Path) -> bool:
@@ -236,10 +241,14 @@ class ProgressDB:
 
     def get_stats(self) -> dict:
         """Return counts of processed images by status."""
-        row = self._conn.execute(
-            "SELECT COUNT(*), SUM(status='ok'), SUM(status='error') FROM processed_images"
-        ).fetchone()
-        return {"total": row[0] or 0, "ok": int(row[1] or 0), "error": int(row[2] or 0)}
+        total = self._conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0]
+        ok = self._conn.execute(
+            "SELECT COUNT(*) FROM processed_images WHERE status = 'ok'"
+        ).fetchone()[0]
+        error = self._conn.execute(
+            "SELECT COUNT(*) FROM processed_images WHERE status = 'error'"
+        ).fetchone()[0]
+        return {"total": total, "ok": ok, "error": error}
 
     def reset_all(self) -> int:
         """Delete all rows from the processed_images table. Returns count deleted."""
@@ -565,25 +574,22 @@ class ProgressDB:
         Always includes cleanup_class='delete'. If include_review=True, also includes 'review'.
         Orders by file_path.
         """
-        try:
-            if include_review:
-                placeholders = "?, ?"
-                params: tuple = ("delete", "review")
-            else:
-                placeholders = "?"
-                params = ("delete",)
-            # Parameterized query; placeholders are code-controlled literals
-            query = (  # nosec B608
-                "SELECT file_path, tags, scene_summary, processed_at, cleanup_class "
-                "FROM processed_images "
-                "WHERE cleanup_class IN ("
-                + placeholders  # nosec B608
-                + ") "
-                "ORDER BY file_path"
-            )
-            rows = self._conn.execute(query, params).fetchall()
-        except sqlite3.Error:
-            return []
+        if include_review:
+            placeholders = "?, ?"
+            params: tuple = ("delete", "review")
+        else:
+            placeholders = "?"
+            params = ("delete",)
+        # Parameterized query; placeholders are code-controlled literals
+        query = (  # nosec B608
+            "SELECT file_path, tags, scene_summary, processed_at, cleanup_class "
+            "FROM processed_images "
+            "WHERE cleanup_class IN ("
+            + placeholders  # nosec B608
+            + ") "
+            "ORDER BY file_path"
+        )
+        rows = self._conn.execute(query, params).fetchall()
 
         result = []
         for row in rows:
@@ -742,42 +748,50 @@ class ProgressDB:
 
         The drift-cleanup walk runs over a 22 k-row DB on the user's
         machine; pulling everything into a single Python list pays an
-        unnecessary memory cost. ``LIMIT … OFFSET`` paginates server-side
-        so the generator can be drained lazily.
+        unnecessary memory cost. A keyset cursor (``WHERE file_path >
+        last_seen``) is used instead of ``LIMIT … OFFSET`` so each page
+        costs O(log N) rather than a full or partial table scan, and rows
+        cannot be skipped or repeated if concurrent deletes occur between
+        pages (WAL mode, ``check_same_thread=False``).
         """
-        offset = 0
+        last_path: str | None = None
         while True:
-            rows = self._conn.execute(
-                "SELECT file_path FROM processed_images ORDER BY file_path LIMIT ? OFFSET ?",
-                (int(batch_size), int(offset)),
-            ).fetchall()
+            if last_path is None:
+                rows = self._conn.execute(
+                    "SELECT file_path FROM processed_images ORDER BY file_path LIMIT ?",
+                    (int(batch_size),),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT file_path FROM processed_images"
+                    " WHERE file_path > ? ORDER BY file_path LIMIT ?",
+                    (last_path, int(batch_size)),
+                ).fetchall()
             if not rows:
                 return
             for (path,) in rows:
                 yield path
             if len(rows) < batch_size:
                 return
-            offset += len(rows)
+            last_path = rows[-1][0]
 
     def delete_image_rows(self, paths: list[str]) -> int:
         """Bulk-delete rows from ``processed_images`` matching *paths*.
 
-        Uses a single ``executemany`` so pruning thousands of stale rows
-        from the DB drift cleanup is one round-trip per batch rather
-        than one-per-path. Returns the number of rows actually removed
-        (which may be smaller than ``len(paths)`` when some paths were
-        already gone).
+        Uses a single ``DELETE … WHERE file_path IN (…)`` statement so the
+        returned ``rowcount`` is accurate without any before/after COUNT(*)
+        queries. Returns the number of rows actually removed (which may be
+        smaller than ``len(paths)`` when some paths were already gone).
         """
         if not paths:
             return 0
-        before = self._conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0]
-        self._conn.executemany(
-            "DELETE FROM processed_images WHERE file_path = ?",
-            [(p,) for p in paths],
+        placeholders = ",".join("?" * len(paths))
+        cur = self._conn.execute(
+            f"DELETE FROM processed_images WHERE file_path IN ({placeholders})",  # nosec B608
+            paths,
         )
         self._conn.commit()
-        after = self._conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0]
-        return int(before - after)
+        return cur.rowcount
 
     @staticmethod
     def _image_row_to_dict(row: tuple) -> dict:
@@ -957,20 +971,21 @@ class ProgressDB:
         persons = self._conn.execute(
             "SELECT id, label, confirmed, source, trusted FROM persons"
         ).fetchall()
+        # Fetch all face->person mappings in a single round-trip.
+        face_rows = self._conn.execute(
+            "SELECT person_id, id FROM faces WHERE person_id IS NOT NULL"
+        ).fetchall()
+        faces_by_person: dict[int, list[int]] = defaultdict(list)
+        for person_id, face_id in face_rows:
+            faces_by_person[person_id].append(face_id)
         result = []
         for pid, label, confirmed, source, trusted in persons:
-            face_ids = [
-                r[0]
-                for r in self._conn.execute(
-                    "SELECT id FROM faces WHERE person_id = ?", (pid,)
-                ).fetchall()
-            ]
             result.append(
                 PersonCluster(
                     person_id=pid,
                     label=label,
                     confirmed=bool(confirmed),
-                    face_ids=face_ids,
+                    face_ids=faces_by_person[pid],
                     source=source or "auto",
                     trusted=bool(trusted),
                 )

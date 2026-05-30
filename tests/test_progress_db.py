@@ -438,8 +438,14 @@ class TestGetCleanupCandidates:
             candidates = db.get_cleanup_candidates(include_review=True)
             assert candidates == []
 
-    def test_returns_empty_list_on_old_db_without_cleanup_class(self, tmp_path):
-        """An old DB lacking cleanup_class column must return an empty list."""
+    def test_raises_on_unmigrated_db_without_cleanup_class(self, tmp_path):
+        """An unmigrated DB lacking cleanup_class must raise, not silently return [].
+
+        ProgressDB.__init__ always migrates, so this path is unreachable in
+        production. The test documents that the old silent-swallow behaviour
+        (``except sqlite3.Error: return []``) has been intentionally removed —
+        real schema errors must propagate so callers can diagnose them.
+        """
         db_path = tmp_path / "old.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute(
@@ -468,9 +474,11 @@ class TestGetCleanupCandidates:
         db = ProgressDB.__new__(ProgressDB)
         db._path = db_path
         db._conn = raw
-        candidates = db.get_cleanup_candidates()
-        raw.close()
-        assert candidates == []
+        try:
+            with pytest.raises(sqlite3.OperationalError):
+                db.get_cleanup_candidates()
+        finally:
+            raw.close()
 
     def test_returned_dict_fields_are_correct(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
