@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-05-31
+
+### Fixed
+- **Faces UI: "Assign to person" / "New person" / "Dismiss" returned 422** (#235): `POST /api/faces/assign-batch` declared its body as a function-local pydantic model, which does not resolve under this module's `from __future__ import annotations`, so FastAPI treated the body as a query parameter and rejected every request. The fields are now declared with `Body(...)`; the JSON contract and behavior are unchanged.
+
 ## [0.18.0] - 2026-05-31
 
 ### Added
