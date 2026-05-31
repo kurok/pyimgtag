@@ -13,8 +13,6 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from fastapi.responses import Response
-
     from pyimgtag.progress_db import ProgressDB
 
 logger = logging.getLogger(__name__)
@@ -1016,7 +1014,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         return render_faces_html(api_base)
 
     @router.get("/persons/{person_id}")
-    async def person_detail(person_id: int) -> Response:
+    async def person_detail(person_id: int):
         persons = db.get_persons()
         if not any(p.person_id == person_id for p in persons):
             # The person was deleted or re-clustered away since the grid was
@@ -1229,7 +1227,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         return {"ok": True, "person_id": target_id}
 
     @router.get("/api/faces/{face_id}/preview")
-    async def face_preview(face_id: int) -> Response:
+    async def face_preview(face_id: int):
         """Render a cropped, bbox-annotated preview JPEG for one detected face.
 
         Raises:

@@ -584,7 +584,7 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
     async def get_thumbnail(
         path: str = Query(..., description="Absolute path to the image file"),
         size: int = Query(default=200, ge=50, le=4000),
-    ) -> Response:
+    ):
         """Return a cached JPEG thumbnail for an image in the progress DB.
 
         ``path`` is used purely as a DB lookup key — the request value never
@@ -609,7 +609,7 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
     @router.get("/original")
     async def get_original(
         path: str = Query(..., description="Absolute path to the image file"),
-    ) -> Response:
+    ):
         """Stream the original image bytes for the lightbox / "view source" link.
 
         Path must already be present in the progress DB; arbitrary filesystem
