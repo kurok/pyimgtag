@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-05-31
+
+### Fixed
+- **Faces detail "back" link reloaded the grid** (#246): the "← All Faces" link navigated (full page load) to the grid whenever `document.referrer` was empty — a new tab, a bookmark, or a referrer-stripping context — instead of going back. It now links to the grid as an href fallback and, when `window.history.length > 1`, calls `history.back()` and cancels the navigation, so it restores the grid from bfcache (scroll position, sort, page) instead of refetching.
+
 ## [0.20.0] - 2026-05-31
 
 ### Added
