@@ -36,7 +36,7 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `preflight`, `query`, `tags`, `faces`, `review`
+- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`
 - Photo quality scoring with professional 13-criterion rubric (new: `judge` subcommand)
 - Dry-run mode, date/limit filters, JSON/CSV export
 - SQLite progress DB with schema versioning for incremental re-runs
@@ -387,16 +387,27 @@ identically for `pyimgtag judge`.
 | `--output-json FILE` | Write results to JSON |
 | `--output-csv FILE` | Write results to CSV |
 | `--jsonl-stdout` | JSONL output to stdout |
+| `--no-recursive` | Only scan the top-level directory (no subdirectories) |
+| `--newest-first` | Process newest files first (by modification time) |
 | `--write-back` | Write tags/description back to Apple Photos *(macOS only; uses osascript by default — set `PYIMGTAG_USE_PHOTOSCRIPT=1` to opt into the faster in-process photoscript path on stable hosts)* |
-| `--write-exif` | Write description and keywords to image EXIF |
+| `--write-back-mode overwrite\|append` | Write-back strategy: replace all keywords (`overwrite`, default) or merge with existing (`append`) |
+| `--skip-if-tagged` | Skip the model for photos that already have keywords in Apple Photos *(`--photos-library` only)* |
+| `--write-exif` | Write description and keywords to image EXIF via exiftool |
+| `--sidecar-only` | Write metadata to an XMP sidecar (`.xmp`) instead of modifying the original |
+| `--metadata-format auto\|xmp\|iptc\|exif` | Which metadata fields to write with `--write-exif` (default: `auto`, all fields) |
 | `--dedup` | Skip duplicates via perceptual hash |
 | `--dedup-threshold N` | Hamming distance threshold (default: 5) |
-| `--model NAME` | Ollama model (default: gemma4:e4b) |
-| `--ollama-url URL` | Ollama API URL |
+| `--backend ollama\|anthropic\|openai\|gemini` | Vision-model backend (default: `ollama`) |
+| `--model NAME` | Model name (backend-specific default; ollama: `gemma4:e4b`) |
+| `--ollama-url URL` | Ollama API URL (used when `--backend=ollama`; supports remote Ollama) |
+| `--api-base URL` / `--api-key KEY` | Cloud-API base URL / key (anthropic / openai / gemini) |
 | `--max-dim N` | Max image dimension (default: 1280) |
 | `--timeout N` | Model request timeout in seconds |
 | `--db PATH` | Progress database path |
 | `--no-cache` | Skip progress DB, reprocess all |
+| `--skip-existing` | Fully skip unchanged photos already complete in the DB (fastest resume; takes precedence over `--resume-from-db`) |
+| `--resume-from-db` | Reuse cached model results for unchanged files; only re-run local enrichment (EXIF, geocoding) |
+| `--resume-threaded` | With `--resume-from-db`: enrich cached items in a background thread |
 
 #### `pyimgtag status` — check progress
 
@@ -437,6 +448,20 @@ pyimgtag cleanup --include-review
 #   [delete]  /path/to/screenshot.png    | 2026-04-01  | tags: screenshot, text
 ```
 
+#### `pyimgtag cleanup-drift` — prune dead DB rows
+
+Finds progress-DB rows whose backing file is gone (and, on macOS, photos that
+Apple Photos no longer indexes). Lists the dead rows by default; pass `--prune`
+to delete them from the database.
+
+```bash
+# Dry run: list the dead rows (default behaviour)
+pyimgtag cleanup-drift
+
+# Actually delete the dead rows from the DB
+pyimgtag cleanup-drift --prune
+```
+
 #### `pyimgtag query` — search tagged images
 
 ```bash
@@ -460,12 +485,14 @@ pyimgtag query --tag beach --format json
 pyimgtag query --tag beach --format paths --limit 50
 ```
 
-#### `pyimgtag faces` — face detection, clustering, naming *(macOS)*
+#### `pyimgtag faces` — face detection, clustering, naming
 
-Six sub-subcommands chain into a typical face workflow:
+Six sub-subcommands chain into a typical face workflow. Detection, clustering,
+review, apply, and the UI work cross-platform on `--input-dir` folders; only
+`import-photos` (and the `--photos-library` source) require macOS + Apple Photos.
 
 ```bash
-# 1. Detect faces and compute embeddings
+# 1. Detect faces and compute embeddings (also accepts --input-dir on any platform)
 pyimgtag faces scan --photos-library ~/Pictures/Photos\ Library.photoslibrary
 
 # 2. Cluster embeddings into person groups (DBSCAN)
@@ -474,7 +501,7 @@ pyimgtag faces cluster --eps 0.5 --min-samples 2
 # 3. Inspect the clusters from the CLI
 pyimgtag faces review
 
-# 4. Import named persons from Apple Photos (uses bulk AppleScript)
+# 4. Import named persons from Apple Photos (uses bulk AppleScript; macOS only)
 pyimgtag faces import-photos
 
 # 5. Write person keywords to image metadata (EXIF or XMP sidecar)
@@ -484,6 +511,11 @@ pyimgtag faces apply --sidecar-only --dry-run
 # 6. Manage clusters via the web UI (rename, merge, delete)
 pyimgtag faces ui  # serves the unified webapp on http://127.0.0.1:8766
 ```
+
+The `faces ui` person grid can **sort by face count** (most / fewest faces)
+or name, and supports **multi-select** to confirm or delete several people
+at once. Selecting unassigned faces lets you create a new person or assign
+them to an existing one.
 
 `scan` accepts `--detection-model {hog,cnn}` (hog = fast CPU, cnn = accurate
 GPU), `--max-dim`, `--extensions`, and `--limit`, plus the same dashboard
@@ -532,13 +564,13 @@ pyimgtag preflight --input-dir ~/Pictures/exported
 
 #### `pyimgtag judge` — score photo quality
 
-Score each image against a 13-criterion professional rubric. Outputs a ranked list with weighted scores as **integers on a 1–10 scale** (no decimal component). Requires Ollama.
+Score each image against a 13-criterion professional rubric. Outputs a ranked list with weighted scores as **integers on a 1–10 scale** (no decimal component). Uses the same pluggable vision backends as `run` — local Ollama by default, or `--backend anthropic` / `openai` / `gemini`.
 
 ```bash
 # Score all images in a folder
 pyimgtag judge --input-dir ~/Pictures/exported
 
-# Only show photos scoring 3.5 or above
+# Only show photos scoring 7 or above
 pyimgtag judge --input-dir ~/Pictures/exported --min-score 7
 
 # Verbose breakdown (per-criterion scores)
@@ -802,6 +834,19 @@ pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
 A file is eligible for DB resume if:
 - Its size and modification time have not changed since the last run.
 - The cached entry has at least one tag.
+
+For the fastest possible resume over a large, mostly-tagged library, use
+`--skip-existing` instead. It fully skips any unchanged photo that already has
+a usable result in the DB (status `ok` + non-empty tags) — no EXIF re-read,
+geocoding, write-back, or DB rewrite. Skipped photos are **not** re-written
+even with `--write-back` / `--write-exif`. `--skip-existing` takes precedence
+over `--resume-from-db` and is ignored when `--no-cache` is set.
+
+```bash
+# Fastest resume — fully skip photos already complete in the DB
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+             --db ~/my-progress.db --skip-existing
+```
 
 Use `pyimgtag reprocess --db ~/my-progress.db` to force a full re-run for all files,
 or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only failed files.

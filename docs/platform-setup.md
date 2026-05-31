@@ -30,6 +30,12 @@ cd pyimgtag
 pip install -e ".[all,dev]"
 ```
 
+Face features additionally require `face_recognition_models`, installed separately from git:
+
+```bash
+pip install "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"
+```
+
 ### Available Features
 
 | Feature | Available |
@@ -301,6 +307,18 @@ pyimgtag run --input-dir "C:\Users\YourName\Pictures" --output-json results.json
 | Extra | Installs | Use for |
 |---|---|---|
 | `[heic]` | pillow-heif | HEIC support on Linux/Windows |
+| `[photos]` | photoscript | Faster in-process Apple Photos access (macOS) |
+| `[face]` | face-recognition, scikit-learn, setuptools | Face detection / clustering (also needs `face_recognition_models`, see below) |
+| `[review]` | fastapi, uvicorn, pydantic, httpx2 | Local web review / dashboard UIs |
 | `[raw]` | rawpy | RAW file support (all platforms) |
-| `[all]` | pillow-heif + rawpy | All optional format support |
-| `[dev]` | pytest, coverage, etc. | Development and testing |
+| `[all]` | heic + photos + face + review + raw | All optional runtime features |
+| `[dev]` | pytest, pytest-xdist, pytest-cov | Development and testing |
+| `[lint]` | mypy, ruff | Linting and type checking |
+| `[security]` | bandit, pip-audit | Security scanning |
+
+> **Note:** the `[face]` (and `[all]`) extras still need `face_recognition_models`
+> installed separately — it only exists at a git URL and cannot be published to PyPI:
+>
+> ```bash
+> pip install "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"
+> ```

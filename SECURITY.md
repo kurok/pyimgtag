@@ -7,11 +7,11 @@ releases stop receiving security updates as soon as a newer minor lands.
 
 | Version  | Supported |
 |----------|-----------|
-| 0.11.x   | ✅ — current release line, all fixes land here |
-| 0.10.x   | ❌ — superseded by 0.11.0 |
-| ≤ 0.9.x  | ❌ — superseded |
+| 0.19.x   | ✅ — current release line, all fixes land here |
+| 0.18.x   | ❌ — superseded by 0.19.0 |
+| ≤ 0.17.x | ❌ — superseded |
 
-The current latest release is **0.11.1** ([release notes](https://github.com/kurok/pyimgtag/releases/tag/v0.11.1)).
+The current latest release is **0.19.0** ([release notes](https://github.com/kurok/pyimgtag/releases/tag/v0.19.0)).
 
 ## Reporting a Vulnerability
 
@@ -55,9 +55,9 @@ Alternatively, contact the maintainers directly through GitHub.
 - **CI scanning:** bandit (SAST) and pip-audit (dependency vulnerabilities) run on every push and PR
 - **CodeQL:** required to pass before merging to main
 - **Least-privilege CI:** all workflows use explicit, minimal `GITHUB_TOKEN` permissions
-- **Minimal dependencies:** only `requests` and `Pillow` are required at runtime
-- **No secrets in code:** pyimgtag does not store or transmit credentials
-- **Local-first design:** image data is never sent to cloud services; only GPS coordinates are sent to Nominatim for reverse geocoding
+- **Minimal dependencies:** only `requests`, `Pillow`, `imagehash`, and `exifread` are required at runtime
+- **No secrets in code:** pyimgtag does not store or transmit credentials; cloud-backend API keys are read from environment variables (or `--api-key`) and never persisted
+- **Local-first by default:** with the default Ollama backend, image data stays on-device and only GPS coordinates are sent to Nominatim for reverse geocoding. Image bytes leave the machine **only** when you explicitly opt into a hosted vision backend (`--backend anthropic` / `openai` / `gemini`), which uploads the JPEG to that provider.
 - **Trusted publishing:** PyPI releases use OpenID Connect trusted publishing, no long-lived API tokens
 - **Subprocess safety:** exiftool is called with fixed arguments only (no user-controlled command injection)
 
