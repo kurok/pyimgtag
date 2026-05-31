@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-05-31
+
+### Fixed
+- **OpenAPI schema generation crashed** (#237): four route handlers were annotated `-> Response` where `Response` is only importable under `TYPE_CHECKING` (`routes_faces` `face_preview`/`person_detail`; `routes_review` `get_thumbnail`/`get_original`). FastAPI resolves return-type hints against module globals when building the schema, so `app.openapi()` raised `PydanticUserError` (`ForwardRef('Response')`). Latent in practice — request handling was unaffected and the app disables `/docs` + `/openapi.json` — but enabling docs would 500. The unresolvable return annotations are dropped; behavior is unchanged.
+
 ## [0.18.1] - 2026-05-31
 
 ### Fixed
