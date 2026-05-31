@@ -14,6 +14,9 @@ from pyimgtag.commands.faces import (
     _handle_faces_apply,
     _handle_faces_cluster,
     _handle_faces_import_photos,
+    _handle_faces_recluster,
+    _handle_faces_reset,
+    _handle_faces_reset_untrusted,
     _handle_faces_review,
     _handle_faces_scan,
     _start_cluster_thread,
@@ -40,6 +43,7 @@ def _make_args(**kwargs) -> argparse.Namespace:
         write_exif=False,
         sidecar_only=False,
         faces_action=None,
+        yes=False,
         web=False,
         no_web=True,
         web_host="127.0.0.1",
@@ -673,3 +677,150 @@ class TestModuleImportFallback:
             # Restore the real module state for other tests/parallel workers.
             importlib.reload(faces_mod)
         assert faces_mod.scan_and_store is not None
+
+
+def _seed_faces_db(db_path):
+    """Seed a DB with a trusted person, an auto cluster, and an unassigned face.
+
+    Layout:
+      - trusted person 'Alice' (source='photos', trusted) with 1 face on /trusted.jpg
+      - auto person with 2 faces on /auto1.jpg, /auto2.jpg
+      - 1 unassigned face on /loose.jpg
+      - all four images marked face-scanned
+    Returns (trusted_pid, auto_pid).
+    """
+    import sqlite3
+
+    con = sqlite3.connect(str(db_path))
+    trusted = con.execute(
+        "INSERT INTO persons (label, confirmed, source, trusted) VALUES ('Alice',1,'photos',1)"
+    ).lastrowid
+    auto = con.execute(
+        "INSERT INTO persons (label, confirmed, source, trusted) VALUES ('',0,'auto',0)"
+    ).lastrowid
+    con.execute(
+        "INSERT INTO faces (image_path, person_id, confidence) VALUES ('/trusted.jpg', ?, 1.0)",
+        (trusted,),
+    )
+    con.execute(
+        "INSERT INTO faces (image_path, person_id, confidence) VALUES ('/auto1.jpg', ?, 1.0)",
+        (auto,),
+    )
+    con.execute(
+        "INSERT INTO faces (image_path, person_id, confidence) VALUES ('/auto2.jpg', ?, 1.0)",
+        (auto,),
+    )
+    con.execute("INSERT INTO faces (image_path, confidence) VALUES ('/loose.jpg', 1.0)")
+    for p in ("/trusted.jpg", "/auto1.jpg", "/auto2.jpg", "/loose.jpg"):
+        con.execute("INSERT INTO face_scanned_images (image_path) VALUES (?)", (p,))
+    con.commit()
+    con.close()
+    return trusted, auto
+
+
+class TestFacesReset:
+    def test_reset_all_dry_run_deletes_nothing(self, tmp_path, capsys):
+        db_path = tmp_path / "p.db"
+        with ProgressDB(db_path=db_path):
+            pass
+        _seed_faces_db(db_path)
+        rc = _handle_faces_reset(_make_args(db=str(db_path), faces_action="reset", yes=False))
+        assert rc == 0
+        out = capsys.readouterr().err
+        assert "Would remove" in out and "--yes" in out
+        with ProgressDB(db_path=db_path) as db:
+            assert db.get_face_count() == 4
+            assert len(db.get_persons()) == 2
+
+    def test_reset_all_yes_wipes_everything(self, tmp_path, capsys):
+        db_path = tmp_path / "p.db"
+        with ProgressDB(db_path=db_path):
+            pass
+        _seed_faces_db(db_path)
+        rc = _handle_faces_reset(_make_args(db=str(db_path), faces_action="reset", yes=True))
+        assert rc == 0
+        # Exact counts must reach the user, not just the word "Removed".
+        err = capsys.readouterr().err
+        assert "Removed: 4 face(s), 2 person(s), 4 scan-cache entries." in err
+        with ProgressDB(db_path=db_path) as db:
+            assert db.get_face_count() == 0
+            assert db.get_persons() == []
+            assert not db.is_face_scanned("/trusted.jpg")
+
+    def test_reset_untrusted_keeps_trusted_person_and_faces(self, tmp_path, capsys):
+        db_path = tmp_path / "p.db"
+        with ProgressDB(db_path=db_path):
+            pass
+        trusted, _auto = _seed_faces_db(db_path)
+        rc = _handle_faces_reset_untrusted(
+            _make_args(db=str(db_path), faces_action="reset-untrusted", yes=True)
+        )
+        assert rc == 0
+        with ProgressDB(db_path=db_path) as db:
+            persons = db.get_persons()
+            assert [p.person_id for p in persons] == [trusted]
+            # Only the trusted person's single face survives.
+            assert db.get_face_count() == 1
+            # The trusted image stays cached (avoids re-detecting the trusted
+            # face); the others are pruned so a re-scan re-detects them.
+            assert db.is_face_scanned("/trusted.jpg")
+            assert not db.is_face_scanned("/loose.jpg")
+            assert not db.is_face_scanned("/auto1.jpg")
+
+    def test_reset_untrusted_dry_run_keeps_everything(self, tmp_path):
+        db_path = tmp_path / "p.db"
+        with ProgressDB(db_path=db_path):
+            pass
+        _seed_faces_db(db_path)
+        _handle_faces_reset_untrusted(
+            _make_args(db=str(db_path), faces_action="reset-untrusted", yes=False)
+        )
+        with ProgressDB(db_path=db_path) as db:
+            assert db.get_face_count() == 4
+            assert len(db.get_persons()) == 2
+
+    def test_recluster_dry_run_reports_and_keeps(self, tmp_path, capsys):
+        db_path = tmp_path / "p.db"
+        with ProgressDB(db_path=db_path):
+            pass
+        _seed_faces_db(db_path)
+        rc = _handle_faces_recluster(
+            _make_args(db=str(db_path), faces_action="recluster", yes=False)
+        )
+        assert rc == 0
+        out = capsys.readouterr().err
+        assert "Would clear 1 auto-cluster" in out and "--yes" in out
+        with ProgressDB(db_path=db_path) as db:
+            assert len(db.get_persons()) == 2  # nothing cleared
+
+    def test_recluster_yes_clears_auto_and_reclusters(self, tmp_path, capsys):
+        db_path = tmp_path / "p.db"
+        with ProgressDB(db_path=db_path):
+            pass
+        _seed_faces_db(db_path)
+        with patch("pyimgtag.face_clustering.recluster_auto", return_value={99: [1, 2]}) as rc_mock:
+            rc = _handle_faces_recluster(
+                _make_args(db=str(db_path), faces_action="recluster", yes=True)
+            )
+        assert rc == 0
+        rc_mock.assert_called_once()
+        assert "created 1 new cluster" in capsys.readouterr().err
+
+    def test_recluster_missing_sklearn_returns_1(self, tmp_path, capsys):
+        db_path = tmp_path / "p.db"
+        with ProgressDB(db_path=db_path):
+            pass
+        with patch.dict("sys.modules", {"pyimgtag.face_clustering": None}):
+            rc = _handle_faces_recluster(
+                _make_args(db=str(db_path), faces_action="recluster", yes=True)
+            )
+        assert rc == 1
+        assert "Error" in capsys.readouterr().err
+
+    def test_dispatch_routes_reset_actions(self, tmp_path):
+        db_path = tmp_path / "p.db"
+        with ProgressDB(db_path=db_path):
+            pass
+        for action in ("reset", "reset-untrusted", "recluster"):
+            rc = cmd_faces(_make_args(db=str(db_path), faces_action=action, yes=False))
+            assert rc == 0

@@ -122,6 +122,13 @@ Examples:
   pyimgtag faces apply --write-exif
   pyimgtag faces ui            # web UI for naming and merging people
 
+  pyimgtag faces recluster --yes        # clear auto-clusters and re-cluster
+  pyimgtag faces reset-untrusted --yes  # drop non-trusted faces, keep named people
+  pyimgtag faces reset --yes            # wipe ALL faces/persons and start over
+
+Reset/recluster actions show a preview of what would change; add --yes to apply.
+Run them when no 'faces scan' is in progress — a scan re-clusters in the
+background, which would race a concurrent reset/recluster.
 Run 'pyimgtag faces <action> -h' for action-specific options.
 """,
     ),
@@ -471,6 +478,36 @@ def _add_faces_subcommand(subparsers: Any) -> None:
     faces_ui.add_argument("--db", help=_DEFAULT_DB_HELP)
     faces_ui.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
     faces_ui.add_argument("--port", type=int, default=8766, help="Port (default: 8766)")
+
+    _RESET_YES_HELP = (
+        "Perform the reset (without it, only a preview of what would be removed is shown)"
+    )
+
+    faces_reset = faces_sub.add_parser(
+        "reset", help="Delete ALL faces, persons (incl. trusted), and the scan cache"
+    )
+    faces_reset.add_argument("--db", help=_DEFAULT_DB_HELP)
+    faces_reset.add_argument("--yes", action="store_true", help=_RESET_YES_HELP)
+
+    faces_reset_unt = faces_sub.add_parser(
+        "reset-untrusted",
+        help="Delete non-trusted faces and clusters; keep trusted/named people",
+    )
+    faces_reset_unt.add_argument("--db", help=_DEFAULT_DB_HELP)
+    faces_reset_unt.add_argument("--yes", action="store_true", help=_RESET_YES_HELP)
+
+    faces_recluster = faces_sub.add_parser(
+        "recluster",
+        help="Clear auto-clusters and re-cluster from scratch (keeps trusted people)",
+    )
+    faces_recluster.add_argument("--db", help=_DEFAULT_DB_HELP)
+    faces_recluster.add_argument(
+        "--eps", type=float, default=0.5, help="DBSCAN eps radius (default: 0.5)"
+    )
+    faces_recluster.add_argument(
+        "--min-samples", type=int, default=2, help="Minimum faces to form a cluster (default: 2)"
+    )
+    faces_recluster.add_argument("--yes", action="store_true", help=_RESET_YES_HELP)
 
 
 def _add_query_subcommand(subparsers: Any) -> None:

@@ -1158,6 +1158,95 @@ class ProgressDB:
         self._conn.execute(f"DELETE FROM persons WHERE id IN ({placeholders})", auto_ids)  # nosec B608
         self._conn.commit()
 
+    def reset_all_faces(self, *, dry_run: bool = False) -> dict[str, int]:
+        """Delete every face, every person, and the face-scan cache.
+
+        The most destructive faces reset: a subsequent ``faces scan`` starts
+        from zero, re-detecting and re-clustering everything. Trusted and
+        Photos-imported persons are **not** spared. Image tagging/geocoding
+        progress in ``processed_images`` is untouched.
+
+        Args:
+            dry_run: When True, only count what would be removed; delete nothing.
+
+        Returns:
+            ``{"faces": n, "persons": n, "scanned_images": n}`` — rows removed
+            (or that would be removed, for ``dry_run``).
+        """
+        counts = {
+            "faces": self._conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0],
+            "persons": self._conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0],
+            "scanned_images": self._conn.execute(
+                "SELECT COUNT(*) FROM face_scanned_images"
+            ).fetchone()[0],
+        }
+        if dry_run:
+            return counts
+        self._conn.execute("DELETE FROM faces")
+        self._conn.execute("DELETE FROM persons")
+        self._conn.execute("DELETE FROM face_scanned_images")
+        self._conn.commit()
+        return counts
+
+    def reset_untrusted_faces(self, *, dry_run: bool = False) -> dict[str, int]:
+        """Delete non-trusted faces and clusters, preserving trusted people.
+
+        Removes every person that is neither trusted nor confirmed, and every
+        non-ignored face not assigned to a surviving trusted person, then
+        prunes the face-scan cache for images that have no face left so the
+        next scan re-detects them. Kept: trusted / Photos-imported persons and
+        the faces assigned to them, AND ignored ("trash") faces — those are
+        explicit user curation, so they survive here; use ``reset_all_faces``
+        to clear them too. (An image that still holds a trusted or trashed
+        face stays cached, so its faces are not re-detected — nor the kept
+        face duplicated — on the next scan.)
+
+        Args:
+            dry_run: When True, only count what would be removed; delete nothing.
+
+        Returns:
+            ``{"faces": n, "persons": n, "scanned_images": n}``.
+        """
+        # All SQL below is constant (no interpolated values). A face is deleted
+        # only when it is NOT ignored AND not assigned to a trusted/confirmed
+        # person. The scan-cache survivor set is images that still have a
+        # trusted OR an ignored face after the delete.
+        counts = {
+            "faces": self._conn.execute(
+                "SELECT COUNT(*) FROM faces WHERE ignored = 0 AND (person_id IS NULL "
+                "OR person_id NOT IN (SELECT id FROM persons WHERE trusted = 1 OR confirmed = 1))"
+            ).fetchone()[0],
+            "persons": self._conn.execute(
+                "SELECT COUNT(*) FROM persons WHERE trusted = 0 AND confirmed = 0"
+            ).fetchone()[0],
+            "scanned_images": self._conn.execute(
+                "SELECT COUNT(*) FROM face_scanned_images WHERE image_path NOT IN "
+                "(SELECT DISTINCT image_path FROM faces WHERE ignored = 1 OR person_id IN "
+                "(SELECT id FROM persons WHERE trusted = 1 OR confirmed = 1))"
+            ).fetchone()[0],
+        }
+        if dry_run:
+            return counts
+        self._conn.execute(
+            "DELETE FROM faces WHERE ignored = 0 AND (person_id IS NULL "
+            "OR person_id NOT IN (SELECT id FROM persons WHERE trusted = 1 OR confirmed = 1))"
+        )
+        self._conn.execute("DELETE FROM persons WHERE trusted = 0 AND confirmed = 0")
+        # Only trusted and ignored faces survive now, so "no face left" is just
+        # "no face row left" for the image.
+        self._conn.execute(
+            "DELETE FROM face_scanned_images WHERE image_path NOT IN "
+            "(SELECT DISTINCT image_path FROM faces)"
+        )
+        self._conn.commit()
+        return counts
+
+    def count_auto_persons(self) -> int:
+        """Return the number of auto-clustered persons (trusted=0 AND confirmed=0)."""
+        return self._conn.execute(
+            "SELECT COUNT(*) FROM persons WHERE trusted = 0 AND confirmed = 0"
+        ).fetchone()[0]
+
     def ignore_face(self, face_id: int) -> None:
         """Mark a face as ignored so it is excluded from auto-clustering."""
         self._conn.execute(
