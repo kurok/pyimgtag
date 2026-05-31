@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-05-31
+
+### Added
+- **Faces person-detail page is paginated** (#244): `GET /api/persons/{id}/faces` previously returned every face for the person and generated a thumbnail for each, so a person with thousands of faces loaded and base64-encoded them all at once. The endpoint now takes `offset`/`limit` (default 60, clamped to ≤200) and returns `{total, items}` sorted highest-confidence first, thumbnailing only the requested page (matching the unassigned/trash endpoints). The detail page renders one page at a time with a Prev/Next pager and the full count; the hero thumbnail shows only on the first page.
+
+### Fixed
+- **Photos-importer test polluted module identity, failing CI on Linux/Windows** (#244): `TestLazyPhotoscriptImport` re-imported `pyimgtag.photos_faces_importer` and restored only `sys.modules`, leaving the parent-package attribute bound to a throwaway module object. A later test's `patch("pyimgtag.photos_faces_importer.…")` then missed and invoked the real `/usr/bin/osascript` — absent on Linux/Windows runners (→ `RuntimeError`), and a multi-minute Photos query on macOS. The test now restores the parent-package attribute and mocks at the `_run_bulk_osascript` seam. Test-only.
+
 ## [0.19.1] - 2026-05-31
 
 ### Changed
