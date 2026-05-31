@@ -171,7 +171,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 4. Run all checks before committing:
    ```bash
    ruff format src/ tests/             # format first
-   pre-commit run --all-files          # MUST run this — uses pinned ruff v0.9.10
+   pre-commit run --all-files          # MUST run this — uses pinned ruff v0.15.15
    python3 -m pytest tests/ -v
    python3 -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
    python3 -m bandit -r src/pyimgtag/ -c pyproject.toml
@@ -189,7 +189,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 10. Monitor CI: `gh run list --branch feature/descriptive-name`
 
 > **Why `pre-commit run --all-files` must run last and is the source of truth:**
-> The pre-commit config pins `ruff` at **v0.9.10** (`rev: v0.9.10` in `.pre-commit-config.yaml`).
+> The pre-commit config pins `ruff` at **v0.15.15** (`rev: v0.15.15` in `.pre-commit-config.yaml`).
 > The locally installed `ruff` will often be a newer version with different formatting rules.
 > Running `ruff format` directly uses the local version and may leave diffs that the pinned
 > CI version will reformat, failing the `pre-commit` CI job.
