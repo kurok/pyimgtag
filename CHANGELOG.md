@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-05-31
+
+### Added
+- **Faces grid: sort by face count** (#233): a sort control on `/faces` (Default / Most faces / Fewest faces / Name A-Z). `GET /api/persons/with-faces` gains a `sort` param (`count_desc` / `count_asc` / `name_asc` / `default`) applied to the whole filtered set before pagination.
+- **Faces grid: multi-select confirm/delete** (#233): a checkbox per person card and a bulk-action bar ("Confirm selected" / "Delete selected"), backed by new `POST /api/persons/confirm-batch` and `POST /api/persons/delete-batch` endpoints and the `ProgressDB.confirm_persons` / `delete_persons` methods (one transaction each).
+
 ## [0.17.4] - 2026-05-31
 
 ### Fixed
