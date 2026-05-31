@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2026-05-31
+
+### Changed
+- **Test coverage raised to 100%** (#242): added ~335 tests across the modules with coverage gaps (run/faces/applescript/progress_db/webapp routes/clients/judge/exif/etc.), lifting project coverage from 87% to 100%. Tests mock at the boundary (subprocess, HTTP, fastapi TestClient, and optional deps) so paths execute in CI without the optional extras. No runtime or behavior changes; the only `src/` edits are `# pragma: no cover` comments on optional-dependency registration and core-dep import-fallback branches.
+
 ## [0.19.0] - 2026-05-31
 
 ### Changed
