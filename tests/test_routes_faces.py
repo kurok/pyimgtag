@@ -398,13 +398,77 @@ def test_get_person_faces_found_and_missing(tmp_path):
     with TestClient(app) as client:
         r = client.get(f"/api/persons/{pid}/faces")
         assert r.status_code == 200
-        faces = r.json()
-        assert len(faces) == 2
+        body = r.json()
+        assert body["total"] == 2
+        assert len(body["items"]) == 2
         # Thumbs are None because the image paths don't exist on disk.
-        assert all("thumb" in f for f in faces)
+        assert all("thumb" in f for f in body["items"])
 
         missing = client.get("/api/persons/9999999/faces")
         assert missing.status_code == 404
+
+
+def test_get_person_faces_pagination(tmp_path):
+    # A person's faces are paginated so a huge cluster doesn't load (and
+    # thumbnail) them all at once.
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+    (pid,) = _seed_persons_with_faces(db_path, [("Big", True, 5)])
+
+    with TestClient(app) as client:
+        page1 = client.get(f"/api/persons/{pid}/faces?offset=0&limit=2").json()
+        assert page1["total"] == 5
+        assert len(page1["items"]) == 2
+
+        last = client.get(f"/api/persons/{pid}/faces?offset=4&limit=2").json()
+        assert last["total"] == 5
+        assert len(last["items"]) == 1  # remainder on the final page
+
+        capped = client.get(f"/api/persons/{pid}/faces?limit=999").json()
+        assert len(capped["items"]) == 5  # limit clamped to <=200
+
+
+def test_get_person_faces_ordered_by_confidence_desc(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+    con = sqlite3.connect(str(db_path))
+    pid = con.execute(
+        "INSERT INTO persons (label, confirmed, source, trusted) VALUES ('Z',1,'auto',1)"
+    ).lastrowid
+    for conf in (0.2, 0.9, 0.5):
+        con.execute(
+            "INSERT INTO faces (image_path, person_id, confidence) VALUES (?,?,?)",
+            (f"/nope/{conf}.jpg", pid, conf),
+        )
+    con.commit()
+    con.close()
+
+    with TestClient(app) as client:
+        items = client.get(f"/api/persons/{pid}/faces").json()["items"]
+    assert [f["confidence"] for f in items] == [0.9, 0.5, 0.2]
+
+
+def test_person_detail_html_has_face_pager(tmp_path):
+    db = ProgressDB(db_path=tmp_path / "progress.db")
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base="/faces"), prefix="/faces")
+    import sqlite3
+
+    con = sqlite3.connect(str(tmp_path / "progress.db"))
+    pid = con.execute(
+        "INSERT INTO persons (label, confirmed, source, trusted) VALUES ('P',1,'auto',1)"
+    ).lastrowid
+    con.commit()
+    con.close()
+    html = TestClient(app).get(f"/faces/persons/{pid}").text
+    assert 'id="face-pager"' in html and "goFacePage" in html
+    assert "limit=" in html  # the faces fetch is paginated
 
 
 def test_list_unassigned_faces(tmp_path):
