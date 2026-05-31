@@ -469,6 +469,10 @@ def test_person_detail_html_has_face_pager(tmp_path):
     html = TestClient(app).get(f"/faces/persons/{pid}").text
     assert 'id="face-pager"' in html and "goFacePage" in html
     assert "limit=" in html  # the faces fetch is paginated
+    # The "back" link does a browser-back (no page reload) when history exists,
+    # and only navigates to the grid as a fallback for direct opens.
+    assert "window.history.length>1" in html and "history.back()" in html
+    assert "document.referrer" not in html  # old reload-on-empty-referrer path is gone
 
 
 def test_list_unassigned_faces(tmp_path):
