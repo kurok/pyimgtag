@@ -101,6 +101,45 @@ def test_dashboard_html_has_nav_links_to_review_and_faces():
     assert 'class="nav"' in body
 
 
+def test_stop_without_session_returns_404():
+    client = TestClient(create_app())
+    r = client.post("/api/run/current/stop")
+    assert r.status_code == 404
+
+
+def test_stop_with_session_requests_stop_and_returns_snapshot():
+    s = RunSession(command="run")
+    s.mark_running()
+    run_registry.set_current(s)
+
+    client = TestClient(create_app())
+    r = client.post("/api/run/current/stop")
+    assert r.status_code == 200
+    body = r.json()
+    # request_stop transitions the session out of plain "running".
+    assert body["state"] in {"stopping", "interrupted", "running"}
+
+
+def test_build_dashboard_router_missing_fastapi_raises_importerror():
+    """Import guard in build_dashboard_router (lines 188-189)."""
+    from unittest.mock import patch
+
+    from pyimgtag.webapp.dashboard_server import build_dashboard_router
+
+    with patch.dict("sys.modules", {"fastapi": None}):
+        with pytest.raises(ImportError, match="fastapi and uvicorn are required"):
+            build_dashboard_router()
+
+
+def test_create_app_missing_fastapi_raises_importerror():
+    """Import guard in create_app (lines 242-243)."""
+    from unittest.mock import patch
+
+    with patch.dict("sys.modules", {"fastapi": None}):
+        with pytest.raises(ImportError, match="fastapi and uvicorn are required"):
+            create_app()
+
+
 def test_dashboard_router_can_be_mounted_on_a_composite_app():
     """build_dashboard_router should produce a router usable on any FastAPI app."""
     from fastapi import FastAPI

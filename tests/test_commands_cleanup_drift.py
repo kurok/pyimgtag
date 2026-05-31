@@ -64,6 +64,21 @@ def _membership_factory(present_paths: list[str]) -> callable:
 
 
 class TestClassify:
+    def test_oserror_on_is_file_treated_as_disk_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A broken symlink / permission error makes ``Path.is_file`` raise
+        # OSError; the classifier must swallow it and treat the row as
+        # disk_missing rather than letting the scan blow up.
+        on_disk = tmp_path / "weird.jpg"
+        on_disk.write_bytes(b"x")
+
+        def _boom(self: Path) -> bool:
+            raise OSError("broken")
+
+        monkeypatch.setattr("pyimgtag.cleanup_drift.Path.is_file", _boom)
+        assert _classify(str(on_disk), {"weird.jpg"}) == CAT_DISK_MISSING
+
     def test_disk_missing_overrides_photos(self, tmp_path: Path) -> None:
         # File doesn't exist on disk — disk_missing always wins, even
         # if the (mock) Photos.app would report it as present.
@@ -110,6 +125,34 @@ class TestScanDrift:
         assert report.photos_missing == 1
         assert sorted(report.dead_paths) == sorted([disk_missing, photos_missing])
 
+    def test_progress_heartbeat_emitted_on_interval(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Shrink the heartbeat cadence so a couple of rows trip it; the
+        # progress callback should then receive a "[drift] scanned" pulse.
+        monkeypatch.setattr("pyimgtag.cleanup_drift._PROGRESS_EVERY", 2)
+
+        db_path = tmp_path / "drift.db"
+        with ProgressDB(db_path=db_path) as db:
+            for i in range(3):
+                p = tmp_path / f"img{i}.jpg"
+                p.write_bytes(b"\x00")
+                db.mark_done(
+                    p,
+                    ImageResult(file_path=str(p), file_name=p.name, processing_status="ok"),
+                )
+
+        messages: list[str] = []
+
+        def _fake() -> tuple[set[str], str | None]:
+            return set(), None
+
+        with ProgressDB(db_path=db_path) as db:
+            scan_drift(db, fetch_membership=_fake, progress=messages.append)
+
+        # At least one mid-scan heartbeat must have fired at the 2-row mark.
+        assert any("scanned 2 rows" in m for m in messages)
+
     def test_probe_error_collapses_photos_missing(self, tmp_path: Path) -> None:
         db_path = tmp_path / "drift.db"
         _, disk_missing, _ = _seed(db_path, tmp_path)
@@ -130,6 +173,27 @@ class TestScanDrift:
 
 
 class TestPruneDrift:
+    def test_prune_flushes_full_batches(self, tmp_path: Path) -> None:
+        # batch_size=2 with three dead paths forces the mid-loop flush
+        # (the ``len(batch) >= batch_size`` branch) plus the trailing
+        # flush of the remainder.
+        db_path = tmp_path / "drift.db"
+        paths = []
+        with ProgressDB(db_path=db_path) as db:
+            for i in range(3):
+                p = tmp_path / f"dead{i}.jpg"
+                p.write_bytes(b"\x00")
+                db.mark_done(
+                    p,
+                    ImageResult(file_path=str(p), file_name=p.name, processing_status="ok"),
+                )
+                paths.append(str(p))
+
+        with ProgressDB(db_path=db_path) as db:
+            removed = prune_drift(db, paths, batch_size=2)
+            assert removed == 3
+            assert db.count_images() == 0
+
     def test_prune_removes_only_dead_paths(self, tmp_path: Path) -> None:
         db_path = tmp_path / "drift.db"
         present, disk_missing, photos_missing = _seed(db_path, tmp_path)

@@ -1,20 +1,28 @@
-"""Tests for faces_review_server FastAPI endpoints."""
+"""Tests for faces_review_server FastAPI endpoints.
+
+``build_app`` and ``run_server`` only need fastapi/uvicorn, both of which are
+mocked or imported directly so the success bodies run even when the heavier
+test client stack (httpx) is unavailable in CI. The route-level integration
+tests use Starlette's TestClient and are skipped when httpx is missing.
+"""
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest.mock
+from types import ModuleType
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 pytest.importorskip("fastapi")
-pytest.importorskip("httpx")
-
-from fastapi.testclient import TestClient
 
 from pyimgtag.faces_review_server import build_app, run_server
 from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
+
+_HAS_HTTPX = importlib.util.find_spec("httpx") is not None
 
 
 @pytest.fixture()
@@ -24,12 +32,85 @@ def db(tmp_path):
     d.close()
 
 
+class TestBuildApp:
+    """build_app body runs with the real (installed) fastapi."""
+
+    def test_returns_app_with_routes(self, db):
+        app = build_app(db)
+        # FastAPI exposes .routes; our faces router must have contributed paths.
+        paths = {getattr(r, "path", None) for r in app.routes}
+        assert "/api/persons" in paths
+        assert app.title == "pyimgtag Faces"
+
+
+class TestRunServer:
+    """run_server should build the app and hand it to uvicorn.run without
+    actually binding a socket."""
+
+    def test_invokes_uvicorn_run(self, db, capsys):
+        fake_uvicorn = ModuleType("uvicorn")
+        fake_uvicorn.run = MagicMock()
+        with patch.dict(sys.modules, {"uvicorn": fake_uvicorn}):
+            run_server(db, host="127.0.0.1", port=8766)
+
+        fake_uvicorn.run.assert_called_once()
+        # The app passed to uvicorn.run is the FastAPI instance.
+        passed_app = fake_uvicorn.run.call_args[0][0]
+        assert passed_app.title == "pyimgtag Faces"
+        # uvicorn.run receives the host/port kwargs.
+        assert fake_uvicorn.run.call_args.kwargs["host"] == "127.0.0.1"
+        assert fake_uvicorn.run.call_args.kwargs["port"] == 8766
+        # The startup banner is printed before the server blocks.
+        assert "Face review UI: http://127.0.0.1:8766/" in capsys.readouterr().out
+
+
+class TestFacesReviewServerMissingDeps:
+    """Regression tests for issue #97: error messages should point at [review]."""
+
+    def test_build_app_missing_fastapi(self, db):
+        """build_app raises ImportError pointing at [review] when fastapi absent."""
+        with unittest.mock.patch.dict(
+            sys.modules,
+            {"fastapi": None, "fastapi.responses": None, "pydantic": None},
+        ):
+            with pytest.raises(ImportError) as exc_info:
+                build_app(db)
+
+            msg = str(exc_info.value)
+            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
+            assert "[dev]" not in msg, (
+                f"Error message should not mention [dev] (issue #97), got: {msg}"
+            )
+            assert "fastapi is required" in msg, f"Error message should mention fastapi, got: {msg}"
+
+    def test_run_server_missing_uvicorn(self, db):
+        """run_server raises ImportError pointing at [review] when uvicorn absent."""
+        with unittest.mock.patch.dict(sys.modules, {"uvicorn": None}):
+            with pytest.raises(ImportError) as exc_info:
+                run_server(db, host="127.0.0.1", port=0)
+
+            msg = str(exc_info.value)
+            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
+            assert "[dev]" not in msg, (
+                f"Error message should not mention [dev] (issue #97), got: {msg}"
+            )
+            assert "uvicorn is required" in msg, f"Error message should mention uvicorn, got: {msg}"
+
+
+# ── Route-level integration tests (require httpx for the test client) ──────────
+
+httpx_required = pytest.mark.skipif(not _HAS_HTTPX, reason="httpx not installed")
+
+
 @pytest.fixture()
 def client(db):
+    from fastapi.testclient import TestClient
+
     app = build_app(db)
     return TestClient(app)
 
 
+@httpx_required
 class TestFacesReviewServerPersons:
     def test_get_persons_empty(self, client):
         resp = client.get("/api/persons")
@@ -58,6 +139,7 @@ class TestFacesReviewServerPersons:
         assert resp.json()[0]["face_count"] == 1
 
 
+@httpx_required
 class TestFacesReviewServerFaces:
     def test_get_faces_for_person(self, client, db):
         pid = db.create_person(label="Carol")
@@ -91,6 +173,7 @@ class TestFacesReviewServerFaces:
         assert any(f["id"] == fid for f in unassigned)
 
 
+@httpx_required
 class TestFacesReviewServerMerge:
     def test_merge_persons(self, client, db):
         p1 = db.create_person(label="Eve")
@@ -128,6 +211,7 @@ class TestFacesReviewServerMerge:
         assert p.label == "Grace H."
 
 
+@httpx_required
 class TestFacesReviewServerHTML:
     def test_root_returns_html(self, client):
         resp = client.get("/")
@@ -136,6 +220,7 @@ class TestFacesReviewServerHTML:
         assert b"faces" in resp.content.lower()
 
 
+@httpx_required
 class TestFacesDocsDisabled:
     """Regression tests for issue #98.B — faces UI must not expose API docs."""
 
@@ -152,6 +237,7 @@ class TestFacesDocsDisabled:
         assert resp.status_code == 404
 
 
+@httpx_required
 class TestFacesUiXss:
     """Regression test for issue #104: stored XSS in faces review UI action buttons."""
 
@@ -162,6 +248,8 @@ class TestFacesUiXss:
         attribute.  The fix builds card DOM via createElement/textContent/addEventListener
         so no user data is ever placed in an HTML attribute at render time.
         """
+        from fastapi.testclient import TestClient
+
         payload = "x',alert(document.cookie),'y"
         pid = db.create_person(label="placeholder", source="test")
         db.update_person_label(pid, payload)
@@ -181,48 +269,3 @@ class TestFacesUiXss:
         assert "alert(document.cookie)" not in body, (
             "alert(document.cookie) found in HTML — attacker payload is inlined into the page"
         )
-
-
-class TestFacesReviewServerMissingDeps:
-    """Regression tests for issue #97: error messages should point at [review]."""
-
-    def test_build_app_missing_fastapi(self, db):
-        """
-        Dynamically test that build_app raises ImportError pointing at [review]
-        when fastapi is not available.
-        """
-        # Mock sys.modules so import fastapi raises ImportError
-        with unittest.mock.patch.dict(
-            sys.modules,
-            {"fastapi": None, "fastapi.responses": None, "pydantic": None},
-        ):
-            with pytest.raises(ImportError) as exc_info:
-                build_app(db)
-
-            msg = str(exc_info.value)
-            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
-            assert "[dev]" not in msg, (
-                f"Error message should not mention [dev] (issue #97), got: {msg}"
-            )
-            assert "fastapi is required" in msg, f"Error message should mention fastapi, got: {msg}"
-
-    def test_run_server_missing_uvicorn(self, db):
-        """
-        Dynamically test that run_server raises ImportError pointing at [review]
-        when uvicorn is not available.
-
-        Note: uvicorn branch is structurally identical to fastapi and would
-        require a harness to avoid starting the real server, so we only test
-        the import failure path here.
-        """
-        # Mock sys.modules so import uvicorn raises ImportError
-        with unittest.mock.patch.dict(sys.modules, {"uvicorn": None}):
-            with pytest.raises(ImportError) as exc_info:
-                run_server(db, host="127.0.0.1", port=0)
-
-            msg = str(exc_info.value)
-            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
-            assert "[dev]" not in msg, (
-                f"Error message should not mention [dev] (issue #97), got: {msg}"
-            )
-            assert "uvicorn is required" in msg, f"Error message should mention uvicorn, got: {msg}"

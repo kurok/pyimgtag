@@ -126,6 +126,16 @@ class TestCheckExiftool:
         assert "brew install" not in msg  # no macOS-only hint
 
     @patch("pyimgtag.preflight.subprocess.run")
+    def test_subprocess_error_returns_fail(self, mock_run: MagicMock) -> None:
+        # A timeout / OSError from the subprocess layer (distinct from
+        # FileNotFoundError) must be caught and reported, not raised.
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="exiftool", timeout=5)
+
+        ok, msg = check_exiftool()
+        assert ok is False
+        assert "exiftool check failed" in msg
+
+    @patch("pyimgtag.preflight.subprocess.run")
     def test_present_but_broken_returns_fail(self, mock_run: MagicMock) -> None:
         # exiftool exists but '-ver' exits nonzero (broken install / lib error);
         # the gate must not green-light it with a blank version.
@@ -164,6 +174,16 @@ class TestCheckPhotosLibrary:
         assert ok is False
         assert "not found" in msg
 
+    def test_permission_error_on_originals_returns_fail(self, tmp_path: Path) -> None:
+        # rglob over a TCC-protected originals/ raises PermissionError;
+        # the check must degrade to a failure message, not propagate.
+        originals = tmp_path / "originals"
+        originals.mkdir()
+        with patch("pyimgtag.preflight.Path.rglob", side_effect=PermissionError("denied")):
+            ok, msg = check_photos_library(str(tmp_path))
+        assert ok is False
+        assert "Cannot read Photos library originals" in msg
+
 
 class TestCheckDirectory:
     def test_valid_dir(self, tmp_path: Path) -> None:
@@ -186,6 +206,25 @@ class TestCheckDirectory:
             ok, msg = check_directory(str(subdir))
         assert ok is False
         assert "Cannot read directory" in msg
+
+    def test_path_exists_but_is_a_file_returns_fail(self, tmp_path: Path) -> None:
+        # A path that exists but is a regular file must be rejected with a
+        # "Not a directory" message, not treated as scannable.
+        f = tmp_path / "afile.txt"
+        f.write_text("hi")
+        ok, msg = check_directory(str(f))
+        assert ok is False
+        assert "Not a directory" in msg
+
+    def test_unreadable_directory_returns_fail(self, tmp_path: Path) -> None:
+        # Directory exists and is a dir, but os.access reports it as
+        # unreadable (e.g. mode 000) — the check must fail before scanning.
+        subdir = tmp_path / "noperm"
+        subdir.mkdir()
+        with patch("pyimgtag.preflight.os.access", return_value=False):
+            ok, msg = check_directory(str(subdir))
+        assert ok is False
+        assert "not readable" in msg
 
 
 class TestRunPreflight:

@@ -28,7 +28,7 @@ from pyimgtag.raw_converter import (
 with contextlib.suppress(ImportError):
     import pillow_heif
 
-    pillow_heif.register_heif_opener()
+    pillow_heif.register_heif_opener()  # pragma: no cover - only runs with the [heic] extra
 
 _MODEL_TEMPERATURE: float = 0.3
 # Bumped from 512: smaller models hitting the cap mid-JSON were the most

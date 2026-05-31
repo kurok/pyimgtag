@@ -121,6 +121,32 @@ class TestFetchErrors:
         geo.close()  # must not raise
 
 
+class TestInit:
+    def test_default_cache_dir_uses_home(self, tmp_path):
+        # With no cache_dir, the geocoder falls back to ~/.cache/pyimgtag.
+        # Patch Path.home so the test never touches the real home directory.
+        with patch("pyimgtag.geocoder.Path.home", return_value=tmp_path):
+            geo = ReverseGeocoder()
+        expected = tmp_path / ".cache" / "pyimgtag" / "geocode_cache.json"
+        assert geo._cache._path == expected
+        geo.close()
+
+
+class TestRateLimit:
+    def test_rate_limit_sleeps_when_called_too_soon(self, tmp_path):
+        import time as _time
+
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        # Pretend the last request was just now so the next call must wait.
+        geo._last_ts = _time.monotonic()
+        with patch("pyimgtag.geocoder.time.sleep") as mock_sleep:
+            geo._rate_limit()
+        mock_sleep.assert_called_once()
+        # The requested sleep is a positive fraction of the min interval.
+        assert mock_sleep.call_args[0][0] > 0
+        geo.close()
+
+
 class TestCacheBehaviour:
     def test_cache_hit_skips_network(self, tmp_path):
         """Second resolve with same coords must not call the network."""

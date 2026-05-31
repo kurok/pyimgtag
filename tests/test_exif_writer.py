@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from pyimgtag.exif_writer import (
     RAW_SIDECAR_ONLY_EXTENSIONS,
     SUPPORTED_DIRECT_WRITE_EXTENSIONS,
+    _read_date_fields,
     diff_metadata,
     is_exiftool_available,
     read_existing_metadata,
@@ -453,6 +454,136 @@ class TestDiffMetadata:
             result = diff_metadata(str(src), description="test")
         assert len(result) == 1
         assert "unavailable" in result[0]
+
+
+class TestReadDateFields:
+    """Direct tests for _read_date_fields error/empty paths (lines 72, 75-76)."""
+
+    def test_empty_data_returns_none(self, tmp_path):
+        """exiftool returning an empty JSON array yields None (line 72)."""
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        mock = _make_completed_process(0, stdout="[]")
+        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+            assert _read_date_fields(str(src)) is None
+
+    def test_returns_only_date_tags_with_values(self, tmp_path):
+        """Only known date tags with truthy values are returned."""
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        payload = json.dumps(
+            [
+                {
+                    "SourceFile": "photo.jpg",  # not a date tag → dropped
+                    "DateTimeOriginal": "2026:04:01 10:30:00",
+                    "CreateDate": "",  # empty → dropped
+                }
+            ]
+        )
+        mock = _make_completed_process(0, stdout=payload)
+        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+            result = _read_date_fields(str(src))
+        assert result == {"DateTimeOriginal": "2026:04:01 10:30:00"}
+
+    def test_timeout_returns_none(self, tmp_path):
+        """subprocess.TimeoutExpired is swallowed and yields None (lines 75-76)."""
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch(
+            "pyimgtag.exif_writer.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="exiftool", timeout=10),
+        ):
+            assert _read_date_fields(str(src)) is None
+
+    def test_json_decode_error_returns_none(self, tmp_path):
+        """Invalid JSON is swallowed and yields None (lines 75-76)."""
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        mock = _make_completed_process(0, stdout="not json {{{")
+        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+            assert _read_date_fields(str(src)) is None
+
+    def test_oserror_returns_none(self, tmp_path):
+        """OSError launching exiftool is swallowed and yields None (lines 75-76)."""
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch(
+            "pyimgtag.exif_writer.subprocess.run",
+            side_effect=OSError("exiftool missing"),
+        ):
+            assert _read_date_fields(str(src)) is None
+
+
+class TestWriteXmpSidecarErrors:
+    """Extra error paths for write_xmp_sidecar (lines 237-238)."""
+
+    def _patch_run(self, *side_effects):
+        return patch(
+            "pyimgtag.exif_writer.subprocess.run",
+            side_effect=list(side_effects),
+        )
+
+    def test_oserror_returns_error(self, tmp_path):
+        """OSError launching exiftool yields a 'Failed to launch' message."""
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(OSError("No such file")):
+                result = write_xmp_sidecar(str(src), description="desc")
+        assert result is not None
+        assert "Failed to launch exiftool" in result
+        assert "No such file" in result
+
+    def test_nonzero_exit_no_stderr(self, tmp_path):
+        """Non-zero exit without stderr reports the exit code."""
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(_make_completed_process(2, stderr="")):
+                result = write_xmp_sidecar(str(src), description="desc")
+        assert result is not None
+        assert "2" in result
+
+
+class TestReadExistingMetadataErrors:
+    """Error paths for read_existing_metadata (lines 291-292)."""
+
+    def test_timeout_returns_defaults(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch(
+            "pyimgtag.exif_writer.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="exiftool", timeout=10),
+        ):
+            result = read_existing_metadata(str(src))
+        assert result == {"description": None, "keywords": []}
+
+    def test_json_decode_error_returns_defaults(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        mock = _make_completed_process(0, stdout="garbage {{{")
+        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+            result = read_existing_metadata(str(src))
+        assert result == {"description": None, "keywords": []}
+
+    def test_oserror_returns_defaults(self, tmp_path):
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        with patch(
+            "pyimgtag.exif_writer.subprocess.run",
+            side_effect=OSError("exiftool missing"),
+        ):
+            result = read_existing_metadata(str(src))
+        assert result == {"description": None, "keywords": []}
+
+    def test_empty_data_list_returns_defaults(self, tmp_path):
+        """exiftool returning '[]' (after passing the stdout check) yields defaults."""
+        src = tmp_path / "photo.jpg"
+        src.touch()
+        mock = _make_completed_process(0, stdout="[]")
+        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+            result = read_existing_metadata(str(src))
+        assert result == {"description": None, "keywords": []}
 
 
 class TestExtensionConstants:

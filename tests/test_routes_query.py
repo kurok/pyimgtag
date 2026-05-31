@@ -129,3 +129,40 @@ def test_query_images_respects_limit(client_factory) -> None:
     r = client.get("/api/images?limit=1")
     assert r.status_code == 200
     assert len(r.json()) == 1
+
+
+def test_query_images_has_text_true_and_false(client_factory) -> None:
+    """has_text=true/false drive the bool-coercion branches (lines 407/409)."""
+    client = client_factory()
+    r_true = client.get("/api/images?has_text=true")
+    assert r_true.status_code == 200
+    r_false = client.get("/api/images?has_text=false")
+    assert r_false.status_code == 200
+    # "any" (unset) leaves has_text None; explicit values must not error.
+    r_any = client.get("/api/images?has_text=")
+    assert r_any.status_code == 200
+
+
+def test_query_images_judged_true_and_false(client_factory) -> None:
+    """judged=true/false drive the bool-coercion branches (lines 412/414)."""
+    client = client_factory()
+    r_true = client.get("/api/images?judged=true")
+    assert r_true.status_code == 200
+    # Nothing in _seeded_db is judged, so judged=true returns no rows.
+    assert r_true.json() == []
+    r_false = client.get("/api/images?judged=false")
+    assert r_false.status_code == 200
+    assert len(r_false.json()) == 2
+
+
+def test_query_router_missing_fastapi_raises_importerror(tmp_path) -> None:
+    """The fastapi import guard (lines 379-380) raises a helpful ImportError."""
+    from unittest.mock import patch
+
+    from pyimgtag.progress_db import ProgressDB
+    from pyimgtag.webapp.routes_query import build_query_router
+
+    db = ProgressDB(db_path=tmp_path / "guard.db")
+    with patch.dict("sys.modules", {"fastapi": None}):
+        with pytest.raises(ImportError, match="fastapi is required"):
+            build_query_router(db)

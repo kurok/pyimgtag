@@ -564,6 +564,19 @@ class TestWriteViaPhotoscript:
         # description should not have been reassigned
         assert mock_photo.description == "original"
 
+    def test_uuid_lookup_failure_returns_not_found_error(self):
+        """A UUID-format filename whose photo() lookup raises must return the
+        'No Photos item found' error (covers the inner try/except branch)."""
+        mock_lib = MagicMock()
+        mock_lib.photo.side_effect = Exception("uuid not in library")
+
+        with patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}):
+            result = _write_via_photoscript(_UUID_FILE, ["tag"], None)
+
+        assert result is not None
+        assert _UUID_FILE in result
+        mock_lib.photo.assert_called_once_with(uuid=_UUID_STEM)
+
 
 @patch("pyimgtag.applescript_writer._IS_MACOS", True)
 class TestWriteToPhotosBackendSelection:
@@ -711,6 +724,23 @@ class TestReadKeywordsFromPhotos:
         ):
             result = read_keywords_from_photos("/Library/Photos/img.jpg")
         assert result is None
+
+    def test_returns_none_when_photoscript_uuid_lookup_raises(self):
+        """A UUID-format filename whose photo() lookup raises must return None
+        (covers the inner try/except in _read_via_photoscript)."""
+        mock_lib = MagicMock()
+        mock_lib.photo.side_effect = Exception("uuid not in library")
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer._use_photoscript", new=lambda: True),
+            patch.dict("sys.modules", {"photoscript": _mock_photoscript(mock_lib)}),
+            patch("pyimgtag.applescript_writer.time.sleep"),  # don't really sleep on retry
+        ):
+            result = read_keywords_from_photos(f"/Library/Photos/{_UUID_FILE}")
+        assert result is None
+        # The cold-start retry calls the reader twice; both must use the UUID stem.
+        mock_lib.photo.assert_called_with(uuid=_UUID_STEM)
 
     def test_returns_none_when_photoscript_library_raises(self):
         mock_ps = MagicMock()
@@ -1123,3 +1153,365 @@ class TestDeleteFromPhotos:
         assert "spotlight theItem" in script
         assert "delete theItem" not in script
         assert 'tell application "System Events"' in script
+
+
+# ---------------------------------------------------------------------------
+# _build_reveal_applescript
+# ---------------------------------------------------------------------------
+
+
+class TestBuildRevealApplescript:
+    def test_uuid_stem_uses_media_item_id(self):
+        from pyimgtag.applescript_writer import _build_reveal_applescript
+
+        script = _build_reveal_applescript(_UUID_FILE)
+        assert f'media item id "{_UUID_STEM}"' in script
+
+    def test_uuid_stem_has_filename_fallback(self):
+        from pyimgtag.applescript_writer import _build_reveal_applescript
+
+        script = _build_reveal_applescript(_UUID_FILE)
+        assert "on error" in script
+        assert f'filename = "{_UUID_FILE}"' in script
+
+    def test_non_uuid_stem_skips_media_item_id(self):
+        from pyimgtag.applescript_writer import _build_reveal_applescript
+
+        script = _build_reveal_applescript("IMG_1234.jpg")
+        assert "media item id" not in script
+        assert 'filename = "IMG_1234.jpg"' in script
+
+    def test_script_activates_and_spotlights(self):
+        from pyimgtag.applescript_writer import _build_reveal_applescript
+
+        script = _build_reveal_applescript("vacation.jpg")
+        assert 'tell application "Photos"' in script
+        assert "activate" in script
+        assert "spotlight theItem" in script
+        assert "end tell" in script
+
+    def test_filename_with_quotes_escaped(self):
+        from pyimgtag.applescript_writer import _build_reveal_applescript
+
+        script = _build_reveal_applescript('say "hi".jpg')
+        assert '\\"' in script
+
+
+# ---------------------------------------------------------------------------
+# reveal_in_photos
+# ---------------------------------------------------------------------------
+
+
+class TestRevealInPhotos:
+    def test_returns_error_on_non_macos(self):
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        with patch("pyimgtag.applescript_writer._IS_MACOS", False):
+            result = reveal_in_photos("/path/photo.jpg")
+        assert result is not None
+        assert "macOS" in result
+
+    def test_returns_error_when_osascript_missing(self):
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=False),
+        ):
+            result = reveal_in_photos("/path/photo.jpg")
+        assert result is not None
+        assert "osascript" in result.lower()
+
+    def test_success_returns_none(self):
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(0),
+            ),
+        ):
+            assert reveal_in_photos("/path/to/photo.jpg") is None
+
+    def test_failure_nonzero_exit_with_stderr(self):
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(1, stderr="Photo not found."),
+            ),
+        ):
+            result = reveal_in_photos("/path/to/photo.jpg")
+        assert result is not None
+        assert "Photo not found." in result
+
+    def test_failure_nonzero_exit_no_stderr(self):
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(2, stderr=""),
+            ),
+        ):
+            result = reveal_in_photos("/path/to/photo.jpg")
+        assert result is not None
+        assert "2" in result
+
+    def test_timeout_returns_error(self):
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=15),
+            ),
+        ):
+            result = reveal_in_photos("/path/to/photo.jpg")
+        assert result is not None
+        assert "timed out" in result.lower()
+
+    def test_oserror_returns_error(self):
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=OSError("launch failed"),
+            ),
+        ):
+            result = reveal_in_photos("/path/to/photo.jpg")
+        assert result is not None
+        assert "launch failed" in result
+
+    def test_uses_basename_not_full_path(self):
+        from pyimgtag.applescript_writer import reveal_in_photos
+
+        captured: list[str] = []
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.append(cmd[2])
+            return _make_completed_process(0)
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run),
+        ):
+            reveal_in_photos("/some/deep/path/vacation.jpg")
+
+        assert captured, "subprocess.run was not called"
+        script = captured[0]
+        assert "/some/deep/path/" not in script
+        assert 'filename = "vacation.jpg"' in script
+        assert "spotlight theItem" in script
+
+
+# ---------------------------------------------------------------------------
+# _build_membership_applescript
+# ---------------------------------------------------------------------------
+
+
+class TestBuildMembershipApplescript:
+    def test_returns_id_tab_filename_dump(self):
+        from pyimgtag.applescript_writer import _build_membership_applescript
+
+        script = _build_membership_applescript()
+        assert 'tell application "Photos"' in script
+        assert "get media items" in script
+        # id and filename joined by a tab (ASCII 9), lines by lf (ASCII 10)
+        assert "ASCII character 9" in script
+        assert "ASCII character 10" in script
+        assert "id of p" in script
+        assert "filename of p" in script
+        # per-item try block keeps a single bad photo from killing traversal
+        assert "try" in script
+        assert "return out" in script
+
+
+# ---------------------------------------------------------------------------
+# fetch_photos_membership
+# ---------------------------------------------------------------------------
+
+
+class TestFetchPhotosMembership:
+    def test_returns_platform_unsupported_on_non_macos(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with patch("pyimgtag.applescript_writer._IS_MACOS", False):
+            membership, error = fetch_photos_membership()
+        assert membership == set()
+        assert error == "platform_unsupported"
+
+    def test_returns_osascript_missing_when_unavailable(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=False),
+        ):
+            membership, error = fetch_photos_membership()
+        assert membership == set()
+        assert error == "osascript_missing"
+
+    def test_success_parses_id_and_filename(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        stdout = (
+            f"{_UUID_STEM}\tvacation.jpg\n"
+            "ABCD-1234\tIMG_0001.heic\n"
+            "\n"  # blank line dropped defensively
+            "no-tab-line\n"  # no tab → dropped
+        )
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(0, stdout=stdout),
+            ),
+        ):
+            membership, error = fetch_photos_membership()
+        assert error is None
+        assert _UUID_STEM in membership
+        assert "vacation.jpg" in membership
+        assert "ABCD-1234" in membership
+        assert "IMG_0001.heic" in membership
+        assert "no-tab-line" not in membership
+
+    def test_success_with_empty_stdout(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(0, stdout=""),
+            ),
+        ):
+            membership, error = fetch_photos_membership()
+        assert error is None
+        assert membership == set()
+
+    def test_success_with_empty_id_field(self):
+        """A line where the id portion is blank still keeps the filename."""
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(0, stdout="\tonly_filename.jpg\n"),
+            ),
+        ):
+            membership, error = fetch_photos_membership()
+        assert error is None
+        assert membership == {"only_filename.jpg"}
+
+    def test_timeout_returns_timeout_category(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=1800),
+            ),
+        ):
+            membership, error = fetch_photos_membership()
+        assert membership == set()
+        assert error == "timeout"
+
+    def test_oserror_returns_osascript_missing(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                side_effect=OSError("no such file"),
+            ),
+        ):
+            membership, error = fetch_photos_membership()
+        assert membership == set()
+        assert error == "osascript_missing"
+
+    def test_parse_error_category_on_2741(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(
+                    1, stderr="execution error: Photos got an error (-2741)"
+                ),
+            ),
+        ):
+            membership, error = fetch_photos_membership()
+        assert membership == set()
+        assert error == "parse_error"
+
+    def test_parse_error_category_on_syntax_error_text(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(1, stderr="A syntax error occurred"),
+            ),
+        ):
+            membership, error = fetch_photos_membership()
+        assert membership == set()
+        assert error == "parse_error"
+
+    def test_applescript_failed_category_on_other_error(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch(
+                "pyimgtag.applescript_writer.subprocess.run",
+                return_value=_make_completed_process(1, stderr="Photos is not running"),
+            ),
+        ):
+            membership, error = fetch_photos_membership()
+        assert membership == set()
+        assert error == "applescript_failed"
+
+    def test_custom_timeout_passed_to_subprocess(self):
+        from pyimgtag.applescript_writer import fetch_photos_membership
+
+        captured: dict = {}
+
+        def fake_run(cmd: list[str], **kwargs):  # noqa: ANN001
+            captured.update(kwargs)
+            return _make_completed_process(0, stdout="")
+
+        with (
+            patch("pyimgtag.applescript_writer._IS_MACOS", True),
+            patch("pyimgtag.applescript_writer.is_applescript_available", return_value=True),
+            patch("pyimgtag.applescript_writer.subprocess.run", side_effect=fake_run),
+        ):
+            fetch_photos_membership(timeout=60)
+
+        assert captured.get("timeout") == 60

@@ -12,7 +12,7 @@ from PIL import Image
 with contextlib.suppress(ImportError):
     import pillow_heif
 
-    pillow_heif.register_heif_opener()
+    pillow_heif.register_heif_opener()  # pragma: no cover - only runs with the [heic] extra
 
 
 def compute_phash(image_path: str | Path) -> str | None:

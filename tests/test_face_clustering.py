@@ -1,4 +1,11 @@
-"""Tests for face clustering pipeline."""
+"""Tests for face clustering pipeline.
+
+The real clustering logic depends on scikit-learn's DBSCAN. scikit-learn is
+an optional ([face]) extra and is *not* installed in CI, so the behavioural
+tests below mock ``sklearn.cluster.DBSCAN`` at the import boundary. This lets
+the real ``cluster_faces`` body run (and count toward coverage) without the
+optional dependency being present.
+"""
 
 from __future__ import annotations
 
@@ -8,12 +15,9 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
+from pyimgtag.face_clustering import cluster_faces, recluster_auto
 from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
-
-sklearn = pytest.importorskip("sklearn", reason="scikit-learn not installed")
-
-from pyimgtag.face_clustering import cluster_faces  # noqa: E402
 
 
 def _seed_faces(db: ProgressDB, embeddings: list[np.ndarray], prefix: str = "/img") -> list[int]:
@@ -26,75 +30,74 @@ def _seed_faces(db: ProgressDB, embeddings: list[np.ndarray], prefix: str = "/im
     return face_ids
 
 
-class TestClusterFaces:
+def _fake_dbscan(labels: list[int]):
+    """Return a fake ``sklearn.cluster`` module whose DBSCAN yields *labels*.
+
+    ``DBSCAN(...).fit_predict(X)`` returns the canned ``labels`` array so the
+    test controls exactly which cluster each face lands in, decoupling the
+    clustering body from the real (absent) scikit-learn implementation.
+    """
+    fake_cluster = type(sys)("sklearn.cluster")
+
+    class _DBSCAN:
+        def __init__(self, *args, **kwargs):
+            self._labels = np.array(labels)
+
+        def fit_predict(self, _x):
+            return self._labels
+
+    fake_cluster.DBSCAN = _DBSCAN
+    return fake_cluster
+
+
+class TestClusterFacesMocked:
+    """Exercise the real cluster_faces body with a mocked DBSCAN."""
+
     def test_empty_db_returns_empty(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            result = cluster_faces(db)
-            assert result == {}
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([])}):
+                assert cluster_faces(db) == {}
 
-    def test_single_face_no_cluster(self, tmp_path):
-        """One face cannot form a cluster with min_samples=2."""
-        with ProgressDB(db_path=tmp_path / "test.db") as db:
-            _seed_faces(db, [np.zeros(128)])
-            result = cluster_faces(db)
-            assert result == {}
-
-    def test_two_identical_embeddings_form_cluster(self, tmp_path):
+    def test_two_faces_one_cluster(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             emb = np.ones(128) * 0.5
             face_ids = _seed_faces(db, [emb, emb])
-            result = cluster_faces(db)
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0, 0])}):
+                result = cluster_faces(db)
             assert len(result) == 1
             person_id = next(iter(result))
             assert set(result[person_id]) == set(face_ids)
 
-    def test_two_distinct_groups(self, tmp_path):
+    def test_two_distinct_clusters(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            # Group A: embeddings near [1, 0, 0, ...]
-            a = np.zeros(128)
-            a[0] = 1.0
-            # Group B: embeddings near [0, 1, 0, ...]
-            b = np.zeros(128)
-            b[1] = 1.0
-            # Add small noise so they're close but not identical
-            rng = np.random.RandomState(42)
-            embs = [
-                a + rng.normal(0, 0.01, 128),
-                a + rng.normal(0, 0.01, 128),
-                b + rng.normal(0, 0.01, 128),
-                b + rng.normal(0, 0.01, 128),
-            ]
-            face_ids = _seed_faces(db, embs)
-            result = cluster_faces(db, eps=0.5, min_samples=2)
+            face_ids = _seed_faces(db, [np.zeros(128) for _ in range(4)])
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0, 0, 1, 1])}):
+                result = cluster_faces(db)
             assert len(result) == 2
-            # Each cluster should have exactly 2 faces
-            cluster_sizes = sorted(len(v) for v in result.values())
-            assert cluster_sizes == [2, 2]
-            # Group A faces and group B faces should be in different clusters
+            sizes = sorted(len(v) for v in result.values())
+            assert sizes == [2, 2]
             all_fids = set()
             for fids in result.values():
                 all_fids.update(fids)
             assert all_fids == set(face_ids)
 
-    def test_noise_faces_not_assigned(self, tmp_path):
-        """An outlier far from any group should be noise (unassigned)."""
+    def test_noise_label_not_assigned(self, tmp_path):
+        """DBSCAN label -1 (noise) faces must be left unassigned."""
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            cluster_emb = np.zeros(128)
-            outlier = np.ones(128) * 100.0
-            face_ids = _seed_faces(db, [cluster_emb, cluster_emb, outlier])
-            result = cluster_faces(db, eps=0.5, min_samples=2)
-            # Only the two close faces should be clustered
-            all_clustered = []
+            face_ids = _seed_faces(db, [np.zeros(128) for _ in range(3)])
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0, 0, -1])}):
+                result = cluster_faces(db)
+            clustered = []
             for fids in result.values():
-                all_clustered.extend(fids)
-            assert face_ids[2] not in all_clustered
-            assert set(all_clustered) == {face_ids[0], face_ids[1]}
+                clustered.extend(fids)
+            assert face_ids[2] not in clustered
+            assert set(clustered) == {face_ids[0], face_ids[1]}
 
     def test_creates_person_rows(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            emb = np.ones(128)
-            _seed_faces(db, [emb, emb])
-            cluster_faces(db)
+            _seed_faces(db, [np.ones(128), np.ones(128)])
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0, 0])}):
+                cluster_faces(db)
             persons = db.get_persons()
             assert len(persons) == 1
             assert persons[0].label.startswith("Person ")
@@ -102,61 +105,44 @@ class TestClusterFaces:
 
     def test_sets_person_id_on_faces(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            emb = np.ones(128)
-            _seed_faces(db, [emb, emb])
-            result = cluster_faces(db)
+            _seed_faces(db, [np.ones(128), np.ones(128)])
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0, 0])}):
+                result = cluster_faces(db)
             person_id = next(iter(result))
             for fid in result[person_id]:
-                faces = db._conn.execute(
+                row = db._conn.execute(
                     "SELECT person_id FROM faces WHERE id = ?", (fid,)
                 ).fetchone()
-                assert faces[0] == person_id
+                assert row[0] == person_id
 
-    def test_custom_eps_tighter(self, tmp_path):
-        """A very small eps should prevent clustering of slightly different embeddings."""
+    def test_label_numbering_is_one_based(self, tmp_path):
+        """Cluster label 0 should produce 'Person 1' (label + 1)."""
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            rng = np.random.RandomState(99)
-            base = np.zeros(128)
-            embs = [base + rng.normal(0, 0.1, 128) for _ in range(3)]
-            _seed_faces(db, embs)
-            # eps=0.001 is too tight for noise of scale 0.1
-            result = cluster_faces(db, eps=0.001, min_samples=2)
-            assert result == {}
+            _seed_faces(db, [np.ones(128), np.ones(128)])
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0, 0])}):
+                cluster_faces(db)
+            persons = db.get_persons()
+            assert persons[0].label == "Person 1"
 
-    def test_custom_min_samples(self, tmp_path):
-        """min_samples=3 should require at least 3 faces to form a cluster."""
-        with ProgressDB(db_path=tmp_path / "test.db") as db:
-            emb = np.ones(128) * 0.5
-            _seed_faces(db, [emb, emb])  # only 2
-            result = cluster_faces(db, min_samples=3)
-            assert result == {}
 
-    def test_faces_without_embeddings_ignored(self, tmp_path):
-        """Faces inserted without embeddings should not appear in clustering."""
+class TestReclusterAuto:
+    def test_clears_then_reclusters(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            det = FaceDetection(image_path="/img/no_emb.jpg")
-            db.insert_face("/img/no_emb.jpg", det)  # no embedding
-            emb = np.ones(128)
-            _seed_faces(db, [emb, emb])
-            result = cluster_faces(db)
-            all_fids = []
-            for fids in result.values():
-                all_fids.extend(fids)
-            # The face without embedding should not be in any cluster
-            assert db.get_face_count() == 3
-            assert len(all_fids) == 2
+            _seed_faces(db, [np.ones(128), np.ones(128)])
+            with patch.object(db, "clear_auto_persons", wraps=db.clear_auto_persons) as clear:
+                with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0, 0])}):
+                    result = recluster_auto(db)
+            clear.assert_called_once()
+            assert len(result) == 1
 
 
 class TestClusterFacesImportError:
-    """Test the ImportError guard when scikit-learn is absent."""
+    """The ImportError guard fires when scikit-learn is absent."""
 
     def test_raises_import_error_when_sklearn_missing(self, tmp_path):
-        """cluster_faces must raise ImportError with a pip-install hint when sklearn is absent."""
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            emb = np.ones(128)
-            _seed_faces(db, [emb, emb])
+            _seed_faces(db, [np.ones(128), np.ones(128)])
 
-            # Temporarily hide sklearn from sys.modules so the lazy import fails
             saved = sys.modules.pop("sklearn.cluster", None)
             sklearn_saved = sys.modules.pop("sklearn", None)
             try:

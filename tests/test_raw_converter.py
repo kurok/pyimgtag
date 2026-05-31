@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import shutil
 import sys
 from pathlib import Path
@@ -268,6 +269,100 @@ class TestConvertRawWithRawpy:
                 result = convert_raw_with_rawpy(fake_cr2, output_dir=tmp_path)
         assert result.exists()
         assert result.stat().st_size > 0
+
+    def test_uses_temp_dir_when_output_dir_none(self, tmp_path):
+        """output_dir=None must create an owned temp dir (lines 153-154)."""
+        import numpy as np
+
+        fake_cr2 = tmp_path / "IMG_X.cr2"
+        fake_cr2.write_bytes(b"\x00" * 16)
+        mock_rgb_array = np.zeros((8, 8, 3), dtype=np.uint8)
+        mock_raw = MagicMock()
+        mock_raw.__enter__ = MagicMock(return_value=mock_raw)
+        mock_raw.__exit__ = MagicMock(return_value=False)
+        mock_raw.postprocess.return_value = mock_rgb_array
+        mock_rawpy = MagicMock()
+        mock_rawpy.imread.return_value = mock_raw
+        with patch("pyimgtag.raw_converter.rawpy_available", return_value=True):
+            with patch.dict(sys.modules, {"rawpy": mock_rawpy}):
+                result = convert_raw_with_rawpy(fake_cr2, output_dir=None)
+        try:
+            assert result.exists()
+            assert "pyimgtag_raw_" in str(result.parent)
+            assert result.stem == "IMG_X_raw"
+        finally:
+            shutil.rmtree(result.parent, ignore_errors=True)
+
+    def test_postprocess_failure_cleans_up_owned_temp_dir(self, tmp_path):
+        """A failure during conversion must rmtree the owned temp dir (170-173)."""
+        fake_cr2 = tmp_path / "photo.cr2"
+        fake_cr2.write_bytes(b"\x00" * 16)
+        mock_rawpy = MagicMock()
+        mock_rawpy.imread.side_effect = RuntimeError("decode boom")
+
+        cleaned: list[str] = []
+
+        def fake_rmtree(path, **kwargs):
+            cleaned.append(str(path))
+
+        with (
+            patch("pyimgtag.raw_converter.rawpy_available", return_value=True),
+            patch.dict(sys.modules, {"rawpy": mock_rawpy}),
+            patch("pyimgtag.raw_converter.shutil.rmtree", side_effect=fake_rmtree),
+            patch(
+                "pyimgtag.raw_converter.tempfile.mkdtemp",
+                return_value=str(tmp_path / "pyimgtag_raw_owned"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="decode boom"):
+                convert_raw_with_rawpy(fake_cr2, output_dir=None)
+
+        assert any("pyimgtag_raw_owned" in p for p in cleaned)
+
+    def test_failure_with_explicit_output_dir_does_not_cleanup(self, tmp_path):
+        """When the caller owns output_dir, a failure must NOT rmtree it."""
+        fake_cr2 = tmp_path / "photo.cr2"
+        fake_cr2.write_bytes(b"\x00" * 16)
+        mock_rawpy = MagicMock()
+        mock_rawpy.imread.side_effect = RuntimeError("decode boom")
+
+        cleaned: list[str] = []
+
+        with (
+            patch("pyimgtag.raw_converter.rawpy_available", return_value=True),
+            patch.dict(sys.modules, {"rawpy": mock_rawpy}),
+            patch(
+                "pyimgtag.raw_converter.shutil.rmtree",
+                side_effect=lambda p, **k: cleaned.append(str(p)),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="decode boom"):
+                convert_raw_with_rawpy(fake_cr2, output_dir=tmp_path)
+
+        assert cleaned == []
+
+
+class TestRawpyImportFallback:
+    """Cover the module-level ``except ImportError: rawpy = None`` fallback."""
+
+    def test_import_without_rawpy_sets_rawpy_none(self):
+        """Re-import raw_converter with rawpy hidden so lines 12-13 execute."""
+        saved_mod = sys.modules.pop("pyimgtag.raw_converter", None)
+        saved_rawpy = sys.modules.get("rawpy")
+        try:
+            with patch.dict(sys.modules, {"rawpy": None}):
+                mod = importlib.import_module("pyimgtag.raw_converter")
+                mod = importlib.reload(mod)
+                assert mod.rawpy is None
+                assert mod.rawpy_available() is False
+        finally:
+            # Restore the real module so other tests see rawpy as installed.
+            sys.modules.pop("pyimgtag.raw_converter", None)
+            if saved_rawpy is not None:
+                sys.modules["rawpy"] = saved_rawpy
+            importlib.import_module("pyimgtag.raw_converter")
+            if saved_mod is not None:
+                sys.modules["pyimgtag.raw_converter"] = saved_mod
 
 
 class TestExtractRawThumbnailErrorPaths:

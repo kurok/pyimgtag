@@ -1331,3 +1331,1276 @@ class TestSkipExisting:
         mock_client.tag_image.assert_not_called()
         mock_exif.assert_not_called()
         mock_kw.assert_not_called()  # no osascript keyword read for skipped photo
+
+
+# ---------------------------------------------------------------------------
+# _request_photos_access_dialog — subprocess body
+# ---------------------------------------------------------------------------
+
+
+class TestRequestPhotosAccessDialogBody:
+    """Exercise the osascript subprocess body on macOS."""
+
+    def test_runs_osascript_on_macos(self) -> None:
+        from pyimgtag.commands.run import _request_photos_access_dialog
+
+        with (
+            patch("pyimgtag.commands.run.get_platform_name", return_value="Darwin"),
+            patch("pyimgtag.commands.run.shutil.which", return_value="/usr/bin/osascript"),
+            patch("pyimgtag.commands.run.subprocess.run") as mock_run,
+        ):
+            _request_photos_access_dialog()
+
+        mock_run.assert_called_once()
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "osascript"
+
+    def test_swallows_oserror(self) -> None:
+        from pyimgtag.commands.run import _request_photos_access_dialog
+
+        with (
+            patch("pyimgtag.commands.run.get_platform_name", return_value="Darwin"),
+            patch("pyimgtag.commands.run.shutil.which", return_value="/usr/bin/osascript"),
+            patch("pyimgtag.commands.run.subprocess.run", side_effect=OSError("boom")),
+        ):
+            # Must not raise
+            _request_photos_access_dialog()
+
+    def test_swallows_timeout(self) -> None:
+        import subprocess
+
+        from pyimgtag.commands.run import _request_photos_access_dialog
+
+        with (
+            patch("pyimgtag.commands.run.get_platform_name", return_value="Darwin"),
+            patch("pyimgtag.commands.run.shutil.which", return_value="/usr/bin/osascript"),
+            patch(
+                "pyimgtag.commands.run.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=120),
+            ),
+        ):
+            _request_photos_access_dialog()
+
+
+# ---------------------------------------------------------------------------
+# _compute_dedup_map
+# ---------------------------------------------------------------------------
+
+
+class TestComputeDedupMap:
+    def test_builds_phash_map_and_skip_set(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import _compute_dedup_map
+
+        f1 = tmp_path / "a.jpg"
+        f2 = tmp_path / "b.jpg"
+        f3 = tmp_path / "c.jpg"
+        for f in (f1, f2, f3):
+            f.write_bytes(b"x")
+
+        def fake_phash(p):
+            # f3 has no hash (unreadable); f1/f2 collide as a duplicate group
+            if str(p).endswith("c.jpg"):
+                return None
+            return "ffff"
+
+        def fake_groups(records, threshold):
+            # records contains f1 and f2 (both "ffff") -> one group
+            return [[str(f1), str(f2)]]
+
+        with (
+            patch("pyimgtag.dedup.compute_phash", side_effect=fake_phash),
+            patch("pyimgtag.dedup.find_duplicate_groups", side_effect=fake_groups),
+        ):
+            phash_map, skipped = _compute_dedup_map([f1, f2, f3], threshold=5)
+
+        assert phash_map == {str(f1): "ffff", str(f2): "ffff"}
+        # The larger of the sorted group (everything past index 0) is skipped.
+        assert skipped == {str(f2)}
+        err = capsys.readouterr().err
+        assert "Computing perceptual hashes" in err
+        assert "duplicate groups" in err
+
+
+# ---------------------------------------------------------------------------
+# cmd_run — warnings, no-files, parser error, ollama-down, cloud backend
+# ---------------------------------------------------------------------------
+
+
+def _base_args(tmp_path: Path) -> MagicMock:
+    args = MagicMock()
+    args.input_dir = str(tmp_path)
+    args.photos_library = None
+    args.extensions = "jpg"
+    args.no_recursive = False
+    args.newest_first = False
+    args.no_cache = True
+    args.dedup = False
+    args.dedup_threshold = 5
+    args.limit = None
+    args.date = None
+    args.date_from = None
+    args.date_to = None
+    args.skip_no_gps = False
+    args.skip_if_tagged = False
+    args.skip_existing = False
+    args.resume_from_db = False
+    args.resume_threaded = False
+    args.write_back = False
+    args.write_back_mode = "merge"
+    args.write_exif = False
+    args.sidecar_only = False
+    args.metadata_format = "auto"
+    args.dry_run = True
+    args.verbose = False
+    args.jsonl_stdout = False
+    args.output_json = None
+    args.output_csv = None
+    args.ollama_url = "http://localhost:11434"
+    args.backend = "ollama"
+    args.model = "test"
+    args.max_dim = 512
+    args.timeout = 5
+    args.cache_dir = None
+    args.db = str(tmp_path / "p.db")
+    return args
+
+
+def _ok_tag():
+    from pyimgtag.models import TagResult
+
+    return TagResult(tags=["x"], summary="s")
+
+
+class TestCmdRunMisc:
+    def test_parser_error_when_no_source(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        args = _base_args(tmp_path)
+        args.input_dir = None
+        args.photos_library = None
+        parser = MagicMock()
+        parser.error.side_effect = SystemExit(2)
+
+        try:
+            cmd_run(args, parser)
+        except SystemExit:
+            pass
+        parser.error.assert_called_once()
+
+    def test_warnings_for_writeback_and_skip_if_tagged_with_input_dir(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.write_back = True
+        args.skip_if_tagged = True
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        err = capsys.readouterr().err
+        assert "--write-back has no effect with --input-dir" in err
+        assert "--skip-if-tagged has no effect with --input-dir" in err
+        assert rc == 0
+
+    def test_writeback_on_non_darwin_warns(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.photos_library = str(tmp_path)
+        args.input_dir = None
+        args.write_back = True
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.get_platform_name", return_value="Linux"),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.scan_photos_library", return_value=[]),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        assert "--write-back requires macOS" in capsys.readouterr().err
+        assert rc == 0
+
+    def test_write_exif_dry_run_info_message(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.write_exif = True
+        args.dry_run = True
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            cmd_run(args, MagicMock())
+
+        assert "--write-exif/--sidecar-only disabled in --dry-run mode" in capsys.readouterr().err
+
+    def test_skip_existing_with_writeback_note(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.skip_existing = True
+        args.write_exif = True
+        args.dry_run = False
+        args.no_cache = False
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+            patch("pyimgtag.commands.run.ProgressDB"),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            cmd_run(args, MagicMock())
+
+        assert "--skip-existing skips photos already complete" in capsys.readouterr().err
+
+    def test_skip_existing_dry_run_info(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.skip_existing = True
+        args.dry_run = True
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            cmd_run(args, MagicMock())
+
+        assert "--skip-existing is inactive in --dry-run mode" in capsys.readouterr().err
+
+    def test_ollama_down_warning(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        args = _base_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(False, "no ollama")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[]),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        assert "Warning: no ollama" in capsys.readouterr().err
+        assert rc == 0
+
+    def test_no_files_returns_zero(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        args = _base_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient"),
+            patch("pyimgtag.commands.run.scan_directory", return_value=[]),
+        ):
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        assert "No image files found." in capsys.readouterr().err
+
+    def test_file_not_found_returns_one(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        args = _base_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient"),
+            patch(
+                "pyimgtag.commands.run.scan_directory",
+                side_effect=FileNotFoundError("missing dir"),
+            ),
+        ):
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 1
+        assert "Error: missing dir" in capsys.readouterr().err
+
+    def test_dedup_path_skips_duplicate(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        f1 = tmp_path / "a.jpg"
+        f2 = tmp_path / "b.jpg"
+        f1.write_bytes(b"x")
+        f2.write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.dedup = True
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[f1, f2]),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+            patch(
+                "pyimgtag.commands.run._compute_dedup_map",
+                return_value=({str(f1): "h", str(f2): "h"}, {str(f2)}),
+            ),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        # only f1 was tagged; f2 deduped out
+        cls.return_value.tag_image.assert_called_once()
+        assert "Skipped (dedup):  1" in capsys.readouterr().err
+
+    def test_cloud_backend_constructed(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.backend = "openai"
+        args.api_key = "sk-x"
+        args.api_base = None
+
+        client = MagicMock()
+        client.tag_image.return_value = _ok_tag()
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.make_image_client", return_value=client) as mk,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mk.assert_called_once()
+        # check_ollama not consulted for cloud backend
+        client.tag_image.assert_called_once()
+
+    def test_cloud_backend_error_returns_one(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.cloud_clients import CloudClientError
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.backend = "openai"
+        args.api_key = None
+        args.api_base = None
+
+        with (
+            patch("pyimgtag.commands.run.scan_directory", return_value=[tmp_path / "p.jpg"]),
+            patch(
+                "pyimgtag.commands.run.make_image_client",
+                side_effect=CloudClientError("no key"),
+            ),
+        ):
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 1
+        assert "Error: no key" in capsys.readouterr().err
+
+    def test_backend_non_string_defaults_to_ollama(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.backend = 123  # not a str -> defaults to "ollama"
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")) as chk,
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        chk.assert_called_once()
+
+    def test_limit_stops_processing(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        files = []
+        for i in range(3):
+            p = tmp_path / f"{i}.jpg"
+            p.write_bytes(b"x")
+            files.append(p)
+        args = _base_args(tmp_path)
+        args.limit = 1
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=files),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        cls.return_value.tag_image.assert_called_once()
+
+    def test_output_json_and_csv_written(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.output_json = str(tmp_path / "out.json")
+        args.output_csv = str(tmp_path / "out.csv")
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+            patch("pyimgtag.commands.run.write_json") as mj,
+            patch("pyimgtag.commands.run.write_csv") as mc,
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        mj.assert_called_once()
+        mc.assert_called_once()
+        err = capsys.readouterr().err
+        assert "out.json" in err
+        assert "out.csv" in err
+
+    def test_jsonl_stdout(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.jsonl_stdout = True
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert out.strip()  # one jsonl line printed to stdout
+
+
+class TestKeyboardInterrupt:
+    def test_sequential_keyboard_interrupt(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        (tmp_path / "p.jpg").write_bytes(b"x")
+        args = _base_args(tmp_path)
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            cls.return_value.tag_image.side_effect = KeyboardInterrupt()
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 1
+        assert "Interrupted." in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# _process_one — branch coverage
+# ---------------------------------------------------------------------------
+
+
+class TestProcessOne:
+    def _stats(self):
+        from pyimgtag.commands.run import _new_stats
+
+        return _new_stats(1)
+
+    def _args(self, **kw):
+        args = MagicMock()
+        args.skip_existing = False
+        args.no_cache = True
+        args.resume_from_db = False
+        args.skip_if_tagged = False
+        args.date = None
+        args.date_from = None
+        args.date_to = None
+        args.skip_no_gps = False
+        for k, v in kw.items():
+            setattr(args, k, v)
+        return args
+
+    def test_missing_file_skipped_no_local(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+
+        missing = tmp_path / "nope.jpg"
+        stats = self._stats()
+        result = _process_one(
+            missing, "directory", self._args(), MagicMock(), MagicMock(), stats, None
+        )
+        assert result is None
+        assert stats["skipped_no_local"] == 1
+
+    def test_empty_file_skipped_no_local(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+
+        empty = tmp_path / "empty.jpg"
+        empty.write_bytes(b"")
+        stats = self._stats()
+        result = _process_one(
+            empty, "directory", self._args(), MagicMock(), MagicMock(), stats, None
+        )
+        assert result is None
+        assert stats["skipped_no_local"] == 1
+
+    def test_oserror_on_stat_skipped_no_local(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        with patch.object(Path, "stat", side_effect=OSError("boom")):
+            result = _process_one(
+                p, "directory", self._args(), MagicMock(), MagicMock(), stats, None
+            )
+        assert result is None
+        assert stats["skipped_no_local"] == 1
+
+    def test_skipped_cached_when_processed_and_no_resume(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        db = MagicMock()
+        db.is_complete_cached.return_value = False
+        db.is_processed.return_value = True
+        args = self._args(no_cache=False)
+        result = _process_one(p, "directory", args, MagicMock(), MagicMock(), stats, db)
+        assert result is None
+        assert stats["skipped_cached"] == 1
+
+    def test_resume_hydrates_from_db(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+        from pyimgtag.models import ImageResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        db = MagicMock()
+        db.is_complete_cached.return_value = False
+        db.is_processed.return_value = True
+        db.has_usable_model_result.return_value = True
+        db.get_cached_result.return_value = ImageResult(
+            file_path=str(p), file_name=p.name, tags=["cached"]
+        )
+        args = self._args(no_cache=False, resume_from_db=True)
+        geocoder = MagicMock()
+        with patch("pyimgtag.commands.run.read_exif", return_value=ExifData()):
+            result = _process_one(p, "directory", args, MagicMock(), geocoder, stats, db)
+        assert result is not None
+        assert "cached" in result.tags
+        assert stats["resumed_from_db"] == 1
+
+    def test_exif_read_failure_uses_empty_exif(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        ollama = MagicMock()
+        ollama.tag_image.return_value = _ok_tag()
+        with patch("pyimgtag.commands.run.read_exif", side_effect=ValueError("bad exif")):
+            result = _process_one(p, "directory", self._args(), ollama, MagicMock(), stats, None)
+        assert result is not None
+        assert result.image_date is None
+
+    def test_skipped_by_date_filter(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        with (
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+            patch("pyimgtag.commands.run.passes_date_filter", return_value=False),
+        ):
+            result = _process_one(
+                p, "directory", self._args(), MagicMock(), MagicMock(), stats, None
+            )
+        assert result is None
+        assert stats["skipped_date"] == 1
+
+    def test_skipped_no_gps(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        with patch("pyimgtag.commands.run.read_exif", return_value=ExifData()):
+            result = _process_one(
+                p, "directory", self._args(skip_no_gps=True), MagicMock(), MagicMock(), stats, None
+            )
+        assert result is None
+        assert stats["skipped_no_gps"] == 1
+
+    def test_geocode_success_populates_location_and_context(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+        from pyimgtag.models import GeoResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        exif = ExifData(date_original="2020:01:01 00:00:00", gps_lat=1.0, gps_lon=2.0, has_gps=True)
+        geocoder = MagicMock()
+        geocoder.resolve.return_value = GeoResult(
+            nearest_place="Park",
+            nearest_city="City",
+            nearest_region="Region",
+            nearest_country="Country",
+            error=None,
+        )
+        ollama = MagicMock()
+        captured = {}
+
+        def tag(path, context=None):
+            captured["context"] = context
+            return _ok_tag()
+
+        ollama.tag_image.side_effect = tag
+        with patch("pyimgtag.commands.run.read_exif", return_value=exif):
+            result = _process_one(p, "directory", self._args(), ollama, geocoder, stats, None)
+        assert result.nearest_city == "City"
+        assert captured["context"]["city"] == "City"
+        assert captured["context"]["country"] == "Country"
+        assert captured["context"]["date"] == "2020:01:01 00:00:00"
+        assert captured["context"]["lat"] == 1.0
+
+    def test_geocode_failure_increments_stat(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+        from pyimgtag.models import GeoResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        exif = ExifData(gps_lat=1.0, gps_lon=2.0, has_gps=True)
+        geocoder = MagicMock()
+        geocoder.resolve.return_value = GeoResult(error="geo down")
+        ollama = MagicMock()
+        ollama.tag_image.return_value = _ok_tag()
+        with patch("pyimgtag.commands.run.read_exif", return_value=exif):
+            result = _process_one(p, "directory", self._args(), ollama, geocoder, stats, None)
+        assert result is not None
+        assert stats["geocode_failures"] == 1
+
+    def test_model_failure_sets_error_status(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+        from pyimgtag.models import TagResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        ollama = MagicMock()
+        ollama.tag_image.return_value = TagResult(tags=[], summary="", error="model boom")
+        with patch("pyimgtag.commands.run.read_exif", return_value=ExifData()):
+            result = _process_one(p, "directory", self._args(), ollama, MagicMock(), stats, None)
+        assert result.processing_status == "error"
+        assert result.error_message == "model boom"
+        assert stats["model_failures"] == 1
+
+    def test_full_tag_result_fields_copied(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _process_one
+        from pyimgtag.models import TagResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        stats = self._stats()
+        ollama = MagicMock()
+        ollama.tag_image.return_value = TagResult(
+            tags=["a"],
+            summary="sum",
+            scene_category="cat",
+            emotional_tone="happy",
+            cleanup_class="keep",
+            has_text=True,
+            text_summary="hello",
+            event_hint="party",
+            significance="high",
+        )
+        with patch("pyimgtag.commands.run.read_exif", return_value=ExifData()):
+            result = _process_one(p, "directory", self._args(), ollama, MagicMock(), stats, None)
+        assert result.scene_category == "cat"
+        assert result.emotional_tone == "happy"
+        assert result.cleanup_class == "keep"
+        assert result.has_text is True
+        assert result.text_summary == "hello"
+        assert result.event_hint == "party"
+        assert result.significance == "high"
+
+
+# ---------------------------------------------------------------------------
+# _hydrate_from_db — geocode-success and gps/date branches
+# ---------------------------------------------------------------------------
+
+
+class TestHydrateFromDbBranches:
+    def _stats(self):
+        from pyimgtag.commands.run import _new_stats
+
+        return _new_stats(1)
+
+    def _args(self, **kw):
+        args = MagicMock()
+        args.date = None
+        args.date_from = None
+        args.date_to = None
+        args.skip_no_gps = False
+        for k, v in kw.items():
+            setattr(args, k, v)
+        return args
+
+    def test_geocode_success_sets_location(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _hydrate_from_db
+        from pyimgtag.models import GeoResult, ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        img = tmp_path / "p.jpg"
+        img.write_bytes(b"x")
+        geocoder = MagicMock()
+        geocoder.resolve.return_value = GeoResult(
+            nearest_place="Pl",
+            nearest_city="Ci",
+            nearest_region="Re",
+            nearest_country="Co",
+            error=None,
+        )
+        with ProgressDB(db_path=tmp_path / "d.db") as db:
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=img.name, tags=["t"]))
+            stats = self._stats()
+            with patch(
+                "pyimgtag.commands.run.read_exif",
+                return_value=ExifData(gps_lat=1.0, gps_lon=2.0, has_gps=True),
+            ):
+                result = _hydrate_from_db(img, "directory", self._args(), geocoder, stats, db)
+        assert result.nearest_city == "Ci"
+        assert result.nearest_country == "Co"
+
+    def test_skipped_by_date_filter(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _hydrate_from_db
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        img = tmp_path / "p.jpg"
+        img.write_bytes(b"x")
+        geocoder = MagicMock()
+        with ProgressDB(db_path=tmp_path / "d.db") as db:
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=img.name, tags=["t"]))
+            stats = self._stats()
+            with (
+                patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+                patch("pyimgtag.commands.run.passes_date_filter", return_value=False),
+            ):
+                result = _hydrate_from_db(img, "directory", self._args(), geocoder, stats, db)
+        assert result is None
+        assert stats["skipped_date"] == 1
+
+    def test_skipped_no_gps(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _hydrate_from_db
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        img = tmp_path / "p.jpg"
+        img.write_bytes(b"x")
+        geocoder = MagicMock()
+        with ProgressDB(db_path=tmp_path / "d.db") as db:
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=img.name, tags=["t"]))
+            stats = self._stats()
+            with patch("pyimgtag.commands.run.read_exif", return_value=ExifData()):
+                result = _hydrate_from_db(
+                    img, "directory", self._args(skip_no_gps=True), geocoder, stats, db
+                )
+        assert result is None
+        assert stats["skipped_no_gps"] == 1
+
+
+# ---------------------------------------------------------------------------
+# _write_metadata — sidecar failure paths
+# ---------------------------------------------------------------------------
+
+
+class TestWriteMetadataFailures:
+    def _result(self, tmp_path, suffix=".jpg"):
+        from pyimgtag.models import ImageResult
+
+        p = tmp_path / f"photo{suffix}"
+        p.write_bytes(b"x")
+        r = MagicMock(spec=ImageResult)
+        r.file_path = str(p)
+        r.tags = ["a"]
+        return r
+
+    def test_sidecar_only_failure_prints(self, tmp_path, capsys) -> None:
+        from pyimgtag.commands.run import _write_metadata
+
+        r = self._result(tmp_path)
+        args = MagicMock()
+        args.sidecar_only = True
+        with patch("pyimgtag.exif_writer.write_xmp_sidecar", return_value="sidecar boom"):
+            _write_metadata(r, "desc", args)
+        assert "Sidecar write failed: sidecar boom" in capsys.readouterr().err
+
+    def test_unsupported_ext_sidecar_failure_prints(self, tmp_path, capsys) -> None:
+        from pyimgtag.commands.run import _write_metadata
+
+        r = self._result(tmp_path, suffix=".cr2")
+        args = MagicMock()
+        args.sidecar_only = False
+        with patch("pyimgtag.exif_writer.write_xmp_sidecar", return_value="fallback boom"):
+            _write_metadata(r, "desc", args)
+        err = capsys.readouterr().err
+        assert "falling back to XMP sidecar" in err
+        assert "Sidecar write failed: fallback boom" in err
+
+
+# ---------------------------------------------------------------------------
+# _finalize_result — write-back failure & dry-run write-exif preview
+# ---------------------------------------------------------------------------
+
+
+class TestFinalizeResult:
+    def _args(self, **kw):
+        args = MagicMock()
+        args.write_back = False
+        args.dry_run = False
+        args.write_back_mode = "merge"
+        args.write_exif = False
+        args.sidecar_only = False
+        args.verbose = False
+        args.jsonl_stdout = False
+        args.limit = None
+        for k, v in kw.items():
+            setattr(args, k, v)
+        return args
+
+    def _stats(self):
+        from pyimgtag.commands.run import _new_stats
+
+        return _new_stats(1)
+
+    def test_write_back_failure_prints(self, tmp_path, capsys) -> None:
+        from pyimgtag.commands.run import _finalize_result
+        from pyimgtag.models import ImageResult
+
+        p = tmp_path / "AABB.jpg"
+        p.write_bytes(b"x")
+        result = ImageResult(
+            file_path=str(p),
+            file_name=p.name,
+            source_type="photos_library",
+            tags=["a"],
+        )
+        args = self._args(write_back=True, dry_run=False)
+        results: list = []
+        stats = self._stats()
+        with patch("pyimgtag.applescript_writer.write_to_photos", return_value="wb boom"):
+            _finalize_result(result, p, args, None, {}, results, stats)
+        assert "Write-back failed: wb boom" in capsys.readouterr().err
+
+    def test_dry_run_write_exif_verbose_preview(self, tmp_path, capsys) -> None:
+        from pyimgtag.commands.run import _finalize_result
+        from pyimgtag.models import ImageResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        result = ImageResult(
+            file_path=str(p),
+            file_name=p.name,
+            source_type="directory",
+            tags=["a", "b"],
+            scene_summary="a scene",
+        )
+        args = self._args(write_exif=True, dry_run=True, verbose=True)
+        results: list = []
+        stats = self._stats()
+        _finalize_result(result, p, args, None, {}, results, stats)
+        err = capsys.readouterr().err
+        assert "[dry-run] Would write to file" in err
+        assert "keywords: a, b" in err
+
+    def test_dry_run_sidecar_preview_target_label(self, tmp_path, capsys) -> None:
+        from pyimgtag.commands.run import _finalize_result
+        from pyimgtag.models import ImageResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        result = ImageResult(
+            file_path=str(p), file_name=p.name, source_type="directory", tags=["a"]
+        )
+        args = self._args(sidecar_only=True, dry_run=True, verbose=True)
+        _finalize_result(result, p, args, None, {}, [], self._stats())
+        assert "Would write to sidecar" in capsys.readouterr().err
+
+    def test_non_dry_run_write_exif_calls_write_metadata(self, tmp_path) -> None:
+        from pyimgtag.commands.run import _finalize_result
+        from pyimgtag.models import ImageResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        result = ImageResult(
+            file_path=str(p), file_name=p.name, source_type="directory", tags=["a"]
+        )
+        args = self._args(write_exif=True, dry_run=False)
+        with patch("pyimgtag.commands.run._write_metadata") as mw:
+            _finalize_result(result, p, args, None, {}, [], self._stats())
+        mw.assert_called_once()
+
+    def test_mark_done_called_with_progress_db(self, tmp_path) -> None:
+        from pyimgtag.commands.run import _finalize_result
+        from pyimgtag.models import ImageResult
+
+        p = tmp_path / "p.jpg"
+        p.write_bytes(b"x")
+        result = ImageResult(
+            file_path=str(p), file_name=p.name, source_type="directory", tags=["a"]
+        )
+        db = MagicMock()
+        args = self._args()
+        _finalize_result(result, p, args, db, {str(p): "phash"}, [], self._stats())
+        db.mark_done.assert_called_once()
+        assert result.phash == "phash"
+
+
+# ---------------------------------------------------------------------------
+# _print_verbose / _print_brief — rich-field branches
+# ---------------------------------------------------------------------------
+
+
+class TestPrinters:
+    def test_print_verbose_all_fields(self, capsys) -> None:
+        from pyimgtag.commands.run import _print_verbose
+        from pyimgtag.models import ImageResult
+
+        result = ImageResult(
+            file_path="/a/b.jpg",
+            file_name="b.jpg",
+            image_date="2020:01:01",
+            tags=["x", "y"],
+            scene_summary="sum",
+            scene_category="cat",
+            emotional_tone="tone",
+            cleanup_class="keep",
+            has_text=True,
+            text_summary="txt",
+            event_hint="ev",
+            significance="hi",
+            gps_lat=1.0,
+            gps_lon=2.0,
+            nearest_place="P",
+            nearest_city="C",
+            nearest_region="R",
+            nearest_country="Co",
+            error_message="oops",
+        )
+        _print_verbose(result, 1, 1)
+        err = capsys.readouterr().err
+        assert "Summary:  sum" in err
+        assert "Scene:    cat" in err
+        assert "Tone:     tone" in err
+        assert "Cleanup:  keep" in err
+        assert "Has text: yes" in err
+        assert "Text:     txt" in err
+        assert "Event:    ev" in err
+        assert "Signif.:  hi" in err
+        assert "GPS:      1.0, 2.0" in err
+        assert "Error:    oops" in err
+
+    def test_print_verbose_no_gps_no_location(self, capsys) -> None:
+        from pyimgtag.commands.run import _print_verbose
+        from pyimgtag.models import ImageResult
+
+        result = ImageResult(file_path="/a/b.jpg", file_name="b.jpg")
+        _print_verbose(result, 1, 1)
+        err = capsys.readouterr().err
+        assert "GPS:      (none)" in err
+        assert "Location: (none)" in err
+
+    def test_print_brief_with_location_and_error(self, capsys) -> None:
+        from pyimgtag.commands.run import _print_brief
+        from pyimgtag.models import ImageResult
+
+        result = ImageResult(
+            file_path="/a/b.jpg",
+            file_name="b.jpg",
+            tags=["x"],
+            nearest_city="City",
+            nearest_country="Country",
+            error_message="bad thing happened",
+        )
+        _print_brief(result, 1, 2)
+        err = capsys.readouterr().err
+        assert "City, Country" in err
+        assert "error: bad thing happened" in err
+
+    def test_print_brief_no_tags_no_loc(self, capsys) -> None:
+        from pyimgtag.commands.run import _print_brief
+        from pyimgtag.models import ImageResult
+
+        result = ImageResult(file_path="/a/b.jpg", file_name="b.jpg")
+        _print_brief(result, 1, 1)
+        err = capsys.readouterr().err
+        assert "(none)" in err
+
+
+# ---------------------------------------------------------------------------
+# Session-attached sequential & threaded branches (final coverage)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionBranches:
+    def test_sequential_session_set_current_none_on_skip(self, tmp_path: Path) -> None:
+        """When _process_one returns None and a session is attached, set_current(None) runs."""
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.run_session import RunSession
+
+        run_registry.set_current(None)
+        img = tmp_path / "p.jpg"
+        img.write_bytes(b"x")
+        args = _base_args(tmp_path)
+        args.skip_no_gps = True  # forces _process_one to return None (no GPS)
+
+        session = RunSession(command="run")
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+            patch(
+                "pyimgtag.webapp.bootstrap.start_dashboard_for",
+                return_value=(session, None),
+            ),
+        ):
+            cls.return_value.tag_image.return_value = _ok_tag()
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        run_registry.set_current(None)
+
+    def test_sequential_keyboard_interrupt_marks_session(self, tmp_path: Path, capsys) -> None:
+        """KeyboardInterrupt in the sequential loop marks the session interrupted."""
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.run_session import RunSession
+
+        run_registry.set_current(None)
+        img = tmp_path / "p.jpg"
+        img.write_bytes(b"x")
+        args = _base_args(tmp_path)
+
+        session = RunSession(command="run")
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[img]),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+            patch(
+                "pyimgtag.webapp.bootstrap.start_dashboard_for",
+                return_value=(session, None),
+            ),
+        ):
+            cls.return_value.tag_image.side_effect = KeyboardInterrupt()
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 1
+        assert session.snapshot()["state"] == "interrupted"
+        assert "Interrupted." in capsys.readouterr().err
+        run_registry.set_current(None)
+
+    def test_threaded_limit_break_and_drain(self, tmp_path: Path) -> None:
+        """Threaded resume path: --limit breaks the fresh loop after one file, and the
+        finally-block drains remaining cache-worker results."""
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+        from pyimgtag.run_session import RunSession
+
+        run_registry.set_current(None)
+        db_path = tmp_path / "progress.db"
+        cached = tmp_path / "cached.jpg"
+        cached.write_bytes(b"x")
+        f0 = tmp_path / "f0.jpg"
+        f0.write_bytes(b"x")
+        f1 = tmp_path / "f1.jpg"
+        f1.write_bytes(b"x")
+
+        db = ProgressDB(db_path=db_path)
+        db.mark_done(
+            cached,
+            ImageResult(
+                file_path=str(cached), file_name=cached.name, tags=["seed"], scene_summary="s"
+            ),
+        )
+        db.close()
+
+        parser = build_parser()
+        argv = [
+            "run",
+            "--input-dir",
+            str(tmp_path),
+            "--extensions",
+            "jpg",
+            "--no-web",
+            "--resume-from-db",
+            "--resume-threaded",
+            "--limit",
+            "1",
+            "--db",
+            str(db_path),
+        ]
+        args = parser.parse_args(argv)
+
+        session = RunSession(command="run")
+
+        def fake_tag(path, *a, **kw):
+            return MagicMock(
+                error=None,
+                tags=["t"],
+                summary=None,
+                scene_category=None,
+                emotional_tone=None,
+                cleanup_class=None,
+                has_text=False,
+                text_summary=None,
+                event_hint=None,
+                significance=None,
+            )
+
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+            patch(
+                "pyimgtag.webapp.bootstrap.start_dashboard_for",
+                return_value=(session, None),
+            ),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.side_effect = fake_tag
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+            rc = cmd_run(args, parser)
+
+        assert rc == 0
+        run_registry.set_current(None)
+
+    def test_threaded_keyboard_interrupt(self, tmp_path: Path, capsys) -> None:
+        """KeyboardInterrupt in the threaded fresh loop sets stop_event and marks session."""
+        from pyimgtag import run_registry
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.main import build_parser
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+        from pyimgtag.run_session import RunSession
+
+        run_registry.set_current(None)
+        db_path = tmp_path / "progress.db"
+        # Many cached files so the worker is still running when the interrupt fires.
+        cached_files = []
+        for i in range(20):
+            c = tmp_path / f"cached{i}.jpg"
+            c.write_bytes(b"x")
+            cached_files.append(c)
+        fresh = tmp_path / "fresh.jpg"
+        fresh.write_bytes(b"x")
+
+        db = ProgressDB(db_path=db_path)
+        for c in cached_files:
+            db.mark_done(
+                c,
+                ImageResult(file_path=str(c), file_name=c.name, tags=["seed"], scene_summary="s"),
+            )
+        db.close()
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "run",
+                "--input-dir",
+                str(tmp_path),
+                "--extensions",
+                "jpg",
+                "--no-web",
+                "--resume-from-db",
+                "--resume-threaded",
+                "--db",
+                str(db_path),
+            ]
+        )
+
+        session = RunSession(command="run")
+
+        with (
+            patch("pyimgtag.commands.run.OllamaClient") as ollama_cls,
+            patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "ok")),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+            patch(
+                "pyimgtag.webapp.bootstrap.start_dashboard_for",
+                return_value=(session, None),
+            ),
+        ):
+            ollama = MagicMock()
+            ollama.tag_image.side_effect = KeyboardInterrupt()
+            ollama_cls.return_value = ollama
+            geo_cls.return_value = MagicMock()
+            rc = cmd_run(args, parser)
+
+        assert rc == 1
+        assert session.snapshot()["state"] == "interrupted"
+        assert "Interrupted." in capsys.readouterr().err
+        run_registry.set_current(None)
+
+
+class TestHydrateGeocodeFailure:
+    def test_geocode_error_increments_failures(self, tmp_path: Path) -> None:
+        from pyimgtag.commands.run import _hydrate_from_db, _new_stats
+        from pyimgtag.models import GeoResult, ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        img = tmp_path / "p.jpg"
+        img.write_bytes(b"x")
+        geocoder = MagicMock()
+        geocoder.resolve.return_value = GeoResult(error="geo down")
+        args = MagicMock()
+        args.date = None
+        args.date_from = None
+        args.date_to = None
+        args.skip_no_gps = False
+
+        with ProgressDB(db_path=tmp_path / "d.db") as db:
+            db.mark_done(img, ImageResult(file_path=str(img), file_name=img.name, tags=["t"]))
+            stats = _new_stats(1)
+            with patch(
+                "pyimgtag.commands.run.read_exif",
+                return_value=ExifData(gps_lat=1.0, gps_lon=2.0, has_gps=True),
+            ):
+                result = _hydrate_from_db(img, "directory", args, geocoder, stats, db)
+
+        assert result is not None
+        assert stats["geocode_failures"] == 1

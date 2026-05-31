@@ -25,6 +25,38 @@ class TestPyimgtagMain:
         mock_exit.assert_called_once_with(0)
 
 
+class TestMainModuleEntrypoint:
+    """pyimgtag/main.py — the ``if __name__ == '__main__'`` wrapper."""
+
+    def test_running_main_module_calls_sys_exit(self, monkeypatch):
+        # run_module re-executes the module body, so the ``main`` name inside
+        # the ``__main__`` namespace is the freshly-defined function (not a
+        # patchable attribute). Feed a benign argv ("no subcommand" → rc 1)
+        # and capture the exit code via a patched sys.exit. Disable the
+        # update check so the run stays fully offline.
+        monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+        with (
+            patch.object(sys, "argv", ["pyimgtag"]),
+            patch("sys.exit") as mock_exit,
+        ):
+            runpy.run_module("pyimgtag.main", run_name="__main__", alter_sys=False)
+
+        mock_exit.assert_called_once_with(1)
+
+
+class TestWebappMainEntrypoint:
+    """pyimgtag/webapp/__main__.py — the ``if __name__ == '__main__'`` wrapper."""
+
+    def test_running_webapp_module_calls_main(self):
+        if "pyimgtag.webapp.__main__" in sys.modules:
+            del sys.modules["pyimgtag.webapp.__main__"]
+        with patch("pyimgtag.webapp.unified_app.create_unified_app", return_value=MagicMock()):
+            with patch.dict(sys.modules, {"uvicorn": MagicMock()}):
+                # run_module executes the module body, hitting the
+                # ``if __name__ == "__main__": main()`` guard.
+                runpy.run_module("pyimgtag.webapp", run_name="__main__", alter_sys=False)
+
+
 class TestWebappMain:
     """pyimgtag/webapp/__main__.py — uvicorn startup and ImportError guard."""
 

@@ -91,6 +91,19 @@ class TestScanPhotosLibrary:
             with pytest.raises(PermissionError, match="Full Disk Access"):
                 scan_photos_library(tmp_path)
 
+    def test_readable_subdirectory_probe_breaks_without_raising(self, tmp_path):
+        """When originals has no images but a readable subdir, the subdir probe
+        succeeds and the scan returns an empty list (no PermissionError)."""
+        originals = tmp_path / "originals"
+        originals.mkdir()
+        # A subdirectory that is readable but contains no matching images.
+        subdir = originals / "00"
+        subdir.mkdir()
+        (subdir / "notes.txt").write_text("not an image")
+
+        files = scan_photos_library(tmp_path)
+        assert files == []
+
     def test_permission_error_on_subdirectory_raises_with_fda_hint(self, tmp_path):
         """PermissionError on originals/ subdirectory must surface with Full Disk Access hint."""
         from unittest.mock import patch
