@@ -419,16 +419,42 @@ def _add_faces_subcommand(subparsers: Any) -> None:
     faces_scan_src.add_argument("--photos-library", help="Path to an Apple Photos library package")
     faces_scan.add_argument("--db", help=_DEFAULT_DB_HELP)
     faces_scan.add_argument(
+        "--quality",
+        choices=["fast", "balanced", "accurate"],
+        default="balanced",
+        help="Detection quality preset (default: balanced). 'fast' matches the "
+        "old behaviour (hog, no upsample/jitter); 'accurate' uses the cnn model "
+        "(much slower on CPU). The individual flags below override the preset.",
+    )
+    faces_scan.add_argument(
         "--max-dim",
         type=int,
-        default=1280,
-        help="Max image dimension for face detection (default: 1280)",
+        default=None,
+        help="Override the preset's max image dimension for detection",
     )
     faces_scan.add_argument(
         "--detection-model",
         choices=["hog", "cnn"],
-        default="hog",
-        help="Face detection model: hog (fast, CPU) or cnn (accurate, GPU) (default: hog)",
+        default=None,
+        help="Override the preset's model: hog (fast, CPU) or cnn (accurate, GPU)",
+    )
+    faces_scan.add_argument(
+        "--upsample",
+        type=int,
+        default=None,
+        help="Override upsample passes; higher finds smaller faces but is slower",
+    )
+    faces_scan.add_argument(
+        "--num-jitters",
+        type=int,
+        default=None,
+        help="Override encoding jitters; higher improves matching but is slower",
+    )
+    faces_scan.add_argument(
+        "--min-face-size",
+        type=int,
+        default=0,
+        help="Drop faces smaller than N px (shorter side) (default: 0 = keep all)",
     )
     faces_scan.add_argument(
         "--extensions", default="jpg,jpeg,heic,png", help="Comma-separated extensions"

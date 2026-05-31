@@ -263,3 +263,57 @@ class TestDetectFaces:
             msg = str(excinfo.value)
             assert "face_recognition_models" in msg
             assert "git+https://github.com/ageitgey/face_recognition_models" in msg
+
+
+class TestDetectFacesQuality:
+    def _make_image(self, tmp_path: Path) -> Path:
+        img = Image.new("RGB", (640, 480), color="white")
+        path = tmp_path / "photo.jpg"
+        img.save(path)
+        return path
+
+    def test_passes_upsample_to_face_recognition(self, tmp_path):
+        path = self._make_image(tmp_path)
+        mock_fr = MagicMock()
+        mock_fr.face_locations.return_value = []
+        with _patch_face_modules(mock_fr):
+            detect_faces(path, upsample=3)
+        _, kwargs = mock_fr.face_locations.call_args
+        assert kwargs["number_of_times_to_upsample"] == 3
+
+    def test_default_upsample_is_one(self, tmp_path):
+        path = self._make_image(tmp_path)
+        mock_fr = MagicMock()
+        mock_fr.face_locations.return_value = []
+        with _patch_face_modules(mock_fr):
+            detect_faces(path)
+        _, kwargs = mock_fr.face_locations.call_args
+        assert kwargs["number_of_times_to_upsample"] == 1
+
+    def test_min_face_size_drops_small_detections(self, tmp_path):
+        path = self._make_image(tmp_path)
+        mock_fr = MagicMock()
+        # (top, right, bottom, left): a 20x20 face and a 120x150 face
+        mock_fr.face_locations.return_value = [(0, 20, 20, 0), (50, 150, 200, 30)]
+        with _patch_face_modules(mock_fr):
+            results = detect_faces(path, min_face_size=50)
+        assert len(results) == 1
+        assert results[0].bbox_w == 120  # the 20px face was filtered out
+
+    def test_min_face_size_zero_keeps_all(self, tmp_path):
+        path = self._make_image(tmp_path)
+        mock_fr = MagicMock()
+        mock_fr.face_locations.return_value = [(0, 20, 20, 0), (50, 150, 200, 30)]
+        with _patch_face_modules(mock_fr):
+            results = detect_faces(path, min_face_size=0)
+        assert len(results) == 2
+
+    def test_min_face_size_keeps_face_equal_to_threshold(self, tmp_path):
+        # The filter uses `< min_face_size`, so a face exactly at the threshold
+        # is KEPT (boundary case).
+        path = self._make_image(tmp_path)
+        mock_fr = MagicMock()
+        mock_fr.face_locations.return_value = [(0, 50, 50, 0)]  # 50x50
+        with _patch_face_modules(mock_fr):
+            results = detect_faces(path, min_face_size=50)
+        assert len(results) == 1

@@ -24,6 +24,7 @@ def compute_embeddings(
     image_path: str | Path,
     faces: list[FaceDetection],
     max_dim: int = _DEFAULT_MAX_DIM,
+    num_jitters: int = 1,
 ) -> list[np.ndarray]:
     """Compute 128-d face encodings for known face locations.
 
@@ -32,6 +33,10 @@ def compute_embeddings(
         faces: Face detections with bounding boxes (from detect_faces).
         max_dim: Must match the max_dim used during detection so that
             bounding box coordinates align with the image.
+        num_jitters: How many times to re-sample each face when computing its
+            encoding (dlib's ``num_jitters``). Higher values yield more robust
+            encodings — improving clustering/matching — at roughly linear extra
+            cost per face.
 
     Returns:
         List of 128-d numpy float64 arrays, one per input face.
@@ -60,7 +65,9 @@ def compute_embeddings(
         (f.bbox_y, f.bbox_x + f.bbox_w, f.bbox_y + f.bbox_h, f.bbox_x) for f in faces
     ]
 
-    encodings = face_recognition.face_encodings(img_array, known_face_locations=known_locations)
+    encodings = face_recognition.face_encodings(
+        img_array, known_face_locations=known_locations, num_jitters=num_jitters
+    )
     return list(encodings)
 
 
@@ -69,6 +76,9 @@ def scan_and_store(
     db: ProgressDB,
     max_dim: int = _DEFAULT_MAX_DIM,
     model: str = "hog",
+    upsample: int = 1,
+    num_jitters: int = 1,
+    min_face_size: int = 0,
 ) -> int:
     """Detect faces, compute embeddings, and store everything in the DB.
 
@@ -79,6 +89,9 @@ def scan_and_store(
         db: ProgressDB instance with face tables.
         max_dim: Max image dimension for detection and embedding.
         model: Detection model — "hog" or "cnn".
+        upsample: dlib upsample passes for detection (finds smaller faces).
+        num_jitters: dlib re-samples per face when encoding (better encodings).
+        min_face_size: Drop detections smaller than this (shorter side, px).
 
     Returns:
         Number of faces detected and stored for this image.
@@ -90,10 +103,16 @@ def scan_and_store(
     if db.is_face_scanned(path_str):
         return 0
 
-    faces = detect_faces(image_path, max_dim=max_dim, model=model)
+    faces = detect_faces(
+        image_path,
+        max_dim=max_dim,
+        model=model,
+        upsample=upsample,
+        min_face_size=min_face_size,
+    )
 
     if faces:
-        embeddings = compute_embeddings(image_path, faces, max_dim=max_dim)
+        embeddings = compute_embeddings(image_path, faces, max_dim=max_dim, num_jitters=num_jitters)
         if len(embeddings) != len(faces):
             # Positional alignment between faces[i] and embeddings[i] only holds
             # when the counts match; a short result means some faces are stored
