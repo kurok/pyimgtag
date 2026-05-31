@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-05-31
+
+### Changed
+- **Updated all dependencies and tooling to latest** (#239): raised the `>=` floors for runtime and extras (requests 2.34, Pillow 12, exifread 3.5, pillow-heif 1.3, scikit-learn 1.8, fastapi 0.136, uvicorn 0.48, pydantic 2.13, httpx2 2.2, rawpy 0.27) and dev tooling (pytest-xdist 3.8, pytest-cov 7, mypy 2.1, ruff 0.15, bandit 1.9, pip-audit 2.10, playwright 1.60, pytest-playwright 0.8); refreshed `uv.lock`. The deliberate `setuptools<81` cap is preserved. Bumped pre-commit hooks (ruff v0.15.15, pre-commit-hooks v6.0.0) and the codecov CI action. No code or behavior changes; full suite, mypy, bandit, and `pip-audit` all clean.
+
 ## [0.18.2] - 2026-05-31
 
 ### Fixed
