@@ -756,6 +756,13 @@ _PERSON_DETAIL_TEMPLATE = """<!DOCTYPE html>
     .face-thumb.hero{width:120px;height:120px;border-width:2px;
                      border-color:var(--accent);box-shadow:0 2px 8px rgba(0,0,0,.18)}
     #loading{padding:32px;color:var(--muted);font-size:14px}
+    .pager{display:flex;align-items:center;gap:10px;padding:8px 32px 24px;
+           font-size:13px;color:var(--muted)}
+    .pager button{padding:4px 12px;border-radius:var(--radius-sm);font-size:12px;
+                  border:1px solid var(--border);background:var(--surface);
+                  color:var(--text);cursor:pointer;transition:all .15s}
+    .pager button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+    .pager button:disabled{opacity:.35;cursor:default}
   </style>
 </head>
 <body>
@@ -777,6 +784,11 @@ __MODAL_JS__
 </div>
 <div id="loading">Loading faces…</div>
 <div id="faces-grid"></div>
+<div class="pager" id="face-pager" style="display:none">
+  <button id="fp-prev" onclick="goFacePage(-1)">← Previous</button>
+  <span id="fp-info"></span>
+  <button id="fp-next" onclick="goFacePage(1)">Next →</button>
+</div>
 <script>
 const _personId = __PERSON_ID__;
 const _apiBase  = '__API_BASE__';
@@ -802,19 +814,32 @@ function showPreview(faceId, rect) {
 }
 
 let _person = null;
+const FACE_PAGE_SIZE = 60;
+let _faceOffset = 0;
+let _faceTotal = 0;
 
 async function load() {
   const [personRes, facesRes] = await Promise.all([
     fetch(_apiBase + '/api/persons/' + _personId),
-    fetch(_apiBase + '/api/persons/' + _personId + '/faces'),
+    fetch(_apiBase + '/api/persons/' + _personId + '/faces?offset=' + _faceOffset
+      + '&limit=' + FACE_PAGE_SIZE),
   ]);
   // Person no longer exists (deleted or merged into another) — go back to list.
   if (!personRes.ok) {
     window.location.href = _apiBase + '/';
     return;
   }
-  const [person, faces] = await Promise.all([personRes.json(), facesRes.json()]);
+  const [person, facesData] = await Promise.all([personRes.json(), facesRes.json()]);
   _person = person;
+  _faceTotal = facesData.total;
+  const items = facesData.items;
+
+  // The last face on the last page was unassigned — step back a page.
+  if (items.length === 0 && _faceOffset > 0) {
+    _faceOffset = Math.max(0, _faceOffset - FACE_PAGE_SIZE);
+    load();
+    return;
+  }
 
   document.getElementById('person-name').textContent =
     person.label || ('(unlabelled #' + person.id + ')');
@@ -822,7 +847,7 @@ async function load() {
   badge.className = person.trusted ? 'badge-trusted' : 'badge-auto';
   badge.textContent = person.trusted ? 'trusted' : 'auto';
   document.getElementById('person-count').textContent =
-    faces.length + ' face' + (faces.length !== 1 ? 's' : '');
+    _faceTotal + ' face' + (_faceTotal !== 1 ? 's' : '');
 
   const cfmBtn = document.getElementById('confirm-btn');
   cfmBtn.disabled = person.trusted;
@@ -831,7 +856,28 @@ async function load() {
   document.getElementById('actions').style.display = 'flex';
   document.getElementById('loading').style.display = 'none';
 
-  renderFaces(faces);
+  renderFaces(items);
+  updateFacePager();
+}
+
+function goFacePage(delta) {
+  _faceOffset = Math.max(0, Math.min(_faceOffset + delta * FACE_PAGE_SIZE,
+    Math.max(0, _faceTotal - 1)));
+  load();
+}
+
+function updateFacePager() {
+  const pager = document.getElementById('face-pager');
+  if (_faceTotal > FACE_PAGE_SIZE) {
+    pager.style.display = 'flex';
+    const end = Math.min(_faceOffset + FACE_PAGE_SIZE, _faceTotal);
+    document.getElementById('fp-info').textContent =
+      (_faceOffset + 1) + '–' + end + ' of ' + _faceTotal;
+    document.getElementById('fp-prev').disabled = _faceOffset === 0;
+    document.getElementById('fp-next').disabled = end >= _faceTotal;
+  } else {
+    pager.style.display = 'none';
+  }
 }
 
 function renderFaces(faces) {
@@ -843,10 +889,11 @@ function renderFaces(faces) {
     const wrap = document.createElement('div');
     wrap.style.cssText = 'position:relative;display:inline-block';
 
+    const isHero = _faceOffset === 0 && i === 0;
     const img = document.createElement('img');
-    img.className = i === 0 ? 'face-thumb hero' : 'face-thumb';
+    img.className = isHero ? 'face-thumb hero' : 'face-thumb';
     img.src = 'data:image/jpeg;base64,' + f.thumb;
-    img.title = i === 0
+    img.title = isHero
       ? 'Best match (conf ' + (f.confidence ? f.confidence.toFixed(2) : '?') + ') — click to unassign'
       : 'Click to unassign';
     img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
@@ -1143,13 +1190,31 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         }
 
     @router.get("/api/persons/{person_id}/faces")
-    async def get_person_faces(person_id: int) -> list[dict]:
+    async def get_person_faces(person_id: int, offset: int = 0, limit: int = 60) -> dict:
+        """Return one page of a person's faces, highest-confidence first.
+
+        Paginated so a person with thousands of faces does not load — and
+        thumbnail — them all at once; only the requested page's thumbnails are
+        generated.
+
+        Query params:
+          offset  – 0-based index of the first face to return (default 0)
+          limit   – faces per page (default 60, max 200)
+
+        Response: ``{"total": N, "items": [...]}``.
+        """
         import asyncio
 
+        limit = min(max(limit, 1), 200)
         persons = db.get_persons()
         if not any(p.person_id == person_id for p in persons):
             raise HTTPException(status_code=404, detail="Person not found")
         faces = db.get_faces_for_person(person_id)
+        # Best matches first so page 1 shows the hero + strongest faces, and
+        # pagination order is stable across pages.
+        faces.sort(key=lambda f: f.get("confidence") or 0.0, reverse=True)
+        total = len(faces)
+        page = faces[offset : offset + limit]
 
         def _gen_thumbs() -> list[dict]:
             return [
@@ -1163,10 +1228,11 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                         f["bbox_h"],
                     ),
                 }
-                for f in faces
+                for f in page
             ]
 
-        return await asyncio.to_thread(_gen_thumbs)
+        items = await asyncio.to_thread(_gen_thumbs)
+        return {"total": total, "items": items}
 
     @router.get("/api/faces/unassigned")
     async def list_unassigned_faces(offset: int = 0, limit: int = 40) -> dict:
