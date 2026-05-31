@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-05-31
+
+### Fixed
+- **Faces UI logged a traceback on Ctrl+C / client disconnect** (#250): stopping the faces server (or navigating away) while a thumbnail-generating request was in flight surfaced `asyncio.CancelledError` as a uvicorn "Exception in ASGI application" traceback. The five endpoints that crop thumbnails off the event loop now share one `_thumbs()` helper that catches the cancellation and returns the page with `thumb=None` (the response is discarded anyway), so a cancelled request shuts down quietly. Also removes ~40 lines of duplicated thumbnail code.
+
 ## [0.21.0] - 2026-05-31
 
 ### Added
