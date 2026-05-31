@@ -1182,6 +1182,39 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
     from pyimgtag.face_thumb import face_thumbnail_b64
 
+    async def _thumbs(faces: list[dict]) -> list[dict]:
+        """Attach a base64 ``thumb`` to each face, cropping off the event loop.
+
+        On request cancellation — the client navigated away mid-load, or the
+        server is shutting down (Ctrl+C) — return the faces with ``thumb=None``
+        instead of letting ``CancelledError`` propagate out of the handler.
+        A propagated ``CancelledError`` is logged by uvicorn as a noisy
+        "Exception in ASGI application" traceback even though it is the normal,
+        expected outcome of a cancelled request; the response is discarded
+        anyway, so the empty thumbnails are never rendered.
+        """
+        import asyncio
+
+        def _work() -> list[dict]:
+            return [
+                {
+                    **f,
+                    "thumb": face_thumbnail_b64(
+                        f["image_path"],
+                        f["bbox_x"],
+                        f["bbox_y"],
+                        f["bbox_w"],
+                        f["bbox_h"],
+                    ),
+                }
+                for f in faces
+            ]
+
+        try:
+            return await asyncio.to_thread(_work)
+        except asyncio.CancelledError:
+            return [{**f, "thumb": None} for f in faces]
+
     router = APIRouter()
 
     @router.get("/", response_class=HTMLResponse)
@@ -1256,23 +1289,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
         async def _person_entry(p) -> dict:
             faces = db.get_faces_for_person(p.person_id)
-
-            def _gen_thumbs() -> list[dict]:
-                return [
-                    {
-                        **f,
-                        "thumb": face_thumbnail_b64(
-                            f["image_path"],
-                            f["bbox_x"],
-                            f["bbox_y"],
-                            f["bbox_w"],
-                            f["bbox_h"],
-                        ),
-                    }
-                    for f in faces[:8]
-                ]
-
-            faces_with_thumbs = await asyncio.to_thread(_gen_thumbs)
+            faces_with_thumbs = await _thumbs(faces[:8])
             return {
                 "id": p.person_id,
                 "label": p.label,
@@ -1331,8 +1348,6 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
         Response: ``{"total": N, "items": [...]}``.
         """
-        import asyncio
-
         limit = min(max(limit, 1), 200)
         persons = db.get_persons()
         if not any(p.person_id == person_id for p in persons):
@@ -1344,22 +1359,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         total = len(faces)
         page = faces[offset : offset + limit]
 
-        def _gen_thumbs() -> list[dict]:
-            return [
-                {
-                    **f,
-                    "thumb": face_thumbnail_b64(
-                        f["image_path"],
-                        f["bbox_x"],
-                        f["bbox_y"],
-                        f["bbox_w"],
-                        f["bbox_h"],
-                    ),
-                }
-                for f in page
-            ]
-
-        items = await asyncio.to_thread(_gen_thumbs)
+        items = await _thumbs(page)
         return {"total": total, "items": items}
 
     @router.get("/api/persons/{person_id}/candidates")
@@ -1377,8 +1377,6 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         where ``source_label`` names the cluster the candidates came from (only
         set for ``source="biggest"``).
         """
-        import asyncio
-
         limit = min(max(limit, 1), 200)
         persons = db.get_persons()
         if not any(p.person_id == person_id for p in persons):
@@ -1400,50 +1398,18 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         total = len(faces)
         page = faces[offset : offset + limit]
 
-        def _gen_thumbs() -> list[dict]:
-            return [
-                {
-                    **f,
-                    "thumb": face_thumbnail_b64(
-                        f["image_path"],
-                        f["bbox_x"],
-                        f["bbox_y"],
-                        f["bbox_w"],
-                        f["bbox_h"],
-                    ),
-                }
-                for f in page
-            ]
-
-        items = await asyncio.to_thread(_gen_thumbs)
+        items = await _thumbs(page)
         return {"total": total, "items": items, "source_label": source_label}
 
     @router.get("/api/faces/unassigned")
     async def list_unassigned_faces(offset: int = 0, limit: int = 40) -> dict:
         """Return a page of faces with no person assignment, with thumbnails."""
-        import asyncio
-
         limit = min(max(limit, 1), 200)
         all_faces = db.get_unassigned_faces()
         total = len(all_faces)
         page = all_faces[offset : offset + limit]
 
-        def _gen_thumbs() -> list[dict]:
-            return [
-                {
-                    **f,
-                    "thumb": face_thumbnail_b64(
-                        f["image_path"],
-                        f["bbox_x"],
-                        f["bbox_y"],
-                        f["bbox_w"],
-                        f["bbox_h"],
-                    ),
-                }
-                for f in page
-            ]
-
-        items = await asyncio.to_thread(_gen_thumbs)
+        items = await _thumbs(page)
         return {"total": total, "items": items}
 
     @router.post("/api/faces/assign-batch")
@@ -1570,29 +1536,12 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     @router.get("/api/faces/ignored")
     async def list_ignored_faces(offset: int = 0, limit: int = 40) -> dict:
         """Return a page of ignored (trashed) faces with thumbnails."""
-        import asyncio
-
         limit = min(max(limit, 1), 200)
         all_faces = db.get_ignored_faces()
         total = len(all_faces)
         page = all_faces[offset : offset + limit]
 
-        def _gen_thumbs() -> list[dict]:
-            return [
-                {
-                    **f,
-                    "thumb": face_thumbnail_b64(
-                        f["image_path"],
-                        f["bbox_x"],
-                        f["bbox_y"],
-                        f["bbox_w"],
-                        f["bbox_h"],
-                    ),
-                }
-                for f in page
-            ]
-
-        items = await asyncio.to_thread(_gen_thumbs)
+        items = await _thumbs(page)
         return {"total": total, "items": items}
 
     @router.post("/api/faces/{face_id}/ignore")

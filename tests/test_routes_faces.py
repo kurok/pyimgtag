@@ -531,6 +531,32 @@ def test_candidate_faces_biggest_none_when_alone(tmp_path):
         assert data["source_label"] is None
 
 
+def test_thumbnail_endpoint_survives_cancellation(tmp_path, monkeypatch):
+    # A cancelled request (client navigated away / server shutting down via
+    # Ctrl+C) must not bubble CancelledError out of the handler — uvicorn would
+    # log it as a noisy "Exception in ASGI application" traceback. The page is
+    # returned with thumb=None instead (the response is discarded anyway).
+    import asyncio
+
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+    (pid,) = _seed_persons_with_faces(db_path, [("Solo", True, 2)])
+
+    async def _cancelled(*_a, **_k):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(asyncio, "to_thread", _cancelled)
+
+    with TestClient(app) as client:
+        r = client.get(f"/api/persons/{pid}/faces")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total"] == 2
+    assert body["items"] and all(f["thumb"] is None for f in body["items"])
+
+
 def test_list_unassigned_faces(tmp_path):
     db_path = tmp_path / "progress.db"
     db = ProgressDB(db_path=db_path)
