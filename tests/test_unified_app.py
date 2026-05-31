@@ -115,3 +115,27 @@ def test_unified_app_dashboard_nav_includes_new_links(tmp_path):
     assert r.status_code == 200
     for href in ('href="/tags"', 'href="/query"', 'href="/judge"'):
         assert href in r.text, f"dashboard nav missing {href}"
+
+
+def test_openapi_schema_generates(tmp_path):
+    """OpenAPI generation must not crash.
+
+    Regression guard: route handlers annotated ``-> Response`` where
+    ``Response`` is only importable under ``TYPE_CHECKING`` raised a pydantic
+    ``ForwardRef('Response')`` error during schema generation (``/openapi.json``
+    and ``/docs`` would 500 if enabled). Also asserts no request-body parameter
+    is misclassified as a query parameter.
+    """
+    app = create_unified_app(db_path=_seed(tmp_path))
+    spec = app.openapi()  # must not raise
+    assert spec.get("paths")
+
+    misclassified = [
+        f"{method.upper()} {path}"
+        for path, methods in spec["paths"].items()
+        for method, op in methods.items()
+        if method.lower() in ("post", "put", "patch")
+        for param in (op.get("parameters") or [])
+        if param.get("in") == "query" and param.get("name") == "body"
+    ]
+    assert not misclassified, f"body params misclassified as query: {misclassified}"
