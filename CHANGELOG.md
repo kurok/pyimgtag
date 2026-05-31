@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-05-31
+
+### Added
+- **Faces cleanup commands** (#252): three new `faces` sub-actions to reset face data at three levels. `faces reset` wipes everything (all faces + embeddings, all persons including trusted/Photos, and the scan cache). `faces reset-untrusted` deletes non-trusted faces and auto-clusters while keeping trusted/named people and their faces — and the user's ignored "trash" faces — pruning the scan cache only for images that no longer have any face so they are re-detected. `faces recluster` clears auto-clusters and re-clusters from scratch (keeps trusted people; no face deletion). All three preview what would change and require `--yes` to apply, and leave image tagging/geocoding progress untouched. Backed by new `ProgressDB.reset_all_faces` / `reset_untrusted_faces` / `count_auto_persons`.
+
 ## [0.21.1] - 2026-05-31
 
 ### Fixed
