@@ -580,8 +580,14 @@ class TestFacesBuildParser:
 
     def test_faces_scan_defaults(self):
         args = build_parser().parse_args(["faces", "scan", "--input-dir", "/tmp"])
-        assert args.max_dim == 1280
-        assert args.detection_model == "hog"
+        # The quality preset (default 'balanced') supplies model/max-dim/etc.;
+        # the granular flags default to None so they only override when given.
+        assert args.quality == "balanced"
+        assert args.max_dim is None
+        assert args.detection_model is None
+        assert args.upsample is None
+        assert args.num_jitters is None
+        assert args.min_face_size == 0
         assert args.extensions == "jpg,jpeg,heic,png"
         assert args.limit is None
         assert args.db is None

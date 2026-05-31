@@ -212,4 +212,55 @@ class TestScanAndStore:
                 patch("pyimgtag.face_embedding.compute_embeddings", return_value=[]),
             ):
                 scan_and_store(path, db, max_dim=800, model="cnn")
-            mock_d.assert_called_once_with(path, max_dim=800, model="cnn")
+            mock_d.assert_called_once_with(
+                path, max_dim=800, model="cnn", upsample=1, min_face_size=0
+            )
+
+
+class TestEmbeddingQuality:
+    def test_passes_num_jitters_to_face_encodings(self, tmp_path):
+        path = _make_image(tmp_path)
+        faces = [FaceDetection(image_path=str(path), bbox_x=30, bbox_y=50, bbox_w=120, bbox_h=150)]
+        mock_fr = MagicMock()
+        mock_fr.face_encodings.return_value = [np.zeros(128)]
+        with patch.dict(
+            "sys.modules",
+            {"face_recognition_models": MagicMock(), "face_recognition": mock_fr},
+        ):
+            compute_embeddings(path, faces, num_jitters=7)
+        assert mock_fr.face_encodings.call_args[1]["num_jitters"] == 7
+
+    def test_default_num_jitters_is_one(self, tmp_path):
+        path = _make_image(tmp_path)
+        faces = [FaceDetection(image_path=str(path), bbox_x=0, bbox_y=0, bbox_w=10, bbox_h=10)]
+        mock_fr = MagicMock()
+        mock_fr.face_encodings.return_value = [np.zeros(128)]
+        with patch.dict(
+            "sys.modules",
+            {"face_recognition_models": MagicMock(), "face_recognition": mock_fr},
+        ):
+            compute_embeddings(path, faces)
+        assert mock_fr.face_encodings.call_args[1]["num_jitters"] == 1
+
+    def test_scan_and_store_threads_quality_params(self, tmp_path):
+        path = _make_image(tmp_path)
+        faces = [FaceDetection(image_path=str(path), bbox_x=0, bbox_y=0, bbox_w=20, bbox_h=20)]
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            with (
+                patch("pyimgtag.face_embedding.detect_faces", return_value=faces) as mock_detect,
+                patch(
+                    "pyimgtag.face_embedding.compute_embeddings", return_value=[np.zeros(128)]
+                ) as mock_embed,
+            ):
+                scan_and_store(
+                    path, db, max_dim=1600, model="cnn", upsample=2, num_jitters=4, min_face_size=30
+                )
+        d_kwargs = mock_detect.call_args[1]
+        assert d_kwargs["max_dim"] == 1600
+        assert d_kwargs["model"] == "cnn"
+        assert d_kwargs["upsample"] == 2
+        assert d_kwargs["min_face_size"] == 30
+        e_kwargs = mock_embed.call_args[1]
+        assert e_kwargs["num_jitters"] == 4
+        # min_face_size is a detection concern only — never forwarded to encoding.
+        assert "min_face_size" not in e_kwargs

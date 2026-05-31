@@ -22,6 +22,47 @@ logger = logging.getLogger(__name__)
 
 _CLUSTER_INTERVAL_S = 30
 
+# Detection-quality presets bundling the dlib knobs. The granular --max-dim /
+# --detection-model / --upsample / --num-jitters flags override any field.
+# max_dim is held at 1280 across presets on purpose: stored bboxes live in the
+# resized-image space and the faces UI (face_thumb / the preview endpoint)
+# assumes a 1280 detection space when scaling crops back. The quality gain comes
+# from upsampling (finds smaller faces), jitter (better encodings), and the cnn
+# model — not from a larger max_dim, which would misalign every thumbnail.
+_FACE_QUALITY_PRESETS = {
+    "fast": {"model": "hog", "upsample": 1, "num_jitters": 1, "max_dim": 1280},
+    "balanced": {"model": "hog", "upsample": 2, "num_jitters": 4, "max_dim": 1280},
+    "accurate": {"model": "cnn", "upsample": 1, "num_jitters": 10, "max_dim": 1280},
+}
+
+
+def _resolve_face_quality(args: argparse.Namespace) -> dict:
+    """Resolve a scan's detection settings from its preset plus any overrides."""
+    preset = dict(_FACE_QUALITY_PRESETS[getattr(args, "quality", None) or "balanced"])
+    if getattr(args, "detection_model", None) is not None:
+        preset["model"] = args.detection_model
+    if getattr(args, "max_dim", None) is not None:
+        preset["max_dim"] = args.max_dim
+    if getattr(args, "upsample", None) is not None:
+        preset["upsample"] = args.upsample
+    if getattr(args, "num_jitters", None) is not None:
+        preset["num_jitters"] = args.num_jitters
+    preset["min_face_size"] = getattr(args, "min_face_size", 0) or 0
+    return preset
+
+
+def _validate_face_quality(q: dict) -> str | None:
+    """Return an error message for out-of-range detection settings, else None."""
+    if q["max_dim"] < 1:
+        return "--max-dim must be >= 1"
+    if q["upsample"] < 0:
+        return "--upsample must be >= 0"
+    if q["num_jitters"] < 1:
+        return "--num-jitters must be >= 1"
+    if q["min_face_size"] < 0:
+        return "--min-face-size must be >= 0"
+    return None
+
 
 def cmd_faces(args: argparse.Namespace) -> int:
     """Dispatch faces sub-actions."""
@@ -144,6 +185,25 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         print("No image files found.", file=sys.stderr)
         return 0
 
+    quality = _resolve_face_quality(args)
+    err = _validate_face_quality(quality)
+    if err:
+        print(f"Error: {err}", file=sys.stderr)
+        return 1
+    size_note = f", min-face-size={quality['min_face_size']}" if quality["min_face_size"] else ""
+    print(
+        f"Quality: {getattr(args, 'quality', None) or 'balanced'} "
+        f"(model={quality['model']}, max-dim={quality['max_dim']}, "
+        f"upsample={quality['upsample']}, jitters={quality['num_jitters']}{size_note}). "
+        "Use --quality fast for the previous speed.",
+        file=sys.stderr,
+    )
+    print(
+        "Already-scanned images are skipped; run 'faces reset-untrusted --yes' "
+        "(or 'faces reset') first to re-detect them at a new quality.",
+        file=sys.stderr,
+    )
+
     total_faces = 0
     scanned = 0
 
@@ -170,7 +230,13 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
 
                     try:
                         count = scan_and_store(
-                            file_path, db, max_dim=args.max_dim, model=args.detection_model
+                            file_path,
+                            db,
+                            max_dim=quality["max_dim"],
+                            model=quality["model"],
+                            upsample=quality["upsample"],
+                            num_jitters=quality["num_jitters"],
+                            min_face_size=quality["min_face_size"],
                         )
                     except OSError as exc:
                         import errno as _errno

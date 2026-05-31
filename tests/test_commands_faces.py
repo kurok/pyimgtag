@@ -19,6 +19,7 @@ from pyimgtag.commands.faces import (
     _handle_faces_reset_untrusted,
     _handle_faces_review,
     _handle_faces_scan,
+    _resolve_face_quality,
     _start_cluster_thread,
     _write_person_keywords,
     cmd_faces,
@@ -37,6 +38,10 @@ def _make_args(**kwargs) -> argparse.Namespace:
         limit=None,
         max_dim=800,
         detection_model="hog",
+        quality="fast",
+        upsample=None,
+        num_jitters=None,
+        min_face_size=0,
         eps=0.5,
         min_samples=2,
         dry_run=False,
@@ -824,3 +829,117 @@ class TestFacesReset:
         for action in ("reset", "reset-untrusted", "recluster"):
             rc = cmd_faces(_make_args(db=str(db_path), faces_action=action, yes=False))
             assert rc == 0
+
+
+def _q(**kw):
+    base = dict(
+        quality="balanced",
+        detection_model=None,
+        max_dim=None,
+        upsample=None,
+        num_jitters=None,
+        min_face_size=0,
+    )
+    base.update(kw)
+    return argparse.Namespace(**base)
+
+
+class TestResolveFaceQuality:
+    def test_balanced_is_default(self):
+        assert _resolve_face_quality(_q()) == {
+            "model": "hog",
+            "upsample": 2,
+            "num_jitters": 4,
+            "max_dim": 1280,
+            "min_face_size": 0,
+        }
+
+    def test_fast_preset_matches_old_behavior(self):
+        assert _resolve_face_quality(_q(quality="fast")) == {
+            "model": "hog",
+            "upsample": 1,
+            "num_jitters": 1,
+            "max_dim": 1280,
+            "min_face_size": 0,
+        }
+
+    def test_accurate_preset(self):
+        assert _resolve_face_quality(_q(quality="accurate")) == {
+            "model": "cnn",
+            "upsample": 1,
+            "num_jitters": 10,
+            "max_dim": 1280,
+            "min_face_size": 0,
+        }
+
+    def test_presets_hold_max_dim_constant(self):
+        # max_dim must stay 1280 across presets so faces-UI crops stay aligned.
+        for q in ("fast", "balanced", "accurate"):
+            assert _resolve_face_quality(_q(quality=q))["max_dim"] == 1280
+
+    def test_granular_flags_override_preset(self):
+        assert _resolve_face_quality(
+            _q(
+                quality="fast",
+                detection_model="cnn",
+                max_dim=900,
+                upsample=5,
+                num_jitters=8,
+                min_face_size=40,
+            )
+        ) == {"model": "cnn", "upsample": 5, "num_jitters": 8, "max_dim": 900, "min_face_size": 40}
+
+    def test_none_quality_falls_back_to_balanced(self):
+        q = _resolve_face_quality(_q(quality=None))
+        assert q["model"] == "hog" and q["upsample"] == 2 and q["max_dim"] == 1280
+
+
+class TestScanResolvesQuality:
+    @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.commands.faces.scan_and_store")
+    @patch("pyimgtag.commands.faces.scan_directory")
+    def test_scan_passes_resolved_quality_to_store(
+        self, mock_scan_dir, mock_store, mock_check, mock_dash, tmp_path
+    ):
+        img = tmp_path / "p.jpg"
+        img.write_bytes(b"\xff\xd8\xff")
+        mock_scan_dir.return_value = [img]
+        mock_store.return_value = 0
+        # quality=accurate with no granular overrides -> cnn / 1280 / up1 / jit10
+        args = _make_args(
+            input_dir=str(tmp_path),
+            db=str(tmp_path / "d.db"),
+            quality="accurate",
+            detection_model=None,
+            max_dim=None,
+            min_face_size=25,
+        )
+        assert _handle_faces_scan(args) == 0
+        kwargs = mock_store.call_args[1]
+        assert kwargs["model"] == "cnn"
+        assert kwargs["max_dim"] == 1280
+        assert kwargs["upsample"] == 1
+        assert kwargs["num_jitters"] == 10
+        assert kwargs["min_face_size"] == 25
+
+    @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.commands.faces.scan_and_store")
+    @patch("pyimgtag.commands.faces.scan_directory")
+    def test_scan_rejects_invalid_quality_values(
+        self, mock_scan_dir, mock_store, mock_check, mock_dash, tmp_path, capsys
+    ):
+        img = tmp_path / "p.jpg"
+        img.write_bytes(b"\xff\xd8\xff")
+        mock_scan_dir.return_value = [img]
+        for bad, msg in [
+            (dict(max_dim=0), "--max-dim"),
+            (dict(upsample=-1), "--upsample"),
+            (dict(num_jitters=0), "--num-jitters"),
+            (dict(min_face_size=-5), "--min-face-size"),
+        ]:
+            args = _make_args(input_dir=str(tmp_path), db=str(tmp_path / "d.db"), **bad)
+            assert _handle_faces_scan(args) == 1
+            assert msg in capsys.readouterr().err
+        mock_store.assert_not_called()  # never reached the scan loop

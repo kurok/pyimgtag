@@ -55,6 +55,8 @@ def detect_faces(
     image_path: str | Path,
     max_dim: int = _DEFAULT_MAX_DIM,
     model: str = "hog",
+    upsample: int = 1,
+    min_face_size: int = 0,
 ) -> list[FaceDetection]:
     """Detect faces in an image and return bounding boxes.
 
@@ -63,6 +65,13 @@ def detect_faces(
         max_dim: Maximum image dimension (longest side) before detection.
             Smaller values are faster but may miss small faces.
         model: Detection model — "hog" (fast, CPU) or "cnn" (accurate, GPU).
+        upsample: How many times to upsample the image before detecting
+            (dlib's ``number_of_times_to_upsample``). Higher values find
+            smaller / more distant faces but cost roughly 4x time and memory
+            per extra level.
+        min_face_size: Drop detections whose shorter bounding-box side (in the
+            resized image's pixels) is below this many pixels. ``0`` keeps all
+            detections. Useful to discard tiny false positives.
 
     Returns:
         List of FaceDetection objects with bounding box coordinates
@@ -84,17 +93,23 @@ def detect_faces(
     img_array = np.array(img)
 
     # face_recognition returns (top, right, bottom, left) tuples
-    locations = face_recognition.face_locations(img_array, model=model)
+    locations = face_recognition.face_locations(
+        img_array, number_of_times_to_upsample=upsample, model=model
+    )
 
     results: list[FaceDetection] = []
     for top, right, bottom, left in locations:
+        w = right - left
+        h = bottom - top
+        if min_face_size and min(w, h) < min_face_size:
+            continue
         results.append(
             FaceDetection(
                 image_path=str(path),
                 bbox_x=left,
                 bbox_y=top,
-                bbox_w=right - left,
-                bbox_h=bottom - top,
+                bbox_w=w,
+                bbox_h=h,
                 confidence=1.0,
             )
         )
