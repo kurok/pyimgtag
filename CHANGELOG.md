@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-05-31
+
+### Added
+- **Face-detection quality controls** (#254): `faces scan` gains a `--quality {fast,balanced,accurate}` preset plus granular `--upsample`, `--num-jitters`, and `--min-face-size` flags (alongside the existing `--detection-model`/`--max-dim`). Detection previously used dlib's weakest defaults (no upsampling, no encoding jitter); upsampling finds smaller/distant faces and jitter produces more robust 128-d encodings (better clustering/matching). `accurate` uses the cnn model. `max_dim` is held at 1280 across presets so faces-UI thumbnail crops stay aligned. Invalid values are rejected before scanning.
+
+### Changed
+- **Default scan quality is now `balanced`** (#254): `faces scan` defaults to `hog, upsample 2, jitters 4` — more accurate but several times slower than before. Pass `--quality fast` to restore the previous speed. Note: already-scanned images are skipped, so to re-detect an existing library at a new quality, run `faces reset-untrusted --yes` (or `faces reset`) first.
+
 ## [0.22.0] - 2026-05-31
 
 ### Added
