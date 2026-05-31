@@ -6,7 +6,7 @@ Thank you for your interest in contributing to pyimgtag! This guide covers every
 
 ### Prerequisites
 
-- macOS (primary platform) or Linux
+- macOS (primary platform), Linux, or Windows
 - Python 3.11 or newer (3.14 recommended)
 - Git
 - [Ollama](https://ollama.ai) (for running the tool, not required for tests)
@@ -37,15 +37,20 @@ pytest
 ```
 pyimgtag/
   src/pyimgtag/
-    main.py           CLI entry point and orchestration
+    main.py           CLI entry point and subcommand dispatch (thin)
     models.py         Data classes
     scanner.py        Directory and Photos library scanning
     exif_reader.py    EXIF GPS + date extraction
     ollama_client.py  Ollama vision API client
+    cloud_clients.py  Anthropic / OpenAI / Gemini vision-API adapters
     geocoder.py       Nominatim reverse geocoder with disk cache
     filters.py        Date/GPS filter logic
     output_writer.py  JSON/CSV/JSONL output
+    progress_db.py    SQLite progress DB with versioned migrations
+    judge_scorer.py   Weighted 13-criterion rubric scoring
     cache.py          Simple JSON disk cache
+    commands/         Per-subcommand handlers (run, judge, faces, query, ...)
+    webapp/           FastAPI dashboard + review/faces/tags/query/judge UIs
   tests/              Unit tests (no network, no Ollama required)
   .github/workflows/  CI/CD pipelines
 ```
@@ -176,7 +181,7 @@ refactor(geocoder): extract rate limiter into separate class
 - **Last push approval** required -- the person who pushes last cannot self-approve
 - **All review threads** must be resolved before merge
 - **Required linear history** -- squash or rebase merges only (no merge commits)
-- **CI must be green** -- the `test (ubuntu-latest, 3.12)` status check must pass
+- **CI must be green** -- the `test (ubuntu-latest, 3.14)` status check must pass
 - **CodeQL** analysis must pass (high or higher severity threshold)
 - No force pushes or branch deletion on `main`
 
@@ -215,15 +220,18 @@ All of these run in CI, so catching issues locally saves round-trips.
 
 ## CI Pipeline
 
-Every push and PR triggers 5 parallel CI jobs:
+Every push and PR triggers these parallel CI jobs (`.github/workflows/python-package.yml`):
 
 | Job | What it checks |
 |---|---|
 | **lint** | `ruff format --check` + `ruff check` |
+| **typecheck** | mypy type checking |
 | **pre-commit** | Trailing whitespace, EOF, YAML, JSON, merge conflicts, ruff |
-| **test** | Pytest matrix: Ubuntu x (3.11–3.14), macOS x (3.12–3.14), Windows x (3.13–3.14); 85% coverage threshold |
-| **typecheck** | mypy strict checking |
+| **test** | Pytest matrix: Ubuntu / macOS / Windows on Python 3.14; coverage uploaded from Ubuntu (85% threshold) |
 | **security** | bandit + pip-audit (dependency vulnerabilities) |
+| **docker** | Build the Docker image and run smoke tests |
+
+A separate `pr-tests` workflow runs a Playwright Chromium smoke against the dashboard, and CodeQL runs in its own workflow.
 
 ## Code Guidelines
 
