@@ -607,6 +607,8 @@ class TestLazyPhotoscriptImport:
         import importlib
         import sys
 
+        import pyimgtag
+
         mod_name = "pyimgtag.photos_faces_importer"
         saved = sys.modules.pop(mod_name, None)
         ps_saved = sys.modules.pop("photoscript", None)
@@ -616,8 +618,16 @@ class TestLazyPhotoscriptImport:
                 "photoscript was imported at module level in photos_faces_importer"
             )
         finally:
+            # Restore BOTH sys.modules AND the parent-package attribute. The
+            # re-import above rebinds ``pyimgtag.photos_faces_importer`` (the
+            # attribute) to a throwaway module object; if we only restore
+            # sys.modules, later ``from pyimgtag import photos_faces_importer``
+            # resolves the throwaway while ``patch("pyimgtag.photos_faces_importer.X")``
+            # targets the sys.modules one — the two diverge and every
+            # module-level patch in subsequent tests silently misses.
             if saved is not None:
                 sys.modules[mod_name] = saved
+                pyimgtag.photos_faces_importer = saved
             if ps_saved is not None:
                 sys.modules["photoscript"] = ps_saved
 
@@ -704,12 +714,15 @@ class TestAppLevelWalkFailure:
         from pyimgtag import photos_faces_importer
 
         with self._make_db(tmp_path) as db:
-
-            def _fake_run(cmd, **_kw):
+            # Mock at the _run_bulk_osascript seam rather than subprocess.run so
+            # the real /usr/bin/osascript binary is never consulted. On Linux/
+            # Windows runners that binary is absent, and a subprocess.run patch
+            # that misses lets the real call raise OSError -> the bulk path falls
+            # through to the photoscript branch -> RuntimeError. Patching the
+            # helper keeps the test platform-independent.
+            def _fake_osascript(script):
                 proc = MagicMock()
-                script = cmd[2]
-                is_app_walk = "set _people_list" in script
-                if is_app_walk:
+                if "set _people_list" in script:
                     # app-level walk fails
                     proc.returncode = 1
                     proc.stdout = ""
@@ -726,7 +739,10 @@ class TestAppLevelWalkFailure:
                     "pyimgtag.photos_faces_importer.is_applescript_available",
                     new=lambda: True,
                 ),
-                patch("pyimgtag.photos_faces_importer.subprocess.run", side_effect=_fake_run),
+                patch(
+                    "pyimgtag.photos_faces_importer._run_bulk_osascript",
+                    side_effect=_fake_osascript,
+                ),
             ):
                 imported, skipped = photos_faces_importer.import_photos_persons(db)
 
