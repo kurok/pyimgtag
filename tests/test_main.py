@@ -229,6 +229,76 @@ class TestBuildParser:
             )
 
 
+class TestCheckForUpdate:
+    def test_skips_when_env_var_set(self, monkeypatch, capsys):
+        from pyimgtag.main import _check_for_update
+
+        monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+        _check_for_update()  # must return early, no output
+        assert capsys.readouterr().err == ""
+
+    def test_import_error_is_silent_no_op(self, monkeypatch, capsys):
+        from pyimgtag import main as main_mod
+
+        monkeypatch.delenv("PYIMGTAG_NO_UPDATE_CHECK", raising=False)
+        # Force the lazy import of routes_about to fail (webapp extras absent).
+        with patch.dict("sys.modules", {"pyimgtag.webapp.routes_about": None}):
+            main_mod._check_for_update()
+        assert capsys.readouterr().err == ""
+
+    def test_latest_version_exception_is_swallowed(self, monkeypatch, capsys):
+        from pyimgtag import main as main_mod
+
+        monkeypatch.delenv("PYIMGTAG_NO_UPDATE_CHECK", raising=False)
+        with (
+            patch("pyimgtag.webapp.routes_about._latest_version", side_effect=RuntimeError("net")),
+            patch("pyimgtag.webapp.routes_about._is_newer", return_value=True),
+        ):
+            main_mod._check_for_update()
+        assert capsys.readouterr().err == ""
+
+    def test_prints_banner_when_newer_available(self, monkeypatch, capsys):
+        from pyimgtag import main as main_mod
+
+        monkeypatch.delenv("PYIMGTAG_NO_UPDATE_CHECK", raising=False)
+        with (
+            patch("pyimgtag.webapp.routes_about._latest_version", return_value="99.0.0"),
+            patch("pyimgtag.webapp.routes_about._is_newer", return_value=True),
+        ):
+            main_mod._check_for_update()
+        err = capsys.readouterr().err
+        assert "99.0.0 is available" in err
+        assert "pip install --upgrade pyimgtag" in err
+
+    def test_no_banner_when_not_newer(self, monkeypatch, capsys):
+        from pyimgtag import main as main_mod
+
+        monkeypatch.delenv("PYIMGTAG_NO_UPDATE_CHECK", raising=False)
+        with (
+            patch("pyimgtag.webapp.routes_about._latest_version", return_value="0.0.1"),
+            patch("pyimgtag.webapp.routes_about._is_newer", return_value=False),
+        ):
+            main_mod._check_for_update()
+        assert capsys.readouterr().err == ""
+
+
+class TestMainUnknownSubcommand:
+    def test_unknown_subcommand_prints_help_returns_1(self, monkeypatch, capsys):
+        # Force args.subcommand to a value with no dispatch entry so the
+        # ``handler is None`` guard prints help and returns 1.
+        from pyimgtag import main as main_mod
+
+        ns = argparse.Namespace(subcommand="bogus")
+        fake_parser = MagicMock()
+        fake_parser.parse_args.return_value = ns
+        monkeypatch.setattr(main_mod, "build_parser", lambda: fake_parser)
+        monkeypatch.setattr(main_mod, "_check_for_update", lambda: None)
+
+        result = main_mod.main(["bogus"])
+        assert result == 1
+        fake_parser.print_help.assert_called()
+
+
 class TestMainNoSource:
     def test_missing_dir_returns_error(self):
         result = main(["run", "--input-dir", "/nonexistent/path/12345"])
@@ -390,6 +460,40 @@ class TestCleanupSubcommand:
         assert "Cleanup candidates" in out
         assert "[delete]" in out
         assert "photo.jpg" in out
+
+    def test_cleanup_shows_location_when_city_and_country_set(self, tmp_path, capsys):
+        # The city/country/date columns are formatted in cmd_cleanup. Drive
+        # it with a stub ProgressDB whose get_cleanup_candidates returns a
+        # row carrying both a city and a country so the "<city>, <country>"
+        # join and the date-column branches both render.
+        import json
+
+        from pyimgtag.commands import db as db_cmd
+
+        candidate = {
+            "file_path": "/photos/x.jpg",
+            "file_name": "x.jpg",
+            "tags": json.dumps(["blur", "duplicate"]),
+            "scene_summary": "blurry",
+            "image_date": "2026-04-01T12:00:00",
+            "cleanup_class": "delete",
+            "nearest_city": "Kyiv",
+            "nearest_country": "UA",
+        }
+        stub_db = MagicMock()
+        stub_db.__enter__.return_value = stub_db
+        stub_db.__exit__.return_value = False
+        stub_db.get_cleanup_candidates.return_value = [candidate]
+
+        ns = argparse.Namespace(db=str(tmp_path / "x.db"), include_review=False)
+        with patch.object(db_cmd, "ProgressDB", return_value=stub_db):
+            result = db_cmd.cmd_cleanup(ns)
+        assert result == 0
+        out = capsys.readouterr().out
+        # "<city>, <country>" line plus the date column must render.
+        assert "Kyiv, UA" in out
+        assert "2026-04-01" in out
+        assert "tags: blur, duplicate" in out
 
     def test_cleanup_without_include_review_omits_review(self, tmp_path, capsys):
         from pyimgtag.models import ImageResult
@@ -837,6 +941,20 @@ class TestQuerySubcommand:
         assert result == 0
         assert "1 image(s) found" in capsys.readouterr().err
 
+    def test_query_has_text_flag_runs(self, tmp_path):
+        # Exercises the ``has_text = True`` branch in cmd_query.
+        db_path = self._make_db(tmp_path)
+        result = main(["query", "--db", db_path, "--has-text"])
+        assert result == 0
+
+    def test_query_no_text_flag_runs(self, tmp_path, capsys):
+        # Exercises the ``has_text = False`` branch in cmd_query; both
+        # seeded rows have no text so they should all match.
+        db_path = self._make_db(tmp_path)
+        result = main(["query", "--db", db_path, "--no-text"])
+        assert result == 0
+        assert "2 image(s) found" in capsys.readouterr().err
+
 
 class TestTagsSubcommand:
     def _make_db(self, tmp_path):
@@ -920,6 +1038,16 @@ class TestTagsSubcommand:
     def test_tags_no_action_returns_error(self, tmp_path):
         result = main(["tags"])
         assert result == 1
+
+    def test_tags_unknown_action_returns_error(self, tmp_path, capsys):
+        # The parser never emits an unknown ``tags_action``, so drive
+        # cmd_tags directly to cover the defensive fallthrough branch.
+        from pyimgtag.commands.tags import cmd_tags
+
+        ns = argparse.Namespace(tags_action="frobnicate", db=str(tmp_path / "x.db"))
+        result = cmd_tags(ns)
+        assert result == 1
+        assert "Unknown tags action: frobnicate" in capsys.readouterr().err
 
     def test_tags_merge_dry_run_does_not_modify(self, tmp_path, capsys):
         from pyimgtag.progress_db import ProgressDB

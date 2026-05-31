@@ -35,7 +35,7 @@ try:
         file_path: str
         cleanup_class: str | None
 
-except ImportError:
+except ImportError:  # pragma: no cover - pydantic ships with fastapi (review extra)
     _TagsBody = None  # type: ignore[assignment,misc]
     _CleanupBody = None  # type: ignore[assignment,misc]
 
@@ -468,7 +468,7 @@ def _make_thumbnail(image_path: str, size: int) -> bytes | None:
     with contextlib.suppress(ImportError):
         from pillow_heif import register_heif_opener  # type: ignore[import-untyped]
 
-        register_heif_opener()
+        register_heif_opener()  # pragma: no cover - only runs with the [heic] extra
 
     cache_key = hashlib.sha256(f"{image_path}:{size}".encode()).hexdigest()
     cache_path = _THUMB_DIR / f"{cache_key}.jpg"

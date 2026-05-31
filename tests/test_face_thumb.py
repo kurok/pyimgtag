@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -77,3 +78,35 @@ class TestFaceThumbnailB64:
         assert avg_r > 80, (
             f"Expected bright red crop (avg_r={avg_r:.1f}), got dark — bbox not scaled"
         )
+
+    def test_heic_source_is_converted(self, tmp_path):
+        """HEIC inputs are routed through convert_heic_to_jpeg before cropping.
+
+        is_heic/convert_heic_to_jpeg are mocked at their module boundary so the
+        HEIC branch runs even on platforms without sips (e.g. CI on Linux).
+        """
+        # The actual pixels live in this JPEG; the .heic path is only a label.
+        real = self._make_image(tmp_path, width=200, height=200, color=(10, 200, 30))
+        heic_path = str(tmp_path / "photo.heic")
+
+        with (
+            patch("pyimgtag.heic_converter.is_heic", return_value=True),
+            patch("pyimgtag.heic_converter.convert_heic_to_jpeg", return_value=real) as mock_conv,
+        ):
+            result = face_thumbnail_b64(heic_path, bbox_x=40, bbox_y=40, bbox_w=80, bbox_h=80)
+
+        mock_conv.assert_called_once_with(heic_path)
+        assert result is not None
+        thumb = Image.open(io.BytesIO(base64.b64decode(result))).convert("RGB")
+        assert thumb.format is None or thumb.size == (120, 120)
+
+    def test_degenerate_crop_after_clamp_returns_none(self, tmp_path):
+        """A bbox fully off the right/bottom edge collapses the crop → None.
+
+        With bbox_x/bbox_y beyond the image and zero padding the clamped
+        ``right <= left`` / ``bottom <= top`` guard (line 76) must fire.
+        """
+        path = self._make_image(tmp_path, width=100, height=100)
+        # bbox starts at the far edge; padding 0 so left=100 right=min(100,100)=100
+        result = face_thumbnail_b64(path, bbox_x=100, bbox_y=100, bbox_w=10, bbox_h=10, padding=0.0)
+        assert result is None

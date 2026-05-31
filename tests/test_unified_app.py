@@ -117,6 +117,30 @@ def test_unified_app_dashboard_nav_includes_new_links(tmp_path):
         assert href in r.text, f"dashboard nav missing {href}"
 
 
+def test_unified_app_health_endpoint(tmp_path):
+    """/health returns ok=True, the running version, and the DB path (lines 54-56)."""
+    from pyimgtag import __version__
+
+    db_path = _seed(tmp_path)
+    app = create_unified_app(db_path=db_path)
+    client = TestClient(app)
+    r = client.get("/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["version"] == __version__
+    assert body["db"] == str(db_path)
+
+
+def test_create_unified_app_missing_fastapi_raises_importerror(tmp_path):
+    """The fastapi import guard (lines 26-27) raises a helpful ImportError."""
+    from unittest.mock import patch
+
+    with patch.dict("sys.modules", {"fastapi": None}):
+        with pytest.raises(ImportError, match="fastapi and uvicorn are required"):
+            create_unified_app(db_path=_seed(tmp_path))
+
+
 def test_openapi_schema_generates(tmp_path):
     """OpenAPI generation must not crash.
 

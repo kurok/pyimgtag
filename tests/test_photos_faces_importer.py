@@ -620,3 +620,207 @@ class TestLazyPhotoscriptImport:
                 sys.modules[mod_name] = saved
             if ps_saved is not None:
                 sys.modules["photoscript"] = ps_saved
+
+
+class TestHasPhotoscript:
+    """Cover the real _has_photoscript body (find_spec, lru_cache)."""
+
+    def test_returns_true_when_spec_found(self):
+        from pyimgtag import photos_faces_importer
+
+        photos_faces_importer._has_photoscript.cache_clear()
+        try:
+            with patch("importlib.util.find_spec", return_value=MagicMock()):
+                assert photos_faces_importer._has_photoscript() is True
+        finally:
+            photos_faces_importer._has_photoscript.cache_clear()
+
+    def test_returns_false_when_spec_missing(self):
+        from pyimgtag import photos_faces_importer
+
+        photos_faces_importer._has_photoscript.cache_clear()
+        try:
+            with patch("importlib.util.find_spec", return_value=None):
+                assert photos_faces_importer._has_photoscript() is False
+        finally:
+            photos_faces_importer._has_photoscript.cache_clear()
+
+
+class TestBulkAppScriptAlias:
+    def test_bulk_applescript_alias_returns_every_person_form(self):
+        from pyimgtag.photos_faces_importer import (
+            _bulk_applescript,
+            _bulk_applescript_every_person,
+        )
+
+        assert _bulk_applescript() == _bulk_applescript_every_person()
+
+
+class TestRunBulkOsascript:
+    """Cover _run_bulk_osascript error branches (timeout, OSError)."""
+
+    def test_timeout_raises_unavailable(self):
+        from pyimgtag.photos_faces_importer import (
+            _BulkAppleScriptUnavailable,
+            _run_bulk_osascript,
+        )
+
+        with patch(
+            "pyimgtag.photos_faces_importer.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=1800),
+        ):
+            with pytest.raises(_BulkAppleScriptUnavailable, match="timed out"):
+                _run_bulk_osascript('tell application "Photos"\nreturn ""\nend tell')
+
+    def test_oserror_raises_unavailable(self):
+        from pyimgtag.photos_faces_importer import (
+            _BulkAppleScriptUnavailable,
+            _run_bulk_osascript,
+        )
+
+        with patch(
+            "pyimgtag.photos_faces_importer.subprocess.run",
+            side_effect=OSError("no such binary"),
+        ):
+            with pytest.raises(_BulkAppleScriptUnavailable, match="failed to launch osascript"):
+                _run_bulk_osascript("script")
+
+
+class TestAppLevelWalkFailure:
+    """Cover the branch where the app-level 'people' walk itself fails (line 386)."""
+
+    def _make_db(self, tmp_path):
+        from pyimgtag.progress_db import ProgressDB
+
+        return ProgressDB(db_path=tmp_path / "test.db")
+
+    def test_app_people_walk_nonzero_logs_and_returns_empty(self, tmp_path):
+        """Per-photo path returns 0 persons, then the app-level walk also fails.
+
+        The first osascript call succeeds with no person rows, triggering the
+        app-level retry. That retry returns a non-zero exit, so the warning
+        branch (line 386-389) runs and the result stays empty.
+        """
+        from pyimgtag import photos_faces_importer
+
+        with self._make_db(tmp_path) as db:
+
+            def _fake_run(cmd, **_kw):
+                proc = MagicMock()
+                script = cmd[2]
+                is_app_walk = "set _people_list" in script
+                if is_app_walk:
+                    # app-level walk fails
+                    proc.returncode = 1
+                    proc.stdout = ""
+                    proc.stderr = "app-level boom"
+                else:
+                    # per-photo path: succeeds but emits zero persons
+                    proc.returncode = 0
+                    proc.stdout = "uuid1\t\n"
+                    proc.stderr = ""
+                return proc
+
+            with (
+                patch(
+                    "pyimgtag.photos_faces_importer.is_applescript_available",
+                    new=lambda: True,
+                ),
+                patch("pyimgtag.photos_faces_importer.subprocess.run", side_effect=_fake_run),
+            ):
+                imported, skipped = photos_faces_importer.import_photos_persons(db)
+
+            assert imported == 0
+            assert skipped == 0
+            assert db.get_persons() == []
+
+
+class TestPhotoscriptFallbackEdgeCases:
+    """Cover the slow photoscript fallback's remaining branches."""
+
+    def _make_db(self, tmp_path):
+        from pyimgtag.progress_db import ProgressDB
+
+        return ProgressDB(db_path=tmp_path / "test.db")
+
+    def test_unreadable_uuid_is_skipped(self, tmp_path):
+        """A photo whose .uuid getter raises must be skipped (lines 469-470)."""
+        with self._make_db(tmp_path) as db:
+            bad = MagicMock()
+            type(bad).persons = property(lambda self: ["Alice"])
+            type(bad).uuid = property(
+                lambda self: (_ for _ in ()).throw(RuntimeError("uuid unreadable"))
+            )
+
+            library = MagicMock()
+            library.photos.return_value = [bad]
+
+            with _photoscript_only(library):
+                imported, skipped = import_photos_persons(db)
+
+            # uuid could not be read, so the name never maps to a uuid → no person.
+            assert imported == 0
+            assert db.get_persons() == []
+
+    def test_photoscript_periodic_progress_line(self, tmp_path):
+        """The photoscript fallback emits a periodic counter every 200 photos (479-480)."""
+        from pyimgtag.photos_faces_importer import _PROGRESS_EVERY
+
+        with self._make_db(tmp_path) as db:
+            photos = [_mock_photo(f"uuid_{i:04d}", [f"P{i}"]) for i in range(_PROGRESS_EVERY + 10)]
+            library = MagicMock()
+            library.photos.return_value = photos
+            messages: list[str] = []
+
+            with _photoscript_only(library):
+                import_photos_persons(db, progress=messages.append)
+
+            assert any(m.startswith("\r[faces] processed") for m in messages), (
+                f"missing periodic photoscript line; got first few: {messages[:3]!r}"
+            )
+
+
+class TestListPhotosFailure:
+    """Cover _list_photos exception handling (lines 557-559)."""
+
+    def test_enumeration_failure_returns_empty_list(self):
+        from pyimgtag.photos_faces_importer import _list_photos
+
+        library = MagicMock()
+        library.photos.side_effect = RuntimeError("AppleScript bridge died")
+        assert _list_photos(library) == []
+
+
+class TestPhotoPersonNames:
+    """Cover _photo_person_names defensive branches."""
+
+    def test_single_name_string_wrapped_in_list(self):
+        """A bridge that returns a bare string must be wrapped (line 580)."""
+        from pyimgtag.photos_faces_importer import _photo_person_names
+
+        photo = MagicMock()
+        type(photo).persons = property(lambda self: "Alice")
+        assert _photo_person_names(photo) == ["Alice"]
+
+    def test_persons_getter_raises_returns_empty(self):
+        from pyimgtag.photos_faces_importer import _photo_person_names
+
+        photo = MagicMock()
+        type(photo).persons = property(
+            lambda self: (_ for _ in ()).throw(RuntimeError("no metadata"))
+        )
+        assert _photo_person_names(photo) == []
+
+    def test_empty_persons_returns_empty(self):
+        from pyimgtag.photos_faces_importer import _photo_person_names
+
+        photo = MagicMock()
+        type(photo).persons = property(lambda self: [])
+        assert _photo_person_names(photo) == []
+
+    def test_list_of_names_coerced_to_str(self):
+        from pyimgtag.photos_faces_importer import _photo_person_names
+
+        photo = MagicMock()
+        type(photo).persons = property(lambda self: ["Alice", "Bob"])
+        assert _photo_person_names(photo) == ["Alice", "Bob"]

@@ -703,3 +703,155 @@ class TestParseJudgeResponseEdgeCases:
         assert result is not None
         assert result.impact == 9
         assert result.story_subject == 6
+
+
+class TestOllamaClientTagImage:
+    """Exercise the tag_image happy/error paths (ollama_client lines 169-180)."""
+
+    def _make_client(self):
+        from pyimgtag.ollama_client import OllamaClient
+
+        return OllamaClient(model="test")
+
+    def _img(self, tmp_path):
+        from PIL import Image as PILImage
+
+        p = tmp_path / "photo.jpg"
+        PILImage.new("RGB", (100, 100), color=(128, 128, 128)).save(str(p))
+        return p
+
+    def test_tag_image_success(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        img = self._img(tmp_path)
+        payload = '{"tags":["dog","park"],"summary":"a dog in a park"}'
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"message": {"content": payload}}
+        mock_response.raise_for_status = MagicMock()
+        client = self._make_client()
+        with patch.object(client._session, "post", return_value=mock_response):
+            result = client.tag_image(str(img))
+        assert result.error is None
+        assert result.tags == ["dog", "park"]
+        assert result.summary == "a dog in a park"
+
+    def test_tag_image_with_context(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        img = self._img(tmp_path)
+        payload = '{"tags":["paris"],"summary":"the eiffel tower"}'
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"message": {"content": payload}}
+        mock_response.raise_for_status = MagicMock()
+        client = self._make_client()
+        with patch.object(client._session, "post", return_value=mock_response) as mock_post:
+            result = client.tag_image(str(img), context={"city": "Paris"})
+        assert result.tags == ["paris"]
+        # The context-enriched prompt is sent to the model.
+        sent_prompt = mock_post.call_args[1]["json"]["messages"][0]["content"]
+        assert "Paris" in sent_prompt
+
+    def test_tag_image_returns_error_on_request_failure(self, tmp_path):
+        import requests as req
+
+        img = self._img(tmp_path)
+        client = self._make_client()
+        with patch.object(client._session, "post", side_effect=req.RequestException("down")):
+            result = client.tag_image(str(img))
+        assert result.error is not None
+        assert "Ollama request failed" in result.error
+
+    def test_tag_image_returns_error_on_response_parse_failure(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        img = self._img(tmp_path)
+        mock_response = MagicMock()
+        mock_response.json.side_effect = ValueError("bad json")
+        mock_response.raise_for_status = MagicMock()
+        client = self._make_client()
+        with patch.object(client._session, "post", return_value=mock_response):
+            result = client.tag_image(str(img))
+        assert result.error is not None
+        assert "Response parse failed" in result.error
+
+
+class TestPrepareImageBoundaries:
+    """Cover prepare_image_b64 HEIC routing, resize, and summary/text coercion."""
+
+    def _jpeg_bytes(self, size=(10, 10)) -> bytes:
+        import io as _io
+
+        from PIL import Image as _Image
+
+        buf = _io.BytesIO()
+        _Image.new("RGB", size, color=(128, 64, 32)).save(buf, format="JPEG")
+        return buf.getvalue()
+
+    def test_heic_routes_through_sips(self, tmp_path):
+        from pyimgtag.ollama_client import prepare_image_b64
+
+        # convert_heic_to_jpeg returns a temp jpeg that gets opened/cleaned up.
+        converted = tmp_path / "converted.jpg"
+        converted.write_bytes(self._jpeg_bytes())
+        fake_heic = tmp_path / "photo.heic"
+        fake_heic.write_bytes(b"\x00" * 10)
+        with patch("pyimgtag.ollama_client.is_heic", return_value=True):
+            with patch("pyimgtag.ollama_client.sips_available", return_value=True):
+                with patch(
+                    "pyimgtag.ollama_client.convert_heic_to_jpeg", return_value=converted
+                ) as mock_conv:
+                    result = prepare_image_b64(str(fake_heic), max_dim=1280)
+        assert isinstance(result, str) and len(result) > 0
+        mock_conv.assert_called_once()
+        # Temp jpeg cleaned up in the finally block.
+        assert not converted.exists()
+
+    def test_resize_applied_when_larger_than_max_dim(self, tmp_path):
+        from pyimgtag.ollama_client import prepare_image_b64
+
+        big = tmp_path / "big.jpg"
+        big.write_bytes(self._jpeg_bytes(size=(400, 200)))
+        with patch("pyimgtag.ollama_client.is_heic", return_value=False):
+            with patch("pyimgtag.ollama_client.is_raw", return_value=False):
+                result = prepare_image_b64(str(big), max_dim=100)
+        assert isinstance(result, str) and len(result) > 0
+
+    def test_summary_non_string_coerced_to_str(self):
+        # ollama_client line 339: summary present but not a string.
+        r = _parse_response('{"tags":["x"],"summary":12345}')
+        assert r.summary == "12345"
+
+    def test_text_summary_non_string_coerced_to_str(self):
+        # ollama_client line 350: has_text true, text_summary not a string.
+        r = _parse_response('{"tags":["sign"],"has_text":true,"text_summary":999}')
+        assert r.has_text is True
+        assert r.text_summary == "999"
+
+
+class TestRepairTruncatedJson:
+    """Direct tests for _repair_truncated_json escape and failure branches."""
+
+    def test_escaped_quote_inside_truncated_string(self):
+        # ollama_client lines 490-491, 494: backslash escape then closing quote
+        # inside a string while the object is still truncated mid-value.
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        text = '{"a": "he said \\"hi\\"", "b": "unterminated'
+        result = _repair_truncated_json(text)
+        assert result is not None
+        assert result["a"] == 'he said "hi"'
+        # The truncated trailing key/value is dropped.
+        assert "b" not in result
+
+    def test_returns_none_when_candidate_unparseable(self):
+        # ollama_client lines 524-525: a comma at depth 1 sets last_safe, but the
+        # trimmed-and-closed candidate is still invalid JSON, so json.loads fails.
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        text = '{"a":, "b": 2,'
+        assert _repair_truncated_json(text) is None
+
+    def test_returns_none_when_nothing_salvageable(self):
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        assert _repair_truncated_json('{"a": 1') is None

@@ -170,6 +170,16 @@ def test_list_scores_min_max_rating_filter(tmp_path):
     assert clamped["total"] == 0
 
 
+def test_judge_router_missing_fastapi_raises_importerror(tmp_path):
+    """The fastapi import guard (lines 323-324) raises a helpful ImportError."""
+    from unittest.mock import patch
+
+    db = ProgressDB(db_path=tmp_path / "guard.db")
+    with patch.dict("sys.modules", {"fastapi": None}):
+        with pytest.raises(ImportError, match="fastapi is required"):
+            build_judge_router(db)
+
+
 def test_list_scores_unknown_sort_falls_back(tmp_path):
     db = _seeded_db(tmp_path)
     app = FastAPI()

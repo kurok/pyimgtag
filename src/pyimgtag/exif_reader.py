@@ -19,13 +19,13 @@ from pyimgtag.models import ExifData
 
 try:
     import exifread
-except ImportError:
+except ImportError:  # pragma: no cover - exifread is a core dependency
     exifread = None  # type: ignore[assignment]
 
 with contextlib.suppress(ImportError):
     import pillow_heif
 
-    pillow_heif.register_heif_opener()
+    pillow_heif.register_heif_opener()  # pragma: no cover - only runs with the [heic] extra
 
 
 def read_exif(file_path: str | Path) -> ExifData:

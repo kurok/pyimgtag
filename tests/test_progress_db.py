@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -1881,3 +1883,575 @@ class TestDriftPrune:
             removed = db.delete_image_rows([paths[0], "/nope/missing.jpg"])
             assert removed == 1
             assert db.count_images() == 3
+
+
+class TestInitDefaultsAndProperty:
+    """Cover the default db_path branch and the ``path`` property."""
+
+    def test_default_db_path_under_cache(self, tmp_path, monkeypatch):
+        """db_path=None must default to ~/.cache/pyimgtag/progress.db."""
+        fake_home = tmp_path / "home"
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        with ProgressDB() as db:
+            expected = fake_home / ".cache" / "pyimgtag" / "progress.db"
+            assert db.path == expected
+            assert expected.exists()
+
+    def test_path_property_returns_backing_file(self, tmp_path):
+        db_path = tmp_path / "explicit.db"
+        with ProgressDB(db_path=db_path) as db:
+            assert db.path == db_path
+
+
+class TestMigrationErrorBranches:
+    """Cover the duplicate-column tolerance and savepoint rollback in _migrate."""
+
+    def test_duplicate_column_is_tolerated(self, tmp_path):
+        """A migration ALTER that hits an already-present column is swallowed."""
+        db_path = tmp_path / "dup.db"
+        conn = sqlite3.connect(str(db_path))
+        # v1 baseline table but already carrying one of the v2 columns
+        # (scene_category) so the v2 migration ALTER raises "duplicate column".
+        conn.execute(
+            """
+            CREATE TABLE processed_images (
+                file_path TEXT PRIMARY KEY, file_size INTEGER, file_mtime REAL,
+                tags TEXT, scene_summary TEXT, processed_at TEXT, status TEXT,
+                error_message TEXT, scene_category TEXT
+            )
+            """
+        )
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        conn.close()
+
+        # Must open without raising despite the duplicate scene_category column.
+        with ProgressDB(db_path=db_path) as db:
+            assert db._conn.execute("PRAGMA user_version").fetchone()[0] == 11
+
+    def test_migration_failure_rolls_back_and_reraises(self, tmp_path):
+        """A non-duplicate OperationalError propagates after savepoint rollback."""
+        db_path = tmp_path / "broken.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            """
+            CREATE TABLE processed_images (
+                file_path TEXT PRIMARY KEY, file_size INTEGER, file_mtime REAL,
+                tags TEXT, scene_summary TEXT, processed_at TEXT, status TEXT,
+                error_message TEXT
+            )
+            """
+        )
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        conn.close()
+
+        # Build a DB instance without running migrations, then patch one
+        # migration to a statement that errors with something other than a
+        # duplicate-column message so the rollback/re-raise path runs.
+        db = ProgressDB.__new__(ProgressDB)
+        db._path = db_path
+        db._conn = sqlite3.connect(str(db_path))
+        bad = (2, "ALTER TABLE no_such_table ADD COLUMN x TEXT")
+        with mock.patch.object(ProgressDB, "_MIGRATIONS", (bad,)):
+            with pytest.raises(sqlite3.OperationalError):
+                db._migrate()
+        # user_version must remain at 1 because the savepoint rolled back.
+        assert db._conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        db.close()
+
+
+class TestStatOSErrorBranches:
+    """Cover the stat() OSError fall-throughs in is_processed/mark_done/is_fresh."""
+
+    def test_is_processed_stat_oserror_returns_false(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20)
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db.mark_done(img, ImageResult(file_path=str(img), file_name="photo.jpg", tags=["x"]))
+            with mock.patch.object(Path, "stat", side_effect=OSError("boom")):
+                assert db.is_processed(img) is False
+
+    def test_mark_done_stat_oserror_records_zeroes(self, tmp_path):
+        img = tmp_path / "gone.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20)
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            with mock.patch.object(Path, "stat", side_effect=OSError("vanished")):
+                db.mark_done(img, ImageResult(file_path=str(img), file_name="gone.jpg", tags=["x"]))
+            row = db._conn.execute(
+                "SELECT file_size, file_mtime FROM processed_images WHERE file_path = ?",
+                (str(img),),
+            ).fetchone()
+            assert row == (0, 0.0)
+
+    def test_is_fresh_stat_oserror_returns_false(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20)
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db.mark_done(img, ImageResult(file_path=str(img), file_name="photo.jpg", tags=["x"]))
+            with mock.patch.object(Path, "stat", side_effect=OSError("boom")):
+                assert db.is_fresh(img) is False
+
+
+class TestQueryConditionsJudgeBranches:
+    """Cover the min/max judge score and judged True/False filter branches."""
+
+    def _seed(self, db: ProgressDB, tmp_path) -> None:
+        from pyimgtag.models import JudgeResult, JudgeScores
+
+        for name, score in [("low.jpg", 2.0), ("mid.jpg", 5.0), ("high.jpg", 9.0)]:
+            img = _make_image(tmp_path, name)
+            db.mark_done(
+                img,
+                ImageResult(file_path=str(img), file_name=name, tags=["t"], processing_status="ok"),
+            )
+            db.save_judge_result(
+                JudgeResult(
+                    file_path=str(img),
+                    file_name=name,
+                    weighted_score=score,
+                    core_score=score,
+                    visible_score=score,
+                    scores=JudgeScores(),
+                )
+            )
+        # one un-judged image
+        unjudged = _make_image(tmp_path, "none.jpg")
+        db.mark_done(
+            unjudged,
+            ImageResult(file_path=str(unjudged), file_name="none.jpg", tags=["t"]),
+        )
+
+    def test_min_judge_score(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            rows = db.query_images(min_judge_score=5)
+            names = {r["file_name"] for r in rows}
+            assert names == {"mid.jpg", "high.jpg"}
+
+    def test_max_judge_score(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            rows = db.query_images(max_judge_score=5)
+            names = {r["file_name"] for r in rows}
+            assert names == {"low.jpg", "mid.jpg"}
+
+    def test_judged_true(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            rows = db.query_images(judged=True)
+            names = {r["file_name"] for r in rows}
+            assert names == {"low.jpg", "mid.jpg", "high.jpg"}
+
+    def test_judged_false(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            rows = db.query_images(judged=False)
+            assert [r["file_name"] for r in rows] == ["none.jpg"]
+
+
+class TestIterTagRowsMalformed:
+    """Cover the malformed-JSON skip in _iter_tag_rows via rename_tag."""
+
+    def test_malformed_json_row_skipped(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            good = _make_image(tmp_path, "good.jpg")
+            db.mark_done(good, ImageResult(file_path=str(good), file_name="good.jpg", tags=["cat"]))
+            # Insert a row whose tags column is not valid JSON.
+            db._conn.execute(
+                "INSERT INTO processed_images (file_path, tags, status) VALUES (?, ?, ?)",
+                ("/bad/row.jpg", "not-json", "ok"),
+            )
+            db._conn.commit()
+            # rename_tag iterates via _iter_tag_rows; the bad row is silently
+            # skipped and only the good row is renamed.
+            count = db.rename_tag("cat", "feline")
+            assert count == 1
+
+
+class TestDeleteImage:
+    """Cover delete_image (single-row delete by path)."""
+
+    def test_delete_existing_returns_true(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            img = _make_image(tmp_path, "photo.jpg")
+            db.mark_done(img, ImageResult(file_path=str(img), file_name="photo.jpg", tags=["x"]))
+            assert db.delete_image(str(img)) is True
+            assert db.get_image(str(img)) is None
+
+    def test_delete_missing_returns_false(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.delete_image("/not/here.jpg") is False
+
+
+class TestLastrowidGuards:
+    """Cover the RuntimeError guards when lastrowid is None."""
+
+    def test_insert_face_no_rowid_raises(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            fake_cur = mock.MagicMock()
+            fake_cur.lastrowid = None
+            # sqlite3.Connection.execute is read-only, so swap the whole
+            # connection for a MagicMock whose execute() yields a None rowid.
+            db._conn = mock.MagicMock()
+            db._conn.execute.return_value = fake_cur
+            with pytest.raises(RuntimeError, match="faces did not return a row id"):
+                db.insert_face("/img/a.jpg", FaceDetection())
+
+    def test_create_person_no_rowid_raises(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            fake_cur = mock.MagicMock()
+            fake_cur.lastrowid = None
+            db._conn = mock.MagicMock()
+            db._conn.execute.return_value = fake_cur
+            with pytest.raises(RuntimeError, match="persons did not return a row id"):
+                db.create_person(label="X")
+
+
+class TestPhotosPersonAndFaceScanned:
+    """Cover get_photos_person_id, mark_face_scanned, is_face_scanned."""
+
+    def test_get_photos_person_id_found(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="Alice", source="photos")
+            assert db.get_photos_person_id("Alice") == pid
+
+    def test_get_photos_person_id_missing(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.get_photos_person_id("Nobody") is None
+
+    def test_face_scanned_roundtrip(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.is_face_scanned("/img/a.jpg") is False
+            db.mark_face_scanned("/img/a.jpg")
+            assert db.is_face_scanned("/img/a.jpg") is True
+            # Idempotent INSERT OR IGNORE.
+            db.mark_face_scanned("/img/a.jpg")
+            assert db.is_face_scanned("/img/a.jpg") is True
+
+
+class TestPersonLabelAndConfirm:
+    """Cover update_person_label empty branch and confirm_person/confirm_persons."""
+
+    def test_update_person_label_empty_clears_without_confirming(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="Temp")
+            db.update_person_label(pid, "")
+            row = db._conn.execute(
+                "SELECT label, confirmed, trusted FROM persons WHERE id = ?", (pid,)
+            ).fetchone()
+            assert row == ("", 0, 0)
+
+    def test_update_person_label_nonempty_confirms_and_trusts(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="")
+            db.update_person_label(pid, "Real Name")
+            row = db._conn.execute(
+                "SELECT label, confirmed, trusted FROM persons WHERE id = ?", (pid,)
+            ).fetchone()
+            assert row == ("Real Name", 1, 1)
+
+    def test_confirm_person(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(label="X")
+            db.confirm_person(pid)
+            row = db._conn.execute(
+                "SELECT confirmed, trusted FROM persons WHERE id = ?", (pid,)
+            ).fetchone()
+            assert row == (1, 1)
+
+    def test_confirm_persons_empty_is_noop(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.confirm_persons([]) == 0
+
+    def test_confirm_persons_updates_count(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            p1 = db.create_person(label="A")
+            p2 = db.create_person(label="B")
+            updated = db.confirm_persons([p1, p2])
+            assert updated == 2
+            for pid in (p1, p2):
+                row = db._conn.execute(
+                    "SELECT confirmed, trusted FROM persons WHERE id = ?", (pid,)
+                ).fetchone()
+                assert row == (1, 1)
+
+
+class TestDeletePersonsAndClearAuto:
+    """Cover delete_persons and clear_auto_persons."""
+
+    def test_delete_persons_empty_is_noop(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.delete_persons([]) == 0
+
+    def test_delete_persons_unassigns_faces_and_deletes(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            p1 = db.create_person(label="A")
+            p2 = db.create_person(label="B")
+            f1 = db.insert_face("/a.jpg", FaceDetection(image_path="/a.jpg"))
+            f2 = db.insert_face("/b.jpg", FaceDetection(image_path="/b.jpg"))
+            db.set_person_id(f1, p1)
+            db.set_person_id(f2, p2)
+            removed = db.delete_persons([p1, p2])
+            assert removed == 2
+            assert db.get_persons() == []
+            # Faces survive but are unassigned.
+            for fid in (f1, f2):
+                row = db._conn.execute(
+                    "SELECT person_id FROM faces WHERE id = ?", (fid,)
+                ).fetchone()
+                assert row[0] is None
+
+    def test_clear_auto_persons_no_auto_is_noop(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            # Only a confirmed/trusted person -> clear_auto finds nothing.
+            db.create_person(label="Kept", confirmed=True, trusted=True)
+            db.clear_auto_persons()
+            assert len(db.get_persons()) == 1
+
+    def test_clear_auto_persons_removes_only_untrusted_unconfirmed(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            auto = db.create_person(label="Auto")  # auto, not confirmed/trusted
+            kept = db.create_person(label="Kept", confirmed=True, trusted=True)
+            f = db.insert_face("/a.jpg", FaceDetection(image_path="/a.jpg"))
+            db.set_person_id(f, auto)
+            db.clear_auto_persons()
+            ids = [p.person_id for p in db.get_persons()]
+            assert auto not in ids
+            assert kept in ids
+            # The face that pointed at the auto person is now unassigned.
+            row = db._conn.execute("SELECT person_id FROM faces WHERE id = ?", (f,)).fetchone()
+            assert row[0] is None
+
+
+class TestIgnoreRestoreUnassignFaces:
+    """Cover ignore_face, restore_face, get_ignored_faces, unassign_face."""
+
+    def test_ignore_and_get_ignored(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            det = FaceDetection(
+                image_path="/a.jpg", bbox_x=1, bbox_y=2, bbox_w=3, bbox_h=4, confidence=0.5
+            )
+            fid = db.insert_face("/a.jpg", det)
+            pid = db.create_person(label="A")
+            db.set_person_id(fid, pid)
+            db.ignore_face(fid)
+            ignored = db.get_ignored_faces()
+            assert len(ignored) == 1
+            assert ignored[0]["id"] == fid
+            assert ignored[0]["image_path"] == "/a.jpg"
+            # ignore_face also clears the person assignment.
+            row = db._conn.execute("SELECT person_id FROM faces WHERE id = ?", (fid,)).fetchone()
+            assert row[0] is None
+
+    def test_restore_face_removes_from_ignored(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            fid = db.insert_face("/a.jpg", FaceDetection(image_path="/a.jpg"))
+            db.ignore_face(fid)
+            assert len(db.get_ignored_faces()) == 1
+            db.restore_face(fid)
+            assert db.get_ignored_faces() == []
+
+    def test_get_ignored_faces_empty(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.get_ignored_faces() == []
+
+    def test_unassign_face(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            fid = db.insert_face("/a.jpg", FaceDetection(image_path="/a.jpg"))
+            pid = db.create_person(label="A")
+            db.set_person_id(fid, pid)
+            db.unassign_face(fid)
+            row = db._conn.execute("SELECT person_id FROM faces WHERE id = ?", (fid,)).fetchone()
+            assert row[0] is None
+
+
+class TestGetFaceById:
+    """Cover get_face_by_id found/not-found."""
+
+    def test_found(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            det = FaceDetection(
+                image_path="/a.jpg", bbox_x=1, bbox_y=2, bbox_w=3, bbox_h=4, confidence=0.7
+            )
+            fid = db.insert_face("/a.jpg", det)
+            face = db.get_face_by_id(fid)
+            assert face is not None
+            assert face["id"] == fid
+            assert face["image_path"] == "/a.jpg"
+            assert face["bbox_x"] == 1
+            assert face["confidence"] == 0.7
+
+    def test_not_found(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            assert db.get_face_by_id(9999) is None
+
+
+class TestQueryJudgeResults:
+    """Cover query_judge_results: pagination, sorts, rating clamping, joins."""
+
+    def _seed(self, db: ProgressDB, tmp_path) -> None:
+        from pyimgtag.models import JudgeResult, JudgeScores
+
+        specs = [
+            ("low.jpg", 2.0, "2020-01-01T00:00:00"),
+            ("mid.jpg", 5.0, "2022-06-01T00:00:00"),
+            ("high.jpg", 9.0, "2024-12-31T00:00:00"),
+        ]
+        for name, score, date in specs:
+            img = _make_image(tmp_path, name)
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name=name,
+                    tags=["t"],
+                    scene_summary=f"summary {name}",
+                    nearest_city="Kyiv",
+                    nearest_country="UA",
+                    cleanup_class="review",
+                    image_date=date,
+                    processing_status="ok",
+                ),
+            )
+            db.save_judge_result(
+                JudgeResult(
+                    file_path=str(img),
+                    file_name=name,
+                    weighted_score=score,
+                    core_score=score,
+                    visible_score=score,
+                    scores=JudgeScores(verdict="ok", reason="because"),
+                )
+            )
+
+    def test_default_sort_and_total(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            res = db.query_judge_results()
+            assert res["total"] == 3
+            # rating_desc default -> highest first
+            assert res["items"][0]["file_name"] == "high.jpg"
+            assert res["items"][-1]["file_name"] == "low.jpg"
+            item = res["items"][0]
+            assert item["scene_summary"] == "summary high.jpg"
+            assert item["nearest_city"] == "Kyiv"
+            assert item["nearest_country"] == "UA"
+            assert item["cleanup_class"] == "review"
+            assert item["weighted_score"] == 9
+            assert item["reason"] == "because"
+            assert item["verdict"] == "ok"
+
+    def test_rating_asc_sort(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            res = db.query_judge_results(sort="rating_asc")
+            assert [i["file_name"] for i in res["items"]] == ["low.jpg", "mid.jpg", "high.jpg"]
+
+    def test_path_sorts(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            asc = db.query_judge_results(sort="path_asc")
+            desc = db.query_judge_results(sort="path_desc")
+            asc_paths = [i["file_path"] for i in asc["items"]]
+            desc_paths = [i["file_path"] for i in desc["items"]]
+            assert asc_paths == sorted(asc_paths)
+            assert desc_paths == sorted(desc_paths, reverse=True)
+
+    def test_shot_sorts(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            desc = db.query_judge_results(sort="shot_desc")
+            assert [i["file_name"] for i in desc["items"]] == ["high.jpg", "mid.jpg", "low.jpg"]
+            asc = db.query_judge_results(sort="shot_asc")
+            assert [i["file_name"] for i in asc["items"]] == ["low.jpg", "mid.jpg", "high.jpg"]
+
+    def test_unknown_sort_falls_back_to_rating_desc(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            res = db.query_judge_results(sort="bogus")
+            assert res["items"][0]["file_name"] == "high.jpg"
+
+    def test_min_max_rating_clamped(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            # min_rating below 1 is clamped to 1 (keeps all); max above 10 -> 10.
+            res = db.query_judge_results(min_rating=-100, max_rating=100)
+            assert res["total"] == 3
+            # min_rating between mid and high.
+            res2 = db.query_judge_results(min_rating=6)
+            assert {i["file_name"] for i in res2["items"]} == {"high.jpg"}
+            res3 = db.query_judge_results(max_rating=4)
+            assert {i["file_name"] for i in res3["items"]} == {"low.jpg"}
+
+    def test_pagination_limit_offset(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            self._seed(db, tmp_path)
+            page1 = db.query_judge_results(limit=2, offset=0)
+            page2 = db.query_judge_results(limit=2, offset=2)
+            assert page1["total"] == 3
+            assert len(page1["items"]) == 2
+            assert len(page2["items"]) == 1
+
+    def test_empty_db(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            res = db.query_judge_results()
+            assert res == {"items": [], "total": 0}
+
+
+class TestMalformedJsonCachePaths:
+    """Cover the malformed-JSON branches in cache/freshness helpers."""
+
+    def test_get_cached_result_malformed_json(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            db._conn.execute(
+                "INSERT INTO processed_images (file_path, file_size, file_mtime, tags, status) "
+                "VALUES (?, 10, 1.0, ?, 'ok')",
+                (str(img), "{bad json"),
+            )
+            db._conn.commit()
+            result = db.get_cached_result(img)
+            assert result is not None
+            assert result.tags == []
+
+    def test_is_complete_cached_malformed_json(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            stat = img.stat()
+            db._conn.execute(
+                "INSERT INTO processed_images (file_path, file_size, file_mtime, tags, status) "
+                "VALUES (?, ?, ?, ?, 'ok')",
+                (str(img), stat.st_size, stat.st_mtime, "{bad json"),
+            )
+            db._conn.commit()
+            # Malformed tags JSON -> treated as no tags -> not complete.
+            assert db.is_complete_cached(img) is False
+
+    def test_has_usable_model_result_row_none(self, tmp_path):
+        """is_fresh True path then the tags SELECT returns no row -> False.
+
+        We force is_fresh to return True while the underlying tags row is
+        absent so the ``row is None`` guard executes.
+        """
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            with mock.patch.object(db, "is_fresh", return_value=True):
+                assert db.has_usable_model_result(img) is False
+
+    def test_has_usable_model_result_malformed_json(self, tmp_path):
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            stat = img.stat()
+            db._conn.execute(
+                "INSERT INTO processed_images (file_path, file_size, file_mtime, tags, status) "
+                "VALUES (?, ?, ?, ?, 'ok')",
+                (str(img), stat.st_size, stat.st_mtime, "{bad json"),
+            )
+            db._conn.commit()
+            # is_fresh True (size+mtime match) but malformed tags -> not usable.
+            assert db.has_usable_model_result(img) is False

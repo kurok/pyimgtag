@@ -337,6 +337,23 @@ class TestReviewServerServe:
         assert opened[0].endswith("/review")
         assert "7777" in opened[0]
 
+    def test_create_app_raises_when_fastapi_missing(self, tmp_path, monkeypatch):
+        """Missing fastapi should surface a helpful ImportError from create_app."""
+        import builtins
+
+        import pytest
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *a, **kw):
+            if name == "fastapi" or name.startswith("fastapi."):
+                raise ImportError("gone")
+            return real_import(name, *a, **kw)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+        with pytest.raises(ImportError, match="fastapi and uvicorn are required"):
+            create_app(db_path=str(tmp_path / "p.db"))
+
     def test_serve_raises_when_uvicorn_missing(self, tmp_path, monkeypatch):
         """Missing uvicorn should surface a helpful ImportError."""
         import builtins
