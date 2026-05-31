@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-05-31
+
+### Added
+- **Faces detail: "Add faces to this person" section** (#248): a new section under the cluster grid grows a person's cluster in place. A source toggle picks the candidate pool — *Unassigned* (faces not yet assigned to anyone) or *Biggest cluster* (faces from the largest **other** cluster, the common "one person split into two clusters" case; the hint names the source) — with a pager (40/page, highest-confidence first). Clicking a candidate face assigns it to this person (via `POST /api/faces/assign-batch`) and refreshes both the cluster and the candidate list. Backed by a new paginated, thumbnail-on-demand endpoint `GET /api/persons/{id}/candidates?source=unassigned|biggest` returning `{total, items, source_label}`.
+
+### Changed
+- **Merge-target dropdown sorted by name** (#248): the "merge into existing trusted person" `<select>` in the rename/merge modal is now sorted A–Z by name on both the grid and detail pages, so a person is easy to find in a long list.
+
 ## [0.20.1] - 2026-05-31
 
 ### Fixed
