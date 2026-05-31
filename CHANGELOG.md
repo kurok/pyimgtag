@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.4] - 2026-05-31
+
+### Fixed
+- **Error-handling quality sweep — narrower catches and surfaced bad states**:
+  - `exif_reader`: replaced bare `except Exception` with typed exception tuples so `KeyboardInterrupt`/`MemoryError` are no longer masked by the EXIF fallback chain.
+  - `geocoder`: guard `GeoResult(**cached)` against schema-changed cache entries — a stale cache dict with unknown keys now re-fetches instead of raising `TypeError`.
+  - `cache`: broaden the `_save` cleanup so a non-`OSError` write failure still removes the leftover `.tmp` file; write with explicit `encoding="utf-8"`.
+  - `dedup`: `hamming_distance` now raises a clear `ValueError` on an invalid hex hash instead of a cryptic imagehash error.
+  - `progress_db`: raise an explicit `RuntimeError` if a cursor's `lastrowid` is unexpectedly `None` instead of returning it typed as `int`.
+- Added regression tests (invalid hash, stale-cache re-fetch, cache-hit skips network, tmp cleanup on non-`OSError`) and fixed two tests that referenced optional packages not installed in the dev environment.
+
 ## [0.17.3] - 2026-05-30
 
 ### Security
