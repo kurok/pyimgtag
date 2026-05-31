@@ -770,7 +770,7 @@ __NAV__
 __MODAL_HTML__
 __MODAL_JS__
 <div class="detail-hdr">
-  <a class="back" href="javascript:history.back()" onclick="if(!document.referrer)window.location.href='__API_BASE__/'">← All Faces</a>
+  <a class="back" href="__API_BASE__/" onclick="if(window.history.length>1){history.back();return false;}">← All Faces</a>
   <h1 id="person-name">Loading…</h1>
 </div>
 <div class="detail-meta">
