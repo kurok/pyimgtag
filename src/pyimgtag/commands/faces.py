@@ -26,7 +26,11 @@ _CLUSTER_INTERVAL_S = 30
 def cmd_faces(args: argparse.Namespace) -> int:
     """Dispatch faces sub-actions."""
     if args.faces_action is None:
-        print("Usage: pyimgtag faces {scan,cluster,review,apply,import-photos,ui}", file=sys.stderr)
+        print(
+            "Usage: pyimgtag faces "
+            "{scan,cluster,review,apply,import-photos,ui,recluster,reset-untrusted,reset}",
+            file=sys.stderr,
+        )
         return 1
 
     if args.faces_action == "scan":
@@ -41,8 +45,70 @@ def cmd_faces(args: argparse.Namespace) -> int:
         return _handle_faces_import_photos(args)
     if args.faces_action == "ui":
         return _handle_faces_ui(args)
+    if args.faces_action == "reset":
+        return _handle_faces_reset(args)
+    if args.faces_action == "reset-untrusted":
+        return _handle_faces_reset_untrusted(args)
+    if args.faces_action == "recluster":
+        return _handle_faces_recluster(args)
 
     return 1
+
+
+def _print_reset_preview(counts: dict[str, int], applied: bool) -> None:
+    """Print the per-table counts for a faces reset, as a preview or a result."""
+    verb = "Removed" if applied else "Would remove"
+    print(
+        f"{verb}: {counts['faces']} face(s), {counts['persons']} person(s), "
+        f"{counts['scanned_images']} scan-cache entr"
+        f"{'y' if counts['scanned_images'] == 1 else 'ies'}.",
+        file=sys.stderr,
+    )
+    if not applied:
+        print("Re-run with --yes to apply.", file=sys.stderr)
+
+
+def _handle_faces_reset(args: argparse.Namespace) -> int:
+    """Delete ALL faces, persons (including trusted), and the scan cache."""
+    with ProgressDB(db_path=args.db) as db:
+        counts = db.reset_all_faces(dry_run=not args.yes)
+    _print_reset_preview(counts, applied=args.yes)
+    return 0
+
+
+def _handle_faces_reset_untrusted(args: argparse.Namespace) -> int:
+    """Delete non-trusted faces and clusters, keeping trusted/named people."""
+    with ProgressDB(db_path=args.db) as db:
+        counts = db.reset_untrusted_faces(dry_run=not args.yes)
+    _print_reset_preview(counts, applied=args.yes)
+    return 0
+
+
+def _handle_faces_recluster(args: argparse.Namespace) -> int:
+    """Clear auto-clusters and re-cluster from scratch (keeps trusted people)."""
+    try:
+        from pyimgtag.face_clustering import recluster_auto
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    with ProgressDB(db_path=args.db) as db:
+        auto = db.count_auto_persons()
+        if not args.yes:
+            print(
+                f"Would clear {auto} auto-cluster(s) and re-cluster from scratch "
+                "(trusted/named people are kept).",
+                file=sys.stderr,
+            )
+            print("Re-run with --yes to apply.", file=sys.stderr)
+            return 0
+        result = recluster_auto(db, eps=args.eps, min_samples=args.min_samples)
+
+    print(
+        f"Cleared {auto} auto-cluster(s); created {len(result)} new cluster(s).",
+        file=sys.stderr,
+    )
+    return 0
 
 
 def _handle_faces_scan(args: argparse.Namespace) -> int:

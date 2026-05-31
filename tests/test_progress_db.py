@@ -2455,3 +2455,109 @@ class TestMalformedJsonCachePaths:
             db._conn.commit()
             # is_fresh True (size+mtime match) but malformed tags -> not usable.
             assert db.has_usable_model_result(img) is False
+
+
+class TestFaceResets:
+    """Exact-count and edge-case coverage for the faces cleanup methods."""
+
+    def _seed(self, db):
+        from pyimgtag.models import FaceDetection
+
+        det = FaceDetection(
+            image_path="x", bbox_x=0, bbox_y=0, bbox_w=10, bbox_h=10, confidence=1.0
+        )
+        trusted = db.create_person(label="Trusted", source="photos", trusted=True, confirmed=True)
+        confirmed_only = db.create_person(label="Conf", confirmed=True)  # trusted=0, confirmed=1
+        auto = db.create_person(label="")  # trusted=0, confirmed=0
+        ft = db.insert_face("/t.jpg", det)
+        db.set_person_id(ft, trusted)
+        fc = db.insert_face("/c.jpg", det)
+        db.set_person_id(fc, confirmed_only)
+        fa = db.insert_face("/a.jpg", det)
+        db.set_person_id(fa, auto)
+        db.insert_face("/u.jpg", det)  # unassigned, not ignored
+        ftrash = db.insert_face("/trash.jpg", det)
+        db.ignore_face(ftrash)  # ignored trash (person_id -> NULL, ignored=1)
+        for p in ("/t.jpg", "/c.jpg", "/a.jpg", "/u.jpg", "/trash.jpg"):
+            db.mark_face_scanned(p)
+        return {"trusted": trusted, "confirmed_only": confirmed_only, "auto": auto}
+
+    def test_count_auto_persons(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "p.db") as db:
+            self._seed(db)
+            assert db.count_auto_persons() == 1  # only the trusted=0,confirmed=0 person
+
+    def test_reset_all_exact_counts_and_wipe(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "p.db") as db:
+            self._seed(db)
+            assert db.reset_all_faces() == {"faces": 5, "persons": 3, "scanned_images": 5}
+            assert db.get_face_count() == 0
+            assert db.get_persons() == []
+            assert not db.is_face_scanned("/t.jpg")
+
+    def test_reset_all_dry_run_changes_nothing(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "p.db") as db:
+            self._seed(db)
+            assert db.reset_all_faces(dry_run=True) == {
+                "faces": 5,
+                "persons": 3,
+                "scanned_images": 5,
+            }
+            assert db.get_face_count() == 5
+            assert len(db.get_persons()) == 3
+            assert db.is_face_scanned("/t.jpg")  # scan cache untouched by dry-run
+
+    def test_reset_untrusted_preserves_trusted_confirmed_and_trash(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "p.db") as db:
+            ids = self._seed(db)
+            # Deleted: the auto-assigned face (/a) and the loose unassigned face
+            # (/u). Kept: trusted (/t), confirmed-only (/c), and ignored trash
+            # (/trash). Persons deleted: the single auto person.
+            assert db.reset_untrusted_faces() == {
+                "faces": 2,
+                "persons": 1,
+                "scanned_images": 2,
+            }
+            surviving = {p.person_id for p in db.get_persons()}
+            assert surviving == {ids["trusted"], ids["confirmed_only"]}
+            assert db.get_face_count() == 3  # trusted + confirmed-only + trash
+            assert len(db.get_ignored_faces()) == 1  # trash survived
+            # Cache: images with a surviving (trusted/confirmed/ignored) face stay;
+            # the re-detectable images are pruned.
+            assert db.is_face_scanned("/t.jpg")
+            assert db.is_face_scanned("/c.jpg")
+            assert db.is_face_scanned("/trash.jpg")
+            assert not db.is_face_scanned("/a.jpg")
+            assert not db.is_face_scanned("/u.jpg")
+
+    def test_reset_untrusted_dry_run_changes_nothing(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "p.db") as db:
+            self._seed(db)
+            assert db.reset_untrusted_faces(dry_run=True) == {
+                "faces": 2,
+                "persons": 1,
+                "scanned_images": 2,
+            }
+            assert db.get_face_count() == 5
+            assert len(db.get_persons()) == 3
+            assert db.is_face_scanned("/a.jpg")  # nothing pruned in dry-run
+
+    def test_resets_on_empty_db(self, tmp_path):
+        with ProgressDB(db_path=tmp_path / "p.db") as db:
+            zero = {"faces": 0, "persons": 0, "scanned_images": 0}
+            assert db.reset_all_faces() == zero
+            assert db.reset_untrusted_faces() == zero
+            assert db.count_auto_persons() == 0
+
+    def test_reset_untrusted_all_trusted_removes_no_persons(self, tmp_path):
+        from pyimgtag.models import FaceDetection
+
+        det = FaceDetection(bbox_w=10, bbox_h=10, confidence=1.0)
+        with ProgressDB(db_path=tmp_path / "p.db") as db:
+            t = db.create_person(label="Only", source="photos", trusted=True, confirmed=True)
+            db.set_person_id(db.insert_face("/t.jpg", det), t)
+            db.insert_face("/loose.jpg", det)  # one untrusted loose face
+            counts = db.reset_untrusted_faces()
+            assert counts["persons"] == 0  # nothing to delete
+            assert counts["faces"] == 1  # only the loose face
+            assert [p.person_id for p in db.get_persons()] == [t]
