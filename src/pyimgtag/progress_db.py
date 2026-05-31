@@ -1094,6 +1094,48 @@ class ProgressDB:
         self._conn.execute("DELETE FROM persons WHERE id = ?", (person_id,))
         self._conn.commit()
 
+    def confirm_persons(self, person_ids: list[int]) -> int:
+        """Mark several person clusters as confirmed and trusted in one transaction.
+
+        Args:
+            person_ids: Person ids to confirm. An empty list is a no-op.
+
+        Returns:
+            The number of person rows updated.
+        """
+        if not person_ids:
+            return 0
+        placeholders = ",".join("?" * len(person_ids))
+        cur = self._conn.execute(
+            f"UPDATE persons SET confirmed = 1, trusted = 1 WHERE id IN ({placeholders})",  # nosec B608
+            person_ids,
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    def delete_persons(self, person_ids: list[int]) -> int:
+        """Delete several persons and unassign their faces in one transaction.
+
+        Args:
+            person_ids: Person ids to delete. An empty list is a no-op.
+
+        Returns:
+            The number of person rows deleted.
+        """
+        if not person_ids:
+            return 0
+        placeholders = ",".join("?" * len(person_ids))
+        self._conn.execute(
+            f"UPDATE faces SET person_id = NULL WHERE person_id IN ({placeholders})",  # nosec B608
+            person_ids,
+        )
+        cur = self._conn.execute(
+            f"DELETE FROM persons WHERE id IN ({placeholders})",  # nosec B608
+            person_ids,
+        )
+        self._conn.commit()
+        return cur.rowcount
+
     def clear_auto_persons(self) -> None:
         """Delete all auto-clustered persons that are not trusted or confirmed.
 

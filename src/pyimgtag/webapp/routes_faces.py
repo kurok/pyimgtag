@@ -101,6 +101,27 @@ __MODAL_JS__
   <button class="filter-btn" data-filter="auto" onclick="setFilter('auto')">Auto</button>
   <button class="filter-btn" data-filter="unassigned" onclick="setFilter('unassigned')">Unassigned</button>
   <button class="filter-btn" data-filter="trash" onclick="setFilter('trash')">🗑 Trash</button>
+  <span style="flex:1"></span>
+  <label id="sort-wrap" for="person-sort" style="color:var(--muted);font-size:13px">
+    Sort:
+    <select id="person-sort" onchange="setSort(this.value)">
+      <option value="default">Default</option>
+      <option value="count_desc">Most faces</option>
+      <option value="count_asc">Fewest faces</option>
+      <option value="name_asc">Name A-Z</option>
+    </select>
+  </label>
+</div>
+<div class="assign-bar" id="persons-bulk-bar" style="display:none">
+  <span id="psel-count">0 selected</span>
+  <button id="btn-psel-all" onclick="selectAllPersons()">Select all on page</button>
+  <button id="btn-psel-clear" onclick="clearPersonSelection()">Clear</button>
+  <button class="confirm-btn" id="btn-confirm-sel" disabled onclick="confirmSelectedPersons()">
+    Confirm selected
+  </button>
+  <button class="del-btn" id="btn-delete-sel" disabled onclick="deleteSelectedPersons()">
+    Delete selected
+  </button>
 </div>
 <div class="pager" id="pager" style="display:none">
   <button id="btn-prev" onclick="goPage(-1)">\u2190 Previous</button>
@@ -175,6 +196,9 @@ let _uaTotal = 0;
 let _trOffset = 0;
 let _trTotal = 0;
 let _selected = new Set();  // face ids selected in unassigned / trash view
+let _sort = 'default';             // persons-grid sort key
+let _selectedPersons = new Set();  // person ids selected in the grid for bulk actions
+let _pageIds = [];                 // person ids rendered on the current grid page
 
 // ── Filter ──────────────────────────────────────────────────────────────────
 function setFilter(f) {
@@ -187,13 +211,25 @@ function setFilter(f) {
     b.classList.toggle('active', b.dataset.filter === f));
   const isUA = f === 'unassigned';
   const isTR = f === 'trash';
-  document.getElementById('persons').style.display = (isUA || isTR) ? 'none' : '';
+  const isGrid = !isUA && !isTR;
+  document.getElementById('persons').style.display = isGrid ? '' : 'none';
   document.getElementById('pager').style.display = 'none';
   document.getElementById('unassigned-section').style.display = isUA ? '' : 'none';
   document.getElementById('trash-section').style.display = isTR ? '' : 'none';
+  // The sort control and bulk-action bar only apply to the persons grid.
+  document.getElementById('sort-wrap').style.display = isGrid ? '' : 'none';
+  _selectedPersons.clear();
+  document.getElementById('persons-bulk-bar').style.display = 'none';
   if (isUA) loadUnassigned();
   else if (isTR) loadTrash();
   else load();
+}
+
+// ── Sort ──────────────────────────────────────────────────────────────────
+function setSort(value) {
+  _sort = value;
+  _offset = 0;
+  load();
 }
 
 function goPage(delta) {
@@ -205,16 +241,25 @@ function goPage(delta) {
 async function load() {
   document.getElementById('status').textContent = 'Loading…';
   const url = '__API_BASE__/api/persons/with-faces?offset=' + _offset
-    + '&limit=' + PAGE_SIZE + '&filter=' + _filter;
+    + '&limit=' + PAGE_SIZE + '&filter=' + _filter + '&sort=' + _sort;
   const data = await fetch(url).then(r => r.json());
   _total = data.total;
   const persons = data.items;
 
   document.getElementById('status').textContent = _total + ' person(s)';
 
+  // Selection is per page; rebuild it each load.
+  _selectedPersons.clear();
+  _pageIds = persons.map(p => p.id);
+
   const grid = document.getElementById('persons');
   grid.innerHTML = '';
   for (const p of persons) grid.appendChild(renderPerson(p, p.faces));
+
+  // The bulk-action bar is only meaningful with at least one person on screen.
+  const bulkBar = document.getElementById('persons-bulk-bar');
+  bulkBar.style.display = persons.length ? 'flex' : 'none';
+  updatePersonsBulkBar();
 
   const pager = document.getElementById('pager');
   if (_total > PAGE_SIZE) {
@@ -487,6 +532,18 @@ function renderPerson(p, faces) {
 
   const nameEl = document.createElement('div');
   nameEl.className = 'person-name';
+  const sel = document.createElement('input');
+  sel.type = 'checkbox';
+  sel.className = 'person-select';
+  sel.style.cssText = 'margin-right:8px;vertical-align:middle;cursor:pointer';
+  sel.title = 'Select for bulk confirm / delete';
+  sel.checked = _selectedPersons.has(p.id);
+  sel.addEventListener('change', () => {
+    if (sel.checked) _selectedPersons.add(p.id);
+    else _selectedPersons.delete(p.id);
+    updatePersonsBulkBar();
+  });
+  nameEl.appendChild(sel);
   const nameLink = document.createElement('a');
   nameLink.href = '__API_BASE__/persons/' + p.id;
   nameLink.textContent = p.label || ('(unlabelled #' + p.id + ')');
@@ -605,6 +662,57 @@ function renderPerson(p, faces) {
 
   card.appendChild(acts);
   return card;
+}
+
+// ── Bulk confirm / delete ─────────────────────────────────────────────────
+function updatePersonsBulkBar() {
+  const n = _selectedPersons.size;
+  document.getElementById('psel-count').textContent = n + ' selected';
+  document.getElementById('btn-confirm-sel').disabled = n === 0;
+  document.getElementById('btn-delete-sel').disabled = n === 0;
+}
+
+function selectAllPersons() {
+  _pageIds.forEach(id => _selectedPersons.add(id));
+  document.querySelectorAll('.person-select').forEach(cb => { cb.checked = true; });
+  updatePersonsBulkBar();
+}
+
+function clearPersonSelection() {
+  _selectedPersons.clear();
+  document.querySelectorAll('.person-select').forEach(cb => { cb.checked = false; });
+  updatePersonsBulkBar();
+}
+
+async function confirmSelectedPersons() {
+  const ids = [..._selectedPersons];
+  if (!ids.length) return;
+  await fetch('__API_BASE__/api/persons/confirm-batch', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({person_ids: ids}),
+  });
+  load();
+}
+
+function deleteSelectedPersons() {
+  const ids = [..._selectedPersons];
+  if (!ids.length) return;
+  openModal(
+    'Delete selected persons',
+    'Delete ' + ids.length + ' person record(s)? Face crops are kept but unassigned.',
+    '',
+    'Delete', 'btn-danger-text',
+    async () => {
+      await fetch('__API_BASE__/api/persons/delete-batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({person_ids: ids}),
+      });
+      closeModal();
+      load();
+    }
+  );
 }
 
 load();
@@ -939,7 +1047,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
     @router.get("/api/persons/with-faces")
     async def list_persons_with_faces(
-        offset: int = 0, limit: int = 10, filter: str = "all"
+        offset: int = 0, limit: int = 10, filter: str = "all", sort: str = "default"
     ) -> dict:
         """Return a page of persons with their top-8 face thumbnails.
 
@@ -947,6 +1055,9 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
           offset  – 0-based index of the first person to return (default 0)
           limit   – number of persons per page (default 10, max 50)
           filter  – ``all`` | ``trusted`` | ``auto`` (default ``all``)
+          sort    – ``default`` (id order) | ``count_desc`` | ``count_asc`` |
+                    ``name_asc``. Sorting is applied to the whole filtered set
+                    before pagination.
 
         Response: ``{"total": N, "items": [...]}``
         """
@@ -959,6 +1070,14 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
             visible = [p for p in visible if p.trusted]
         elif filter == "auto":
             visible = [p for p in visible if not p.trusted]
+        # Sort the full filtered set before paginating so the order is stable
+        # across pages.
+        if sort == "count_desc":
+            visible.sort(key=lambda p: len(p.face_ids), reverse=True)
+        elif sort == "count_asc":
+            visible.sort(key=lambda p: len(p.face_ids))
+        elif sort == "name_asc":
+            visible.sort(key=lambda p: (p.label or "").lower())
         total = len(visible)
         page = visible[offset : offset + limit]
 
@@ -993,6 +1112,22 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
         items = list(await asyncio.gather(*[_person_entry(p) for p in page]))
         return {"total": total, "items": items}
+
+    # Bulk actions. Declared before the ``/api/persons/{person_id}`` routes so
+    # the static ``confirm-batch`` / ``delete-batch`` paths always win.
+    # ``Body(embed=True)`` with a builtin ``list[int]`` is used instead of a
+    # pydantic model because this module enables ``from __future__ import
+    # annotations`` — a function-local model's string annotation would not
+    # resolve and FastAPI would mistake the body for a query param.
+    @router.post("/api/persons/confirm-batch")
+    async def confirm_persons_batch(person_ids: list[int] = Body(..., embed=True)) -> dict:
+        confirmed = db.confirm_persons(person_ids)
+        return {"ok": True, "confirmed": confirmed}
+
+    @router.post("/api/persons/delete-batch")
+    async def delete_persons_batch(person_ids: list[int] = Body(..., embed=True)) -> dict:
+        deleted = db.delete_persons(person_ids)
+        return {"ok": True, "deleted": deleted}
 
     @router.get("/api/persons/{person_id}")
     async def get_person(person_id: int) -> dict:
