@@ -378,7 +378,8 @@ async function openAssignModal() {
 // ── Rename / merge modal ─────────────────────────────────────────────────────
 async function openRenameModal(personId, currentLabel, onDone) {
   const allPersons = await fetch('__API_BASE__/api/persons').then(r => r.json());
-  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== personId);
+  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== personId)
+    .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
 
   const body = '<input class="inp" id="m-inp" placeholder="Type a new name…"'
     + ' style="margin-bottom:8px;display:block;width:100%" />'
@@ -763,6 +764,20 @@ _PERSON_DETAIL_TEMPLATE = """<!DOCTYPE html>
                   color:var(--text);cursor:pointer;transition:all .15s}
     .pager button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
     .pager button:disabled{opacity:.35;cursor:default}
+    .cand-section{border-top:1px solid var(--border);margin-top:8px;padding:18px 32px 8px}
+    .cand-section h2{font-size:15px;font-weight:600;color:var(--text);margin:0 0 2px}
+    .cand-section .hint{font-size:12px;color:var(--muted);margin:0 0 12px}
+    .cand-toggle{display:inline-flex;gap:0;border:1px solid var(--border);
+                 border-radius:var(--radius-sm);overflow:hidden;margin-bottom:14px}
+    .cand-toggle button{padding:5px 14px;font-size:12px;border:none;background:var(--surface);
+                        color:var(--text);cursor:pointer;transition:all .15s}
+    .cand-toggle button:not(:last-child){border-right:1px solid var(--border)}
+    .cand-toggle button.active{background:var(--accent);color:#fff}
+    #cand-grid{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+    #cand-grid .cand-thumb{width:80px;height:80px;object-fit:cover;border-radius:var(--radius-sm);
+                           border:1px solid var(--border);cursor:pointer;transition:all .15s}
+    #cand-grid .cand-thumb:hover{border-color:var(--accent);transform:scale(1.06)}
+    #cand-empty{font-size:13px;color:var(--muted)}
   </style>
 </head>
 <body>
@@ -788,6 +803,21 @@ __MODAL_JS__
   <button id="fp-prev" onclick="goFacePage(-1)">← Previous</button>
   <span id="fp-info"></span>
   <button id="fp-next" onclick="goFacePage(1)">Next →</button>
+</div>
+<div class="cand-section" id="cand-section" style="display:none">
+  <h2>Add faces to this person</h2>
+  <p class="hint" id="cand-hint">Click a face to assign it to this person.</p>
+  <div class="cand-toggle">
+    <button id="cand-src-unassigned" class="active" onclick="setCandSource('unassigned')">Unassigned</button>
+    <button id="cand-src-biggest" onclick="setCandSource('biggest')">Biggest cluster</button>
+  </div>
+  <div id="cand-grid"></div>
+  <div id="cand-empty" style="display:none">No candidate faces here.</div>
+  <div class="pager" id="cand-pager" style="display:none;padding-left:0">
+    <button id="cp-prev" onclick="goCandPage(-1)">← Previous</button>
+    <span id="cp-info"></span>
+    <button id="cp-next" onclick="goCandPage(1)">Next →</button>
+  </div>
 </div>
 <script>
 const _personId = __PERSON_ID__;
@@ -911,7 +941,8 @@ function renderFaces(faces) {
 
 document.getElementById('rename-btn').addEventListener('click', async () => {
   const allPersons = await fetch(_apiBase + '/api/persons').then(r => r.json());
-  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== _personId);
+  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== _personId)
+    .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
 
   const body = '<input class="inp" id="m-inp" placeholder="Type a new name…"'
     + ' style="margin-bottom:8px;display:block;width:100%" />'
@@ -990,7 +1021,104 @@ document.getElementById('delete-btn').addEventListener('click', () => {
   );
 });
 
+// ---- Candidate faces: add more faces to this person ----
+let _candSource = 'unassigned';
+let _candOffset = 0;
+let _candTotal = 0;
+const CAND_PAGE_SIZE = 40;
+
+function setCandSource(src) {
+  if (src === _candSource) return;
+  _candSource = src;
+  _candOffset = 0;
+  document.getElementById('cand-src-unassigned').classList.toggle('active', src === 'unassigned');
+  document.getElementById('cand-src-biggest').classList.toggle('active', src === 'biggest');
+  loadCandidates();
+}
+
+function goCandPage(delta) {
+  _candOffset = Math.max(0, Math.min(_candOffset + delta * CAND_PAGE_SIZE,
+    Math.max(0, _candTotal - 1)));
+  loadCandidates();
+}
+
+function updateCandPager() {
+  const pager = document.getElementById('cand-pager');
+  if (_candTotal > CAND_PAGE_SIZE) {
+    pager.style.display = 'flex';
+    const end = Math.min(_candOffset + CAND_PAGE_SIZE, _candTotal);
+    document.getElementById('cp-info').textContent =
+      (_candOffset + 1) + '–' + end + ' of ' + _candTotal;
+    document.getElementById('cp-prev').disabled = _candOffset === 0;
+    document.getElementById('cp-next').disabled = end >= _candTotal;
+  } else {
+    pager.style.display = 'none';
+  }
+}
+
+async function loadCandidates() {
+  const section = document.getElementById('cand-section');
+  section.style.display = '';
+  const res = await fetch(_apiBase + '/api/persons/' + _personId + '/candidates?source='
+    + _candSource + '&offset=' + _candOffset + '&limit=' + CAND_PAGE_SIZE);
+  if (!res.ok) { section.style.display = 'none'; return; }
+  const data = await res.json();
+  _candTotal = data.total;
+  const items = data.items;
+
+  // Assigning the last face on a page can empty it — step back.
+  if (items.length === 0 && _candOffset > 0) {
+    _candOffset = Math.max(0, _candOffset - CAND_PAGE_SIZE);
+    loadCandidates();
+    return;
+  }
+
+  const hint = document.getElementById('cand-hint');
+  if (_candSource === 'biggest') {
+    hint.textContent = data.source_label
+      ? 'From "' + data.source_label + '" — click a face to move it to this person.'
+      : 'No other cluster to pull from.';
+  } else {
+    hint.textContent = 'Unassigned faces — click one to add it to this person.';
+  }
+
+  renderCandidates(items);
+  updateCandPager();
+}
+
+function renderCandidates(faces) {
+  const grid = document.getElementById('cand-grid');
+  grid.innerHTML = '';
+  document.getElementById('cand-empty').style.display = faces.length ? 'none' : '';
+  faces.forEach(f => {
+    if (!f.thumb) return;
+    const img = document.createElement('img');
+    img.className = 'cand-thumb';
+    img.src = 'data:image/jpeg;base64,' + f.thumb;
+    img.title = 'Click to add to this person';
+    img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
+    img.addEventListener('mouseleave', () => { _preview.style.display = 'none'; });
+    img.addEventListener('click', () => assignCandidate(f.id, img));
+    grid.appendChild(img);
+  });
+}
+
+async function assignCandidate(faceId, imgEl) {
+  _preview.style.display = 'none';
+  imgEl.style.opacity = '0.3';
+  imgEl.style.pointerEvents = 'none';
+  await fetch(_apiBase + '/api/faces/assign-batch', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({face_ids: [faceId], person_id: _personId}),
+  });
+  // Refresh this person's faces + count and the candidate list.
+  load();
+  loadCandidates();
+}
+
 load();
+loadCandidates();
 </script>
 </body>
 </html>"""
@@ -1233,6 +1361,62 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
         items = await asyncio.to_thread(_gen_thumbs)
         return {"total": total, "items": items}
+
+    @router.get("/api/persons/{person_id}/candidates")
+    async def list_candidate_faces(
+        person_id: int, source: str = "unassigned", offset: int = 0, limit: int = 40
+    ) -> dict:
+        """Return a page of candidate faces to add to this person.
+
+        ``source="unassigned"`` lists faces not assigned to any person;
+        ``source="biggest"`` lists faces from the largest *other* cluster (a
+        common case: a person was split into two clusters and you want to fold
+        the big one in). Highest-confidence first; only the page is thumbnailed.
+
+        Response: ``{"total": N, "items": [...], "source_label": str | None}``
+        where ``source_label`` names the cluster the candidates came from (only
+        set for ``source="biggest"``).
+        """
+        import asyncio
+
+        limit = min(max(limit, 1), 200)
+        persons = db.get_persons()
+        if not any(p.person_id == person_id for p in persons):
+            raise HTTPException(status_code=404, detail="Person not found")
+
+        source_label = None
+        if source == "biggest":
+            others = [p for p in persons if p.person_id != person_id and p.face_ids]
+            biggest = max(others, key=lambda p: len(p.face_ids), default=None)
+            if biggest is None:
+                faces: list[dict] = []
+            else:
+                faces = db.get_faces_for_person(biggest.person_id)
+                source_label = biggest.label or f"Person {biggest.person_id}"
+        else:
+            faces = db.get_unassigned_faces()
+
+        faces.sort(key=lambda f: f.get("confidence") or 0.0, reverse=True)
+        total = len(faces)
+        page = faces[offset : offset + limit]
+
+        def _gen_thumbs() -> list[dict]:
+            return [
+                {
+                    **f,
+                    "thumb": face_thumbnail_b64(
+                        f["image_path"],
+                        f["bbox_x"],
+                        f["bbox_y"],
+                        f["bbox_w"],
+                        f["bbox_h"],
+                    ),
+                }
+                for f in page
+            ]
+
+        items = await asyncio.to_thread(_gen_thumbs)
+        return {"total": total, "items": items, "source_label": source_label}
 
     @router.get("/api/faces/unassigned")
     async def list_unassigned_faces(offset: int = 0, limit: int = 40) -> dict:
