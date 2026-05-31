@@ -1198,29 +1198,33 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         items = await asyncio.to_thread(_gen_thumbs)
         return {"total": total, "items": items}
 
-    class _AssignBatchBody(BaseModel):
-        face_ids: list[int]
-        person_id: int | None = None
-        label: str = ""
-
     @router.post("/api/faces/assign-batch")
-    async def assign_faces_batch(body: _AssignBatchBody) -> dict:
+    async def assign_faces_batch(
+        face_ids: list[int] = Body(...),
+        person_id: int | None = Body(None),
+        label: str = Body(""),
+    ) -> dict:
         """Assign multiple faces to a person.
 
         If ``person_id`` is provided, faces are assigned to that person.
         If ``person_id`` is None, a new person is created (with optional ``label``).
+
+        Body params are declared with ``Body(...)`` rather than a pydantic model
+        because this module uses ``from __future__ import annotations``: a
+        function-local model's string annotation would not resolve and FastAPI
+        would treat the body as a query parameter (returning 422).
         """
-        if not body.face_ids:
+        if not face_ids:
             raise HTTPException(status_code=400, detail="face_ids must not be empty")
-        if body.person_id is not None:
-            target_id = body.person_id
+        if person_id is not None:
+            target_id = person_id
         else:
             target_id = db.create_person(
-                label=body.label,
-                confirmed=bool(body.label),
-                trusted=bool(body.label),
+                label=label,
+                confirmed=bool(label),
+                trusted=bool(label),
             )
-        for fid in body.face_ids:
+        for fid in face_ids:
             db.set_person_id(fid, target_id)
         return {"ok": True, "person_id": target_id}
 
