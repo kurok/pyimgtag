@@ -473,6 +473,62 @@ def test_person_detail_html_has_face_pager(tmp_path):
     # and only navigates to the grid as a fallback for direct opens.
     assert "window.history.length>1" in html and "history.back()" in html
     assert "document.referrer" not in html  # old reload-on-empty-referrer path is gone
+    # The "add faces to this person" candidate section with its source toggle.
+    assert 'id="cand-section"' in html and "loadCandidates" in html
+    assert "/candidates?source=" in html
+    assert "setCandSource('biggest')" in html
+    # The merge-target dropdown is sorted by name.
+    assert "localeCompare" in html
+
+
+def test_candidate_faces_unassigned(tmp_path):
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+    (pid,) = _seed_persons_with_faces(db_path, [("Me", True, 1)])
+    _seed_unassigned_faces(db_path, 3)
+
+    with TestClient(app) as client:
+        data = client.get(f"/api/persons/{pid}/candidates?source=unassigned").json()
+        assert data["total"] == 3
+        assert len(data["items"]) == 3
+        assert data["source_label"] is None
+        assert all("thumb" in f for f in data["items"])
+
+        page = client.get(
+            f"/api/persons/{pid}/candidates?source=unassigned&offset=2&limit=2"
+        ).json()
+        assert page["total"] == 3
+        assert len(page["items"]) == 1  # remainder on the final page
+
+
+def test_candidate_faces_biggest_other_cluster(tmp_path):
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+    me, _small, _big = _seed_persons_with_faces(
+        db_path, [("Me", True, 1), ("Small", False, 2), ("Big", False, 5)]
+    )
+    with TestClient(app) as client:
+        data = client.get(f"/api/persons/{me}/candidates?source=biggest").json()
+        assert data["total"] == 5  # the largest *other* cluster
+        assert data["source_label"] == "Big"
+
+        assert client.get("/api/persons/999999/candidates").status_code == 404
+
+
+def test_candidate_faces_biggest_none_when_alone(tmp_path):
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+    (solo,) = _seed_persons_with_faces(db_path, [("Solo", True, 3)])
+    with TestClient(app) as client:
+        data = client.get(f"/api/persons/{solo}/candidates?source=biggest").json()
+        assert data["total"] == 0
+        assert data["source_label"] is None
 
 
 def test_list_unassigned_faces(tmp_path):
