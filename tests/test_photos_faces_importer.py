@@ -17,10 +17,11 @@ import contextlib
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
 
 from pyimgtag.models import FaceDetection
-from pyimgtag.photos_faces_importer import import_photos_persons
+from pyimgtag.photos_faces_importer import _assign_faces_to_person, import_photos_persons
 
 
 def _mock_photo(uuid: str, persons: list[str]) -> MagicMock:
@@ -281,6 +282,89 @@ class TestImportPhotosPersons:
             ):
                 with pytest.raises(RuntimeError, match="Neither osascript nor photoscript"):
                     import_photos_persons(db)
+
+
+class TestAssignFacesMultiFace:
+    """Embedding-based linking of group (multi-face) photos."""
+
+    @staticmethod
+    def _db(tmp_path):
+        from pyimgtag.progress_db import ProgressDB
+
+        return ProgressDB(db_path=tmp_path / "test.db")
+
+    @staticmethod
+    def _vec(*nonzero: tuple[int, float]) -> np.ndarray:
+        v = np.zeros(128, dtype=np.float64)
+        for idx, val in nonzero:
+            v[idx] = val
+        return v
+
+    def _face(self, db, path: str, embedding=None) -> int:
+        return db.insert_face(path, FaceDetection(image_path=path), embedding=embedding)
+
+    def test_links_matching_face_in_group_photo(self, tmp_path):
+        """The group-photo face closest to the person's centroid is linked."""
+        with self._db(tmp_path) as db:
+            pid = db.create_person(label="Alice", confirmed=True, source="photos", trusted=True)
+            seed = self._vec((0, 1.0))
+            solo = self._face(db, "/p/solo.jpg", embedding=seed)
+            # Group shot: Alice (near seed) + a stranger (far away).
+            alice = self._face(db, "/p/group.jpg", embedding=self._vec((0, 1.0), (1, 0.05)))
+            stranger = self._face(db, "/p/group.jpg", embedding=self._vec((40, 1.0)))
+
+            skipped = _assign_faces_to_person(db, pid, ["solo", "group"])
+
+            assert skipped == 0
+            faces = next(p for p in db.get_persons() if p.person_id == pid).face_ids
+            assert solo in faces
+            assert alice in faces
+            assert stranger not in faces
+
+    def test_group_photo_skipped_without_reference(self, tmp_path):
+        """No seed (person only in a group shot) → left for manual review."""
+        with self._db(tmp_path) as db:
+            pid = db.create_person(label="Bob", confirmed=True, source="photos", trusted=True)
+            self._face(db, "/p/group.jpg", embedding=self._vec((0, 1.0)))
+            self._face(db, "/p/group.jpg", embedding=self._vec((40, 1.0)))
+
+            skipped = _assign_faces_to_person(db, pid, ["group"])
+
+            assert skipped == 1
+            assert next(p for p in db.get_persons() if p.person_id == pid).face_ids == []
+
+    def test_ambiguous_group_photo_skipped(self, tmp_path):
+        """Two near-equally-close candidates fail the margin check → skipped."""
+        with self._db(tmp_path) as db:
+            pid = db.create_person(label="Carol", confirmed=True, source="photos", trusted=True)
+            seed = self._vec((0, 1.0))
+            solo = self._face(db, "/p/solo.jpg", embedding=seed)
+            # Both group faces sit almost the same tiny distance from the seed.
+            self._face(db, "/p/group.jpg", embedding=self._vec((0, 1.0), (1, 0.05)))
+            self._face(db, "/p/group.jpg", embedding=self._vec((0, 1.0), (2, 0.06)))
+
+            skipped = _assign_faces_to_person(db, pid, ["solo", "group"])
+
+            # Solo seed is linked; the ambiguous group photo is not.
+            assert skipped == 1
+            faces = next(p for p in db.get_persons() if p.person_id == pid).face_ids
+            assert faces == [solo]
+
+    def test_seeds_from_existing_assignment(self, tmp_path):
+        """An already-assigned reference face resolves a later group import."""
+        with self._db(tmp_path) as db:
+            pid = db.create_person(label="Dave", confirmed=True, source="photos", trusted=True)
+            # Pre-existing reference face for Dave (e.g. from a prior import).
+            ref = self._face(db, "/p/ref.jpg", embedding=self._vec((0, 1.0)))
+            db.set_person_id(ref, pid)
+            # New group photo only — no single-face seed in this batch.
+            dave = self._face(db, "/p/grp.jpg", embedding=self._vec((0, 1.0), (1, 0.04)))
+            self._face(db, "/p/grp.jpg", embedding=self._vec((40, 1.0)))
+
+            skipped = _assign_faces_to_person(db, pid, ["grp"])
+
+            assert skipped == 0
+            assert dave in next(p for p in db.get_persons() if p.person_id == pid).face_ids
 
 
 class TestBulkAppleScriptPath:

@@ -38,6 +38,15 @@ _PERSON_NAME_SEPARATOR = "|"
 # regardless of which path runs.
 _PROGRESS_EVERY = 200
 
+# Multi-face (group) photo auto-linking. A detected face is linked to a Photos
+# person only when its 128-d encoding is within this euclidean distance of the
+# person's reference centroid. face_recognition treats <0.6 as the same person;
+# we stay tighter so group shots are not mis-assigned. The face must also be
+# clearer than the next candidate by _MULTI_FACE_MATCH_MARGIN, else the photo is
+# left for manual review.
+_MULTI_FACE_MATCH_THRESHOLD = 0.5
+_MULTI_FACE_MATCH_MARGIN = 0.05
+
 
 @lru_cache(maxsize=None)
 def _has_photoscript() -> bool:
@@ -73,9 +82,10 @@ def import_photos_persons(
       ``confirmed=True``.
     - For photos with exactly one detected face in the local faces DB:
       assigns that face to the person.
-    - For photos with multiple detected faces: person is created but the
-      photo's faces are left unassigned (logged as skipped — requires
-      manual review).
+    - For photos with multiple detected faces (group shots): links the face
+      whose embedding best matches the person's reference faces, when the
+      match is confident; otherwise leaves the photo for manual review
+      (logged as skipped). See :func:`_assign_faces_to_person`.
     - Photos not yet in the faces DB are ignored.
 
     Two enumeration paths exist:
@@ -491,27 +501,102 @@ def _collect_via_photoscript(emit: Callable[[str], None]) -> dict[str, list[str]
     return name_to_uuids
 
 
-def _assign_faces_to_person(db: ProgressDB, person_id: int, uuids: list[str]) -> int:
-    """Assign unambiguous unassigned faces for *uuids* to *person_id*.
+def _assign_faces_to_person(
+    db: ProgressDB,
+    person_id: int,
+    uuids: list[str],
+    *,
+    match_threshold: float = _MULTI_FACE_MATCH_THRESHOLD,
+    margin: float = _MULTI_FACE_MATCH_MARGIN,
+) -> int:
+    """Assign this person's faces across their tagged photos.
 
-    Only faces with ``person_id IS NULL`` are touched so existing assignments
-    are never overwritten.  Returns the number of multi-face photos that could
-    not be auto-assigned (skipped count).
+    Single-face photos are unambiguous and assigned directly. Multi-face
+    (group) photos are resolved by embedding similarity: the unassigned face
+    closest to the person's reference centroid is linked, but only when it is
+    within ``match_threshold`` *and* clearly closer than the next-best
+    candidate (by ``margin``). Otherwise the photo is left for manual review —
+    a wrong auto-assignment in someone's library is worse than an empty slot.
+
+    The reference centroid is seeded from the person's existing assignments
+    (covering re-import and the all-group-photo case) plus the single-face
+    photos assigned in this pass, so a person who appears in group photos but
+    has at least one solo/portrait shot still gets linked. When there is no
+    usable reference at all, multi-face photos are skipped, not guessed.
+
+    Only faces with ``person_id IS NULL`` are touched, so existing assignments
+    are never overwritten. Returns the number of photos left unassigned
+    (skipped) for manual review.
     """
-    skipped = 0
+    import numpy as np
+
+    # Collect this person's unassigned candidate faces, grouped per photo.
+    per_photo: list[tuple[str, list[int]]] = []
+    candidate_ids: list[int] = []
     for uuid in uuids:
-        faces = db.get_faces_by_uuid(uuid)
-        unassigned = [f for f in faces if f["person_id"] is None]
-        if len(unassigned) == 1:
-            db.set_person_id(unassigned[0]["id"], person_id)
-        elif len(unassigned) > 1:
+        unassigned = [f["id"] for f in db.get_faces_by_uuid(uuid) if f["person_id"] is None]
+        if unassigned:
+            per_photo.append((uuid, unassigned))
+            candidate_ids.extend(unassigned)
+    if not per_photo:
+        return 0
+
+    embeddings = db.get_embeddings_for_faces(candidate_ids)
+    # Reference embeddings: faces already confirmed for this person, grown with
+    # the unambiguous single-face shots assigned below.
+    seeds = db.get_person_embeddings(person_id)
+
+    # Phase 1 — unambiguous single-face photos.
+    multi: list[tuple[str, list[int]]] = []
+    for uuid, ids in per_photo:
+        if len(ids) == 1:
+            db.set_person_id(ids[0], person_id)
+            if ids[0] in embeddings:
+                seeds.append(embeddings[ids[0]])
+        else:
+            multi.append((uuid, ids))
+    if not multi:
+        return 0
+
+    # Phase 2 — resolve group photos against a fixed reference centroid.
+    centroid = np.mean(np.stack(seeds), axis=0) if seeds else None
+    skipped = 0
+    for uuid, ids in multi:
+        ranked: list[tuple[int, float]] = []
+        if centroid is not None:
+            ranked = sorted(
+                (
+                    (fid, float(np.linalg.norm(embeddings[fid] - centroid)))
+                    for fid in ids
+                    if fid in embeddings
+                ),
+                key=lambda t: t[1],
+            )
+        if not ranked:
+            skipped += 1
             logger.warning(
-                "Photos person id=%d: photo %s has %d unassigned faces — skipping auto-assign",
+                "Photos person id=%d: photo %s has %d unassigned faces and no usable "
+                "reference — leaving for manual review",
                 person_id,
                 uuid,
-                len(unassigned),
+                len(ids),
             )
+            continue
+        best_id, best_dist = ranked[0]
+        next_dist = ranked[1][1] if len(ranked) > 1 else float("inf")
+        if best_dist <= match_threshold and (next_dist - best_dist) >= margin:
+            db.set_person_id(best_id, person_id)
+        else:
             skipped += 1
+            logger.warning(
+                "Photos person id=%d: photo %s ambiguous (closest dist=%.3f, "
+                "threshold=%.2f, next=%.3f) — leaving for manual review",
+                person_id,
+                uuid,
+                best_dist,
+                match_threshold,
+                next_dist,
+            )
     return skipped
 
 
