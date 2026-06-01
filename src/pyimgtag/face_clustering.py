@@ -48,7 +48,11 @@ def cluster_faces(
             "scikit-learn is not installed. Install the [face] extra: pip install pyimgtag[face]"
         ) from None
 
-    rows = db.get_all_embeddings()
+    # Only cluster unassigned, non-ignored faces. Faces already belonging to a
+    # trusted/confirmed (e.g. Photos-imported, manually named) person must not be
+    # pulled into a fresh auto cluster, or the named person would be silently
+    # emptied; ignored ("trash") faces must not be reclustered back into people.
+    rows = db.get_clusterable_embeddings()
     if not rows:
         return {}
 

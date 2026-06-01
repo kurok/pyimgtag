@@ -997,6 +997,47 @@ class ProgressDB:
         ).fetchall()
         return [(r[0], self._blob_to_embedding(r[1])) for r in rows]
 
+    def get_clusterable_embeddings(self) -> list[tuple[int, np.ndarray]]:
+        """Return (face_id, embedding) for faces eligible for auto-clustering.
+
+        Only unassigned, non-ignored faces are returned. Faces already assigned
+        to a person (notably trusted / Photos-imported or manually confirmed
+        people) and trashed faces are excluded, so clustering never steals a
+        face away from a named person nor pulls a dismissed face back into a
+        cluster. ``clear_auto_persons`` releases auto-cluster faces back to the
+        unassigned pool before a recluster, so this set is exactly the faces
+        that should be (re)grouped.
+        """
+        rows = self._conn.execute(
+            "SELECT id, embedding FROM faces "
+            "WHERE embedding IS NOT NULL AND person_id IS NULL AND ignored = 0"
+        ).fetchall()
+        return [(r[0], self._blob_to_embedding(r[1])) for r in rows]
+
+    def get_embeddings_for_faces(self, face_ids: list[int]) -> dict[int, np.ndarray]:
+        """Return ``{face_id: embedding}`` for the given ids that have one.
+
+        Ids without a stored embedding (or unknown ids) are simply absent from
+        the result, so callers can look up by membership.
+        """
+        if not face_ids:
+            return {}
+        placeholders = ",".join("?" * len(face_ids))
+        rows = self._conn.execute(
+            f"SELECT id, embedding FROM faces WHERE id IN ({placeholders}) "  # nosec B608
+            "AND embedding IS NOT NULL",
+            list(face_ids),
+        ).fetchall()
+        return {r[0]: self._blob_to_embedding(r[1]) for r in rows}
+
+    def get_person_embeddings(self, person_id: int) -> list[np.ndarray]:
+        """Return the embeddings of the faces currently assigned to a person."""
+        rows = self._conn.execute(
+            "SELECT embedding FROM faces WHERE person_id = ? AND embedding IS NOT NULL",
+            (person_id,),
+        ).fetchall()
+        return [self._blob_to_embedding(r[0]) for r in rows]
+
     def set_person_id(self, face_id: int, person_id: int) -> None:
         """Assign a face to a person cluster."""
         self._conn.execute("UPDATE faces SET person_id = ? WHERE id = ?", (person_id, face_id))

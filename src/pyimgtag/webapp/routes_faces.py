@@ -598,9 +598,16 @@ function renderPerson(p, faces) {
   if (thumbsShown === 0) {
     const hint = document.createElement('div');
     hint.className = 'no-faces-hint';
-    hint.textContent = p.face_count === 0
-      ? 'No faces scanned yet — run faces scan to populate'
-      : 'Face images not available';
+    if (p.face_count === 0) {
+      // A plain "faces scan" only detects faces and leaves them unassigned; it
+      // never links them to a named Photos-imported person. Point those at the
+      // step that actually populates them instead of a dead-end "run scan".
+      hint.textContent = p.source === 'photos'
+        ? 'No faces linked yet — run "faces import-photos" after a scan, or add faces from the person page'
+        : 'No faces scanned yet — run faces scan to populate';
+    } else {
+      hint.textContent = 'Face images not available';
+    }
     facesGrid.appendChild(hint);
   }
   card.appendChild(facesGrid);

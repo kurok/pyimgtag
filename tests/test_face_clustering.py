@@ -135,6 +135,50 @@ class TestReclusterAuto:
             clear.assert_called_once()
             assert len(result) == 1
 
+    def test_preserves_trusted_person_faces(self, tmp_path):
+        """Recluster must not steal faces from a trusted (named) person.
+
+        Regression for the bug where the background recluster during a scan
+        fed *every* embedding into DBSCAN — including faces already assigned to
+        a trusted/Photos-imported person — and reassigned them to a fresh
+        "Person N" cluster, silently emptying the named person.
+        """
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            pid = db.create_person(
+                label="Alexander Ryabikov", confirmed=True, source="photos", trusted=True
+            )
+            face_ids = _seed_faces(db, [np.ones(128) for _ in range(3)])
+            for fid in face_ids:
+                db.set_person_id(fid, pid)
+
+            # DBSCAN would group these 3 faces, but they belong to a trusted
+            # person and must be excluded from clustering entirely.
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0, 0, 0])}):
+                result = recluster_auto(db)
+
+            assert result == {}  # nothing clusterable
+            person = next(p for p in db.get_persons() if p.person_id == pid)
+            assert len(person.face_ids) == 3  # trusted person keeps all its faces
+            # No stray auto "Person N" was created.
+            assert all(p.trusted for p in db.get_persons())
+
+    def test_excludes_ignored_faces(self, tmp_path):
+        """Ignored (trashed) faces must not be reclustered back into a person."""
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            face_ids = _seed_faces(db, [np.ones(128), np.ones(128)])
+            db.ignore_face(face_ids[0])
+            # Only the non-ignored face is fed to DBSCAN; the single returned
+            # label clusters that face alone. The ignored face is never an input.
+            with patch.dict(sys.modules, {"sklearn.cluster": _fake_dbscan([0])}):
+                result = cluster_faces(db)
+            # The lone cluster contains only the non-ignored face.
+            assert list(result.values()) == [[face_ids[1]]]
+            # The ignored face was never assigned to a cluster.
+            person_id = db._conn.execute(
+                "SELECT person_id FROM faces WHERE id = ?", (face_ids[0],)
+            ).fetchone()[0]
+            assert person_id is None
+
 
 class TestClusterFacesImportError:
     """The ImportError guard fires when scikit-learn is absent."""
