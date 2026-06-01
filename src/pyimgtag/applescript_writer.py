@@ -102,6 +102,61 @@ def _filename_scan_block(safe_file_name: str, indent: str = "    ") -> str:
     )
 
 
+def _lookup_block(file_name: str, indent: str = "    ") -> str:
+    """Return AppleScript that binds ``theItem`` to the matching media item.
+
+    The tricky case is an Apple Photos *library* original, whose on-disk path
+    is ``.../originals/X/<UUID>.<ext>``. There the stem is the asset's
+    localIdentifier prefix — but Photos' ``filename`` property is the photo's
+    *original* import name (e.g. ``IMG_1234.HEIC``), so scanning for
+    ``<UUID>.<ext>`` never matches. A UUID stem is therefore resolved by
+    media-item id, trying in order:
+
+    1. ``<UUID>/L0/001`` — the full PHAsset localIdentifier; the form that
+       resolves reliably across Photos versions (the bare UUID does not on
+       some builds, which is what made "open in Photos" fail).
+    2. the bare ``<UUID>`` — kept for versions where it works.
+    3. ``every media item whose id begins with <UUID>`` — catches edited /
+       burst renditions whose suffix is not ``/L0/001`` (best-effort; wrapped
+       so unsupported builds fall through).
+    4. a filename scan — only useful for genuine non-library paths.
+
+    Non-UUID stems go straight to the filename scan, avoiding the slow
+    AppleScript timeout that ``media item id`` incurs for an unknown id.
+    """
+    stem = PurePosixPath(file_name).stem
+    safe_file_name = _escape_applescript_string(file_name)
+    if not _looks_like_uuid(stem):
+        return _filename_scan_block(safe_file_name, indent)
+
+    uuid = _escape_applescript_string(stem)
+    i = indent
+    return (
+        f"{i}set theItem to missing value\n"
+        f"{i}try\n"
+        f'{i}    set theItem to media item id "{uuid}/L0/001"\n'
+        f"{i}end try\n"
+        f"{i}if theItem is missing value then\n"
+        f"{i}    try\n"
+        f'{i}        set theItem to media item id "{uuid}"\n'
+        f"{i}    end try\n"
+        f"{i}end if\n"
+        f"{i}if theItem is missing value then\n"
+        f"{i}    set _results to {{}}\n"
+        f"{i}    try\n"
+        f'{i}        set _results to (every media item whose id begins with "{uuid}")\n'
+        f"{i}    end try\n"
+        f"{i}    if (count of _results) is 0 then\n"
+        f'{i}        set _results to (every media item whose filename = "{safe_file_name}")\n'
+        f"{i}    end if\n"
+        f"{i}    if (count of _results) is 0 then\n"
+        f'{i}        error "Photo not found: {safe_file_name}"\n'
+        f"{i}    end if\n"
+        f"{i}    set theItem to item 1 of _results\n"
+        f"{i}end if\n"
+    )
+
+
 def _build_applescript(
     file_name: str,
     tags: list[str],
@@ -119,9 +174,6 @@ def _build_applescript(
     Returns:
         AppleScript source string ready to pass to ``osascript -e``.
     """
-    stem = PurePosixPath(file_name).stem
-    safe_file_name = _escape_applescript_string(file_name)
-
     escaped_tags = [f'"{_escape_applescript_string(t)}"' for t in tags]
     tag_list = "{" + ", ".join(escaped_tags) + "}"
 
@@ -135,20 +187,7 @@ def _build_applescript(
         safe_title = _escape_applescript_string(title)
         title_line = f'\n    set name of theItem to "{safe_title}"'
 
-    if _looks_like_uuid(stem):
-        # UUID-format stem: try O(1) media item id first, fall back to filename scan.
-        # Non-UUID stems skip the media item id call entirely — Photos takes several
-        # seconds to confirm an unknown id, making each lookup slow.
-        uuid = _escape_applescript_string(stem)
-        lookup = (
-            "    try\n"
-            f'        set theItem to media item id "{uuid}"\n'
-            "    on error\n"
-            + _filename_scan_block(safe_file_name, indent="        ")
-            + "    end try\n"
-        )
-    else:
-        lookup = _filename_scan_block(safe_file_name)
+    lookup = _lookup_block(file_name)
 
     return (
         'tell application "Photos"\n'
@@ -227,20 +266,7 @@ def _write_via_osascript(
 
 def _build_read_applescript(file_name: str) -> str:
     """Build AppleScript to read keywords list from a photo, returning newline-separated."""
-    stem = PurePosixPath(file_name).stem
-    safe_file_name = _escape_applescript_string(file_name)
-
-    if _looks_like_uuid(stem):
-        uuid = _escape_applescript_string(stem)
-        lookup = (
-            "    try\n"
-            f'        set theItem to media item id "{uuid}"\n'
-            "    on error\n"
-            + _filename_scan_block(safe_file_name, indent="        ")
-            + "    end try\n"
-        )
-    else:
-        lookup = _filename_scan_block(safe_file_name)
+    lookup = _lookup_block(file_name)
 
     return (
         'tell application "Photos"\n'
@@ -387,20 +413,7 @@ def write_to_photos(
 
 def _build_reveal_applescript(file_name: str) -> str:
     """Build AppleScript that activates Photos and reveals the matching item."""
-    stem = PurePosixPath(file_name).stem
-    safe_file_name = _escape_applescript_string(file_name)
-
-    if _looks_like_uuid(stem):
-        uuid = _escape_applescript_string(stem)
-        lookup = (
-            "    try\n"
-            f'        set theItem to media item id "{uuid}"\n'
-            "    on error\n"
-            + _filename_scan_block(safe_file_name, indent="        ")
-            + "    end try\n"
-        )
-    else:
-        lookup = _filename_scan_block(safe_file_name)
+    lookup = _lookup_block(file_name)
 
     return (
         'tell application "Photos"\n'
@@ -570,20 +583,7 @@ def _build_delete_applescript(file_name: str) -> str:
         triggers a confirmation dialog. The script tries to dismiss
         any prompt by pressing Return, but this is best-effort.
     """
-    stem = PurePosixPath(file_name).stem
-    safe_file_name = _escape_applescript_string(file_name)
-
-    if _looks_like_uuid(stem):
-        uuid = _escape_applescript_string(stem)
-        lookup = (
-            "    try\n"
-            f'        set theItem to media item id "{uuid}"\n'
-            "    on error\n"
-            + _filename_scan_block(safe_file_name, indent="        ")
-            + "    end try\n"
-        )
-    else:
-        lookup = _filename_scan_block(safe_file_name)
+    lookup = _lookup_block(file_name)
 
     return (
         # 1. Resolve theItem and ask Photos to spotlight it (selects in UI).

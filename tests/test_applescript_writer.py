@@ -106,9 +106,12 @@ class TestBuildApplescript:
         script = _build_applescript(_UUID_FILE, ["sunset"], None)
         assert f'media item id "{_UUID_STEM}"' in script
 
-    def test_uuid_stem_has_try_on_error_fallback(self):
+    def test_uuid_stem_resolves_by_id_with_filename_fallback(self):
         script = _build_applescript(_UUID_FILE, ["tag"], None)
-        assert "on error" in script
+        # UUID stems resolve by media-item id (full localIdentifier first),
+        # with an "id begins with" scan and a filename scan as fallbacks.
+        assert f'media item id "{_UUID_STEM}/L0/001"' in script
+        assert f'whose id begins with "{_UUID_STEM}"' in script
         assert f'filename = "{_UUID_FILE}"' in script
 
     def test_uuid_stem_fallback_has_not_found_error(self):
@@ -195,7 +198,10 @@ class TestBuildReadApplescript:
 
     def test_uuid_stem_has_fallback(self):
         script = _build_read_applescript(_UUID_FILE)
-        assert "on error" in script
+        # UUID stems resolve by media-item id (full localIdentifier first),
+        # with an "id begins with" scan and a filename scan as fallbacks.
+        assert f'media item id "{_UUID_STEM}/L0/001"' in script
+        assert f'whose id begins with "{_UUID_STEM}"' in script
         assert f'filename = "{_UUID_FILE}"' in script
 
     def test_non_uuid_stem_skips_media_item_id(self):
@@ -1000,7 +1006,10 @@ class TestBuildDeleteApplescript:
         from pyimgtag.applescript_writer import _build_delete_applescript
 
         script = _build_delete_applescript(_UUID_FILE)
-        assert "on error" in script
+        # UUID stems resolve by media-item id (full localIdentifier first),
+        # with an "id begins with" scan and a filename scan as fallbacks.
+        assert f'media item id "{_UUID_STEM}/L0/001"' in script
+        assert f'whose id begins with "{_UUID_STEM}"' in script
         assert f'filename = "{_UUID_FILE}"' in script
 
     def test_non_uuid_stem_skips_media_item_id(self):
@@ -1171,8 +1180,22 @@ class TestBuildRevealApplescript:
         from pyimgtag.applescript_writer import _build_reveal_applescript
 
         script = _build_reveal_applescript(_UUID_FILE)
-        assert "on error" in script
+        # UUID stems resolve by media-item id (full localIdentifier first),
+        # with an "id begins with" scan and a filename scan as fallbacks.
+        assert f'media item id "{_UUID_STEM}/L0/001"' in script
+        assert f'whose id begins with "{_UUID_STEM}"' in script
         assert f'filename = "{_UUID_FILE}"' in script
+
+    def test_uuid_lookup_tries_localidentifier_before_filename(self):
+        """Regression: a Photos library original's on-disk name is <UUID>.<ext>,
+        but Photos' `filename` is the original import name, so the filename scan
+        can never match it. The localIdentifier lookup must come first."""
+        from pyimgtag.applescript_writer import _build_reveal_applescript
+
+        script = _build_reveal_applescript(_UUID_FILE)
+        assert script.index(f'media item id "{_UUID_STEM}/L0/001"') < script.index(
+            f'filename = "{_UUID_FILE}"'
+        )
 
     def test_non_uuid_stem_skips_media_item_id(self):
         from pyimgtag.applescript_writer import _build_reveal_applescript
