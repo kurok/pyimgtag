@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-06-01
+
+### Changed
+- **Internal: resolved CodeQL code-scanning alerts in the test suite** (#256): two tests mixed `import x` with `from x import y` for the same module (`py/import-and-import-from`) — both now obtain the module via `importlib.import_module(...)`. An intentional `except SystemExit: pass` (`py/empty-except`) is now documented. Test-only; no runtime or API change.
+
 ## [0.23.0] - 2026-05-31
 
 ### Added
