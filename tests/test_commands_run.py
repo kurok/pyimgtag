@@ -1484,6 +1484,8 @@ class TestCmdRunMisc:
         try:
             cmd_run(args, parser)
         except SystemExit:
+            # parser.error is mocked to raise SystemExit(2); swallow it so the
+            # call assertion below can run.
             pass
         parser.error.assert_called_once()
 

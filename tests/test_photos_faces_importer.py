@@ -607,7 +607,11 @@ class TestLazyPhotoscriptImport:
         import importlib
         import sys
 
-        import pyimgtag
+        # Use import_module (not ``import pyimgtag``) so this file never mixes
+        # ``import pyimgtag`` with the ``from pyimgtag import ...`` forms used
+        # elsewhere; we still need the package object to rebind the submodule
+        # attribute in ``finally``.
+        pyimgtag = importlib.import_module("pyimgtag")
 
         mod_name = "pyimgtag.photos_faces_importer"
         saved = sys.modules.pop(mod_name, None)
