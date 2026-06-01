@@ -665,7 +665,10 @@ class TestModuleImportFallback:
         import builtins
         import importlib
 
-        import pyimgtag.commands.faces as faces_mod
+        # Use import_module (not ``import pyimgtag.commands.faces``) so this
+        # file never mixes that form with the module-level
+        # ``from pyimgtag.commands.faces import ...``.
+        faces_mod = importlib.import_module("pyimgtag.commands.faces")
 
         real_import = builtins.__import__
 
