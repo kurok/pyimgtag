@@ -227,22 +227,28 @@ def _run_drift_prune_job(db: ProgressDB, job: _Job) -> None:
             job.finished_at = time.time()
         raise RuntimeError("drift scan failed") from exc
 
+    # Only prune ``disk_missing`` rows (the file is genuinely gone). The
+    # ``photos_missing`` category is a soft signal prone to false positives
+    # (filename spelling, HEIC↔JPEG, or a partial Photos enumeration) and
+    # pruning it from a one-click web action has wiped nearly-whole DBs, so it
+    # is deliberately left for the explicit ``--prune-photos-missing`` CLI flag.
+    prune_paths = report.disk_missing_paths
     with _JOB_LOCK:
-        job.total = report.dead_count
+        job.total = len(prune_paths)
         if report.photos_probe_error is not None:
             # The AppleScript probe degraded — surface the category but
             # keep going. ``photos_missing`` and ``present`` collapse,
             # so only ``disk_missing`` rows will actually get pruned.
             job.last_error = report.photos_probe_error
 
-    if not report.dead_paths:
+    if not prune_paths:
         with _JOB_LOCK:
             job.state = "done"
             job.finished_at = time.time()
         return
 
     try:
-        deleted = prune_drift(db, report.dead_paths)
+        deleted = prune_drift(db, prune_paths)
     except Exception as exc:  # noqa: BLE001 — propagate as job error
         logger.exception("drift job: prune failed")
         with _JOB_LOCK:
@@ -253,7 +259,7 @@ def _run_drift_prune_job(db: ProgressDB, job: _Job) -> None:
 
     with _JOB_LOCK:
         job.ok = deleted
-        job.done = report.dead_count
+        job.done = len(prune_paths)
         # Keep the deleted-row sample short so the events panel stays
         # readable on a 22 k-photo library.
         for path in report.dead_paths[:_RECENT_LIMIT]:

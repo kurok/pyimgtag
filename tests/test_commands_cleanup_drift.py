@@ -205,8 +205,15 @@ class TestPruneDrift:
 
 
 class TestCmdCleanupDrift:
-    def _ns(self, db_path: Path, *, prune: bool = False) -> argparse.Namespace:
-        return argparse.Namespace(db=str(db_path), dry_run=not prune, prune=prune)
+    def _ns(
+        self, db_path: Path, *, prune: bool = False, prune_photos_missing: bool = False
+    ) -> argparse.Namespace:
+        return argparse.Namespace(
+            db=str(db_path),
+            dry_run=not (prune or prune_photos_missing),
+            prune=prune,
+            prune_photos_missing=prune_photos_missing,
+        )
 
     def test_dry_run_does_not_delete(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
@@ -231,9 +238,11 @@ class TestCmdCleanupDrift:
         with ProgressDB(db_path=db_path) as db:
             assert db.count_images() == 3
 
-    def test_prune_deletes_dead_rows(
+    def test_prune_deletes_only_disk_missing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """--prune removes the gone-from-disk row but LEAVES photos_missing,
+        which is only deletable via the explicit opt-in flag."""
         db_path = tmp_path / "drift.db"
         present, disk_missing, photos_missing = _seed(db_path, tmp_path)
         monkeypatch.setattr(
@@ -244,12 +253,30 @@ class TestCmdCleanupDrift:
         rc = cmd_cleanup_drift(self._ns(db_path, prune=True))
         assert rc == 0
         captured = capsys.readouterr()
-        assert "deleted" in captured.out
-        assert "2 deleted" in captured.out
+        assert "1 deleted" in captured.out
 
         with ProgressDB(db_path=db_path) as db:
             remaining = sorted(db.iter_image_paths())
-            assert remaining == [present]
+            # photos_missing survives — its file is still on disk.
+            assert remaining == sorted([present, photos_missing])
+
+    def test_prune_photos_missing_flag_deletes_both(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        db_path = tmp_path / "drift.db"
+        present, disk_missing, photos_missing = _seed(db_path, tmp_path)
+        monkeypatch.setattr(
+            "pyimgtag.cleanup_drift.fetch_photos_membership",
+            _membership_factory([present]),
+        )
+
+        rc = cmd_cleanup_drift(self._ns(db_path, prune_photos_missing=True))
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "2 deleted" in captured.out
+
+        with ProgressDB(db_path=db_path) as db:
+            assert sorted(db.iter_image_paths()) == [present]
 
     def test_probe_error_degrades_gracefully(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
