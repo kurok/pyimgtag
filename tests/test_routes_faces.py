@@ -259,6 +259,23 @@ def test_faces_grid_html_has_sort_and_bulk_controls(tmp_path):
     assert not re.findall(r"__[A-Z][A-Z0-9_]+__", html)
 
 
+def test_faces_grid_persists_view_state_in_url(tmp_path):
+    """Sort/filter/page are mirrored into the URL and restored on load, so the
+    view survives opening a cluster and pressing Back (regression)."""
+    db = ProgressDB(db_path=tmp_path / "progress.db")
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base="/faces"), prefix="/faces")
+
+    html = TestClient(app).get("/faces/").text
+    # State is written to the URL …
+    assert "history.replaceState" in html
+    assert "function _syncUrl" in html
+    # … and restored from it on initial load instead of a bare load().
+    assert "function _initFromUrl" in html
+    assert "new URLSearchParams(location.search)" in html
+    assert "_initFromUrl();" in html
+
+
 def _seed_unassigned_faces(db_path, n):
     """Insert n faces with no person and return their ids."""
     import sqlite3
