@@ -69,13 +69,16 @@ def cmd_faces(args: argparse.Namespace) -> int:
     if args.faces_action is None:
         print(
             "Usage: pyimgtag faces "
-            "{scan,cluster,review,apply,import-photos,ui,recluster,reset-untrusted,reset}",
+            "{scan,cluster,review,apply,import-photos,match-references,ui,recluster,"
+            "reset-untrusted,reset}",
             file=sys.stderr,
         )
         return 1
 
     if args.faces_action == "scan":
         return _handle_faces_scan(args)
+    if args.faces_action == "match-references":
+        return _handle_faces_match_references(args)
     if args.faces_action == "cluster":
         return _handle_faces_cluster(args)
     if args.faces_action == "review":
@@ -504,6 +507,77 @@ def _handle_faces_import_photos(args: argparse.Namespace) -> int:
             f"{skipped} multi-face photo(s) could not be auto-assigned — use 'faces ui' to review.",
             file=sys.stderr,
         )
+    return 0
+
+
+def _handle_faces_match_references(args: argparse.Namespace) -> int:
+    """Name auto-clustered people from a folder of labeled reference faces.
+
+    The escape hatch for Photos libraries that can't be enumerated via
+    AppleScript: drop one labeled image (or sub-folder) per person into
+    ``<dir>`` and match clusters to them by face embedding. Dry-run by
+    default; pass ``--apply`` to write the names.
+    """
+    from pathlib import Path
+
+    from pyimgtag.face_naming import (
+        apply_matches,
+        load_reference_embeddings,
+        match_clusters_to_references,
+    )
+
+    ref_dir = Path(args.reference_dir)
+    if not ref_dir.is_dir():
+        print(f"Error: reference dir not found: {ref_dir}", file=sys.stderr)
+        return 1
+
+    try:
+        from pyimgtag.face_detection import _check_face_recognition
+
+        _check_face_recognition()
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Loading reference faces from {ref_dir}…", file=sys.stderr)
+    references = load_reference_embeddings(ref_dir)
+    if not references:
+        print(
+            "No usable reference faces found. Add one image (or sub-folder) per "
+            "person, e.g. 'Alice.jpg' or 'Alice/01.jpg'.",
+            file=sys.stderr,
+        )
+        return 1
+    ref_faces = sum(len(v) for v in references.values())
+    print(f"Loaded {len(references)} name(s) from {ref_faces} reference face(s).", file=sys.stderr)
+
+    threshold = getattr(args, "threshold", None) or 0.5
+    with ProgressDB(db_path=args.db) as db:
+        matches = match_clusters_to_references(db, references, threshold=threshold)
+        if not matches:
+            print("No clusters matched a reference within the threshold.", file=sys.stderr)
+            return 0
+
+        for m in matches:
+            cur = m.current_label or f"Person {m.person_id}"
+            print(
+                f"  {cur} ({m.face_count} face(s)) → {m.name} (distance {m.distance:.3f})",
+                file=sys.stderr,
+            )
+
+        if not getattr(args, "apply", False):
+            print(
+                f"\n{len(matches)} cluster(s) would be named. Re-run with --apply to write them.",
+                file=sys.stderr,
+            )
+            return 0
+
+        result = apply_matches(db, matches)
+    print(
+        f"\nNamed {result['renamed'] + result['merged']} cluster(s) "
+        f"({result['renamed']} renamed, {result['merged']} merged into existing people).",
+        file=sys.stderr,
+    )
     return 0
 
 

@@ -517,6 +517,28 @@ def _add_faces_subcommand(subparsers: Any) -> None:
     )
     faces_import.add_argument("--db", help=_DEFAULT_DB_HELP)
 
+    faces_match = faces_sub.add_parser(
+        "match-references",
+        help="Name auto clusters from a folder of labeled reference faces",
+    )
+    faces_match.add_argument(
+        "reference_dir",
+        help="Folder of labeled face images: 'Name.jpg' or 'Name/<images>'.",
+    )
+    faces_match.add_argument("--db", help=_DEFAULT_DB_HELP)
+    faces_match.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Max embedding distance for a match (default: 0.5; lower = stricter).",
+    )
+    faces_match.add_argument(
+        "--apply",
+        action="store_true",
+        default=False,
+        help="Write the names (without it, only a preview of proposed matches is shown).",
+    )
+
     faces_ui = faces_sub.add_parser("ui", help="Start face management web UI")
     faces_ui.add_argument("--db", help=_DEFAULT_DB_HELP)
     faces_ui.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
