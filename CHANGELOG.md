@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.25.0] - 2026-06-02
 
 ### Added
 - **`import-photos` reads the Photos library DB (osxphotos)** (#268): when the `[photos-db]` extra is installed, `faces import-photos` now reads each person's exact name and photo UUIDs straight from the Apple Photos library database via osxphotos — no AppleScript, so it works on Photos builds where the `person` class isn't scriptable (the `-2741` "Expected class name" failure that returned 0 people), and names come through verbatim (Cyrillic etc.) instead of via fragile OCR. Preferred over the AppleScript/photoscript paths, which remain as fallbacks. New `--library` flag (default: auto-detect the system library); install with `pip install 'pyimgtag[photos-db]'`.
