@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Name auto clusters from labeled reference faces** (#267): new `pyimgtag faces match-references <dir>` matches each auto-clustered person to the nearest *labeled* reference face by embedding and applies the name (merging into an existing trusted person of that name when one exists). Drop one image — or a sub-folder of images — per person into `<dir>` (`Alice.jpg` or `Alice/01.jpg`); dry-run by default, `--apply` to write, `--threshold` to tune. This is the escape hatch for Apple Photos libraries that can't be enumerated via AppleScript (the `-2741` failure that makes `import-photos` return 0), and the foundation for the upcoming screenshot/OCR capture. Backed by `pyimgtag.face_naming`.
+
 ### Fixed
 - **`faces scan` summary read as "detected 0 faces" when images were merely already scanned** (#266): a re-scan skips images detected in a previous run, but those skips were counted toward "Scanned N images, detected 0 faces" — indistinguishable from a real detection failure. The summary now reports newly-scanned images separately and, when any were skipped, says how many were already scanned and points at `faces reset-untrusted --yes` to re-detect.
 
