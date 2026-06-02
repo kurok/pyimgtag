@@ -8,10 +8,12 @@ import sys
 import threading
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 from PIL import Image
 
 from pyimgtag.commands.faces import (
     _handle_faces_apply,
+    _handle_faces_capture_names,
     _handle_faces_cluster,
     _handle_faces_import_photos,
     _handle_faces_recluster,
@@ -1103,3 +1105,109 @@ class TestScanResolvesQuality:
             assert _handle_faces_scan(args) == 1
             assert msg in capsys.readouterr().err
         mock_store.assert_not_called()  # never reached the scan loop
+
+
+class TestHandleFacesCaptureNames:
+    """`faces capture-names` — screenshot OCR → cluster naming."""
+
+    def _args(self, tmp_path, **kw):
+        defaults = dict(
+            faces_action="capture-names",
+            screenshot=None,
+            live=False,
+            save_screenshot=None,
+            languages=None,
+            threshold=0.5,
+            apply=False,
+            db=str(tmp_path / "faces.db"),
+        )
+        defaults.update(kw)
+        return _make_args(**defaults)
+
+    def test_no_source_returns_1(self, tmp_path, capsys):
+        # Neither --screenshot nor --live; bails before touching face deps.
+        assert _handle_faces_capture_names(self._args(tmp_path)) == 1
+        assert "--screenshot" in capsys.readouterr().err
+
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    def test_missing_screenshot_file_returns_1(self, _mock_check, tmp_path, capsys):
+        args = self._args(tmp_path, screenshot=str(tmp_path / "nope.png"))
+        assert _handle_faces_capture_names(args) == 1
+        assert "screenshot not found" in capsys.readouterr().err
+
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face_ocr.build_references_from_screenshot", return_value={})
+    def test_no_named_faces_returns_1(self, _mock_build, _mock_check, tmp_path, capsys):
+        shot = tmp_path / "shot.png"
+        Image.new("RGB", (10, 10)).save(shot)
+        args = self._args(tmp_path, screenshot=str(shot))
+        assert _handle_faces_capture_names(args) == 1
+        assert "No named faces" in capsys.readouterr().err
+
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face_naming.apply_matches")
+    @patch("pyimgtag.face_naming.match_clusters_to_references")
+    @patch("pyimgtag.face_ocr.build_references_from_screenshot")
+    def test_dry_run_previews_without_writing(
+        self, mock_build, mock_match, mock_apply, _mock_check, tmp_path, capsys
+    ):
+        from pyimgtag.face_naming import NameMatch
+
+        shot = tmp_path / "shot.png"
+        Image.new("RGB", (10, 10)).save(shot)
+        mock_build.return_value = {"Alice": [np.ones(128)]}
+        mock_match.return_value = [
+            NameMatch(
+                person_id=1, current_label="Person 1", name="Alice", distance=0.12, face_count=3
+            )
+        ]
+        args = self._args(tmp_path, screenshot=str(shot), apply=False)
+        assert _handle_faces_capture_names(args) == 0
+        err = capsys.readouterr().err
+        assert "→ Alice" in err
+        assert "would be named" in err
+        mock_apply.assert_not_called()  # dry-run never writes
+
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face_naming.apply_matches", return_value={"renamed": 1, "merged": 0})
+    @patch("pyimgtag.face_naming.match_clusters_to_references")
+    @patch("pyimgtag.face_ocr.build_references_from_screenshot")
+    def test_apply_writes_names(
+        self, mock_build, mock_match, mock_apply, _mock_check, tmp_path, capsys
+    ):
+        from pyimgtag.face_naming import NameMatch
+
+        shot = tmp_path / "shot.png"
+        Image.new("RGB", (10, 10)).save(shot)
+        mock_build.return_value = {"Alice": [np.ones(128)]}
+        mock_match.return_value = [
+            NameMatch(
+                person_id=1, current_label="Person 1", name="Alice", distance=0.12, face_count=3
+            )
+        ]
+        args = self._args(tmp_path, screenshot=str(shot), apply=True)
+        assert _handle_faces_capture_names(args) == 0
+        assert "Named 1 cluster" in capsys.readouterr().err
+        mock_apply.assert_called_once()
+
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face_naming.match_clusters_to_references", return_value=[])
+    @patch(
+        "pyimgtag.face_ocr.build_references_from_screenshot", return_value={"Alice": [np.ones(128)]}
+    )
+    def test_no_matches_returns_0(self, _mock_build, _mock_match, _mock_check, tmp_path, capsys):
+        shot = tmp_path / "shot.png"
+        Image.new("RGB", (10, 10)).save(shot)
+        args = self._args(tmp_path, screenshot=str(shot))
+        assert _handle_faces_capture_names(args) == 0
+        assert "No clusters matched" in capsys.readouterr().err
+
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face_ocr.capture_people_screenshot")
+    def test_live_capture_failure_returns_1(self, mock_capture, _mock_check, tmp_path, capsys):
+        from pyimgtag.face_ocr import OcrUnavailableError
+
+        mock_capture.side_effect = OcrUnavailableError("Live capture needs macOS")
+        args = self._args(tmp_path, live=True)
+        assert _handle_faces_capture_names(args) == 1
+        assert "macOS" in capsys.readouterr().err
