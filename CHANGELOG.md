@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Parallel `faces scan` (`--jobs`/`-j`)** (#273): detection + embedding is the CPU-bound bottleneck — especially `--quality accurate` (`num_jitters=10` encodes each face 10×) over a large library — and it ran single-threaded. `faces scan -j 8` now fans detection/encoding across worker processes for a near-linear speedup; `-j 0` auto-uses one worker per core. Workers do no DB I/O — they return the detected faces/embeddings and the main process performs all SQLite writes (single writer), so a bounded backlog keeps memory flat and incremental resume / not-downloaded skips still work. Default stays `-j 1` (serial, unchanged). `pyimgtag.face_embedding.detect_and_encode` is the reusable per-image worker.
+
 ## [0.25.1] - 2026-06-02
 
 ### Fixed

@@ -194,6 +194,113 @@ class TestHandleFacesScan:
         assert rc == 0
         assert mock_store.call_count == 1
 
+    # --- Parallel scan (--jobs > 1): ProcessPoolExecutor is swapped for an
+    #     in-process ThreadPoolExecutor so the mocked worker + DB writes run
+    #     here; the orchestration (submit/collect/write/skip) is identical. ---
+    @staticmethod
+    def _one_face(path, **_kw):
+        import numpy as np
+
+        from pyimgtag.models import FaceDetection
+
+        det = FaceDetection(image_path=path, bbox_x=0, bbox_y=0, bbox_w=10, bbox_h=10)
+        return [(det, np.zeros(128, dtype=np.float64))]
+
+    @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.commands.faces.scan_directory")
+    def test_parallel_scan_detects_and_writes(
+        self, mock_scan_dir, mock_check, mock_dash, tmp_path, capsys
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from pyimgtag.progress_db import ProgressDB
+
+        imgs = [tmp_path / f"p{i}.jpg" for i in range(5)]
+        for f in imgs:
+            f.write_bytes(b"\xff\xd8\xff")
+        mock_scan_dir.return_value = imgs
+        db_path = tmp_path / "progress.db"
+        args = _make_args(input_dir=str(tmp_path), db=str(db_path), jobs=3)
+
+        with (
+            patch("pyimgtag.commands.faces.ProcessPoolExecutor", ThreadPoolExecutor),
+            patch("pyimgtag.face_embedding.detect_and_encode", side_effect=self._one_face),
+        ):
+            rc = _handle_faces_scan(args)
+
+        assert rc == 0
+        with ProgressDB(db_path=db_path) as db:
+            assert db._conn.execute("SELECT COUNT(*) FROM faces").fetchone()[0] == 5
+            assert all(db.is_face_scanned(str(f)) for f in imgs)
+        assert "[parallel: 3 workers]" in capsys.readouterr().err
+
+    @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.commands.faces.scan_directory")
+    def test_parallel_scan_skips_existing_and_missing(
+        self, mock_scan_dir, mock_check, mock_dash, tmp_path, capsys
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from pyimgtag.progress_db import ProgressDB
+
+        present = tmp_path / "present.jpg"
+        present.write_bytes(b"\xff\xd8\xff")
+        already = tmp_path / "already.jpg"
+        already.write_bytes(b"\xff\xd8\xff")
+        missing = tmp_path / "icloud.jpg"  # never created on disk
+        db_path = tmp_path / "progress.db"
+        with ProgressDB(db_path=db_path) as db:
+            db.mark_face_scanned(str(already))  # detected in a prior run
+
+        mock_scan_dir.return_value = [present, already, missing]
+        args = _make_args(input_dir=str(tmp_path), db=str(db_path), jobs=2)
+        with (
+            patch("pyimgtag.commands.faces.ProcessPoolExecutor", ThreadPoolExecutor),
+            patch(
+                "pyimgtag.face_embedding.detect_and_encode", side_effect=self._one_face
+            ) as worker,
+        ):
+            rc = _handle_faces_scan(args)
+
+        assert rc == 0
+        # Only the genuinely-new, on-disk image is sent to a worker.
+        assert worker.call_count == 1
+        err = capsys.readouterr().err
+        assert "1 not downloaded locally" in err
+        assert "1 image(s) already scanned" in err
+
+    @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.commands.faces.scan_directory")
+    def test_parallel_scan_worker_error_is_counted_not_fatal(
+        self, mock_scan_dir, mock_check, mock_dash, tmp_path, capsys
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+
+        imgs = [tmp_path / f"p{i}.jpg" for i in range(3)]
+        for f in imgs:
+            f.write_bytes(b"\xff\xd8\xff")
+        mock_scan_dir.return_value = imgs
+
+        def flaky(path, **_kw):
+            if path.endswith("p1.jpg"):
+                raise ValueError("bad image")
+            return self._one_face(path)
+
+        args = _make_args(input_dir=str(tmp_path), db=str(tmp_path / "progress.db"), jobs=2)
+        with (
+            patch("pyimgtag.commands.faces.ProcessPoolExecutor", ThreadPoolExecutor),
+            patch("pyimgtag.face_embedding.detect_and_encode", side_effect=flaky),
+        ):
+            rc = _handle_faces_scan(args)
+
+        assert rc == 0
+        err = capsys.readouterr().err
+        assert "p1.jpg: skipped" in err
+        assert "1 error(s) skipped" in err
+
 
 class TestHandleFacesCluster:
     def test_import_error_returns_1(self, tmp_path):

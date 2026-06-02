@@ -477,6 +477,15 @@ def _add_faces_subcommand(subparsers: Any) -> None:
         "--extensions", default="jpg,jpeg,heic,png", help="Comma-separated extensions"
     )
     faces_scan.add_argument("--limit", type=int, help="Max images to scan")
+    faces_scan.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        default=1,
+        help="Worker processes for detection+embedding (default 1 = serial). "
+        "Use e.g. -j 8 to detect across CPU cores — the big speedup for large "
+        "libraries. 0 = auto (one per core).",
+    )
     add_web_flags(faces_scan)
 
     faces_cluster = faces_sub.add_parser("cluster", help="Cluster faces into person groups")

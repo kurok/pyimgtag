@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import threading
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from pathlib import Path
 
 from pyimgtag import run_registry
@@ -155,6 +157,166 @@ def _handle_faces_recluster(args: argparse.Namespace) -> int:
     return 0
 
 
+_DISK_FULL_MSG = (
+    "\nError: disk full — no space left on device. Free up space and re-run; "
+    "already-scanned images will be skipped automatically."
+)
+
+
+def _scan_serial(db, files, quality, *, limit, session, stats: dict) -> bool:
+    """Detect + store one image at a time. Returns True if interrupted."""
+    import errno as _errno
+
+    try:
+        for i, file_path in enumerate(files):
+            if limit and i >= limit:
+                break
+            if session is not None:
+                session.wait_if_paused()
+                session.set_current(str(file_path))
+
+            # Already detected in a previous run — counted separately so the
+            # summary doesn't read "0 detected" when nothing was re-detected.
+            if db.is_face_scanned(str(file_path)):
+                stats["skipped_existing"] += 1
+                if session is not None:
+                    session.set_counter("skipped_existing", stats["skipped_existing"])
+                    session.set_current(None)
+                continue
+            # iCloud-evicted originals are absent on disk — skip quietly.
+            if not file_path.is_file():
+                stats["not_downloaded"] += 1
+                if session is not None:
+                    session.set_counter("not_downloaded", stats["not_downloaded"])
+                    session.set_current(None)
+                continue
+
+            try:
+                count = scan_and_store(
+                    file_path,
+                    db,
+                    max_dim=quality["max_dim"],
+                    model=quality["model"],
+                    upsample=quality["upsample"],
+                    num_jitters=quality["num_jitters"],
+                    min_face_size=quality["min_face_size"],
+                )
+            except OSError as exc:
+                if exc.errno == _errno.ENOSPC:
+                    print(_DISK_FULL_MSG, file=sys.stderr)
+                    return True
+                print(f"  {file_path.name}: skipped ({exc})", file=sys.stderr)
+                stats["errors"] += 1
+                continue
+            except Exception as exc:  # noqa: BLE001 — one bad image must not abort batch
+                print(f"  {file_path.name}: skipped ({exc})", file=sys.stderr)
+                stats["errors"] += 1
+                continue
+
+            stats["scanned"] += 1
+            if count > 0:
+                stats["faces"] += count
+                print(f"  {file_path.name}: {count} face(s)", file=sys.stderr)
+            if session is not None:
+                session.record_item(str(file_path), "ok")
+                session.set_counter("scanned", stats["scanned"])
+                session.set_counter("faces_detected", stats["faces"])
+                session.set_current(None)
+    except KeyboardInterrupt:
+        if session is not None:
+            session.mark_interrupted()
+        print("\nInterrupted.", file=sys.stderr)
+        return True
+    return False
+
+
+def _scan_parallel(db, files, quality, *, jobs, limit, session, stats: dict) -> bool:
+    """Detect + encode across ``jobs`` worker processes; write results in this
+    (main) process so SQLite keeps a single writer. Returns True if interrupted.
+
+    Detection + embedding is the CPU-bound bottleneck (especially with high
+    ``num_jitters``); fanning it across cores is the large speedup for big
+    libraries. Workers do no DB I/O — they return picklable
+    ``(FaceDetection, embedding)`` pairs that the main process inserts.
+    """
+    import errno as _errno
+
+    from pyimgtag.face_embedding import detect_and_encode
+
+    qkw = {k: quality[k] for k in ("max_dim", "model", "upsample", "num_jitters", "min_face_size")}
+    file_enum = enumerate(files)
+
+    def _next_eligible():
+        for i, fp in file_enum:
+            if limit and i >= limit:
+                return None
+            if db.is_face_scanned(str(fp)):
+                stats["skipped_existing"] += 1
+                if session is not None:
+                    session.set_counter("skipped_existing", stats["skipped_existing"])
+                continue
+            if not fp.is_file():
+                stats["not_downloaded"] += 1
+                if session is not None:
+                    session.set_counter("not_downloaded", stats["not_downloaded"])
+                continue
+            return fp
+        return None
+
+    interrupted = False
+    inflight: dict = {}
+    try:
+        with ProcessPoolExecutor(max_workers=jobs) as executor:
+            # Keep a bounded backlog (a few per worker) so memory stays flat
+            # even on a 20k-image library.
+            for _ in range(jobs * 4):
+                fp = _next_eligible()
+                if fp is None:
+                    break
+                inflight[executor.submit(detect_and_encode, str(fp), **qkw)] = fp
+
+            while inflight and not interrupted:
+                if session is not None:
+                    session.wait_if_paused()
+                done, _pending = wait(list(inflight), return_when=FIRST_COMPLETED)
+                for fut in done:
+                    fp = inflight.pop(fut)
+                    try:
+                        results = fut.result()
+                    except Exception as exc:  # noqa: BLE001 — one bad image must not abort
+                        print(f"  {fp.name}: skipped ({exc})", file=sys.stderr)
+                        stats["errors"] += 1
+                    else:
+                        try:
+                            for detection, embedding in results:
+                                db.insert_face(str(fp), detection, embedding=embedding)
+                            db.mark_face_scanned(str(fp))
+                        except OSError as exc:
+                            if exc.errno == _errno.ENOSPC:
+                                print(_DISK_FULL_MSG, file=sys.stderr)
+                                interrupted = True
+                                break
+                            raise
+                        stats["scanned"] += 1
+                        if results:
+                            stats["faces"] += len(results)
+                            print(f"  {fp.name}: {len(results)} face(s)", file=sys.stderr)
+                        if session is not None:
+                            session.record_item(str(fp), "ok")
+                            session.set_counter("scanned", stats["scanned"])
+                            session.set_counter("faces_detected", stats["faces"])
+                    if not interrupted:
+                        nf = _next_eligible()
+                        if nf is not None:
+                            inflight[executor.submit(detect_and_encode, str(nf), **qkw)] = nf
+    except KeyboardInterrupt:
+        if session is not None:
+            session.mark_interrupted()
+        print("\nInterrupted.", file=sys.stderr)
+        return True
+    return interrupted
+
+
 def _handle_faces_scan(args: argparse.Namespace) -> int:
     """Detect faces and compute embeddings for all images."""
     if scan_and_store is None:
@@ -207,10 +369,11 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
 
-    total_faces = 0
-    scanned = 0
-    skipped_existing = 0
-    not_downloaded = 0
+    stats = {"scanned": 0, "faces": 0, "errors": 0, "not_downloaded": 0, "skipped_existing": 0}
+    jobs = getattr(args, "jobs", 1)
+    if jobs == 0:  # 0 = auto: one worker per CPU
+        jobs = os.cpu_count() or 1
+    jobs = max(1, jobs)
 
     session, dashboard = start_dashboard_for(args, command="faces scan")
     if session is not None:
@@ -218,101 +381,42 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         session.mark_running()
 
     interrupted = False
-    errors = 0
     try:
         with ProgressDB(db_path=args.db) as db:
             stop_event = threading.Event()
             cluster_thread = _start_cluster_thread(db, args, stop_event)
 
             try:
-                for i, file_path in enumerate(files):
-                    if args.limit and i >= args.limit:
-                        break
-
-                    if session is not None:
-                        session.wait_if_paused()
-                        session.set_current(str(file_path))
-
-                    # Images detected in a previous run are skipped (incremental
-                    # resume). Count them separately so the summary doesn't read
-                    # as "detected 0 faces" when it actually re-detected nothing.
-                    if db.is_face_scanned(str(file_path)):
-                        skipped_existing += 1
-                        if session is not None:
-                            session.set_counter("skipped_existing", skipped_existing)
-                            session.set_current(None)
-                        continue
-
-                    # iCloud-optimized libraries evict originals, leaving the
-                    # path absent locally. Skip those quietly (they are not an
-                    # error and must not be marked scanned) so a later run can
-                    # pick them up once downloaded.
-                    if not file_path.is_file():
-                        not_downloaded += 1
-                        if session is not None:
-                            session.set_counter("not_downloaded", not_downloaded)
-                            session.set_current(None)
-                        continue
-
-                    try:
-                        count = scan_and_store(
-                            file_path,
-                            db,
-                            max_dim=quality["max_dim"],
-                            model=quality["model"],
-                            upsample=quality["upsample"],
-                            num_jitters=quality["num_jitters"],
-                            min_face_size=quality["min_face_size"],
-                        )
-                    except OSError as exc:
-                        import errno as _errno
-
-                        if exc.errno == _errno.ENOSPC:
-                            print(
-                                "\nError: disk full — no space left on device."
-                                " Free up space and re-run; already-scanned images"
-                                " will be skipped automatically.",
-                                file=sys.stderr,
-                            )
-                            interrupted = True
-                            break
-                        print(f"  {file_path.name}: skipped ({exc})", file=sys.stderr)
-                        errors += 1
-                        continue
-                    except Exception as exc:  # noqa: BLE001 — one bad image must not abort batch
-                        print(f"  {file_path.name}: skipped ({exc})", file=sys.stderr)
-                        errors += 1
-                        continue
-
-                    scanned += 1
-                    if count > 0:
-                        total_faces += count
-                        print(f"  {file_path.name}: {count} face(s)", file=sys.stderr)
-
-                    if session is not None:
-                        session.record_item(str(file_path), "ok")
-                        session.set_counter("scanned", scanned)
-                        session.set_counter("faces_detected", total_faces)
-                        session.set_current(None)
-            except KeyboardInterrupt:
-                interrupted = True
-                if session is not None:
-                    session.mark_interrupted()
-                print("\nInterrupted.", file=sys.stderr)
+                if jobs <= 1:
+                    interrupted = _scan_serial(
+                        db, files, quality, limit=args.limit, session=session, stats=stats
+                    )
+                else:
+                    interrupted = _scan_parallel(
+                        db,
+                        files,
+                        quality,
+                        jobs=jobs,
+                        limit=args.limit,
+                        session=session,
+                        stats=stats,
+                    )
             finally:
                 stop_event.set()
                 cluster_thread.join()
 
-        summary = f"\nScanned {scanned} new image(s), detected {total_faces} faces"
-        if errors:
-            summary += f", {errors} error(s) skipped"
-        if not_downloaded:
-            summary += f", {not_downloaded} not downloaded locally (skipped)"
-        if skipped_existing:
+        summary = f"\nScanned {stats['scanned']} new image(s), detected {stats['faces']} faces"
+        if stats["errors"]:
+            summary += f", {stats['errors']} error(s) skipped"
+        if stats["not_downloaded"]:
+            summary += f", {stats['not_downloaded']} not downloaded locally (skipped)"
+        if stats["skipped_existing"]:
             summary += (
-                f". {skipped_existing} image(s) already scanned and skipped — "
+                f". {stats['skipped_existing']} image(s) already scanned and skipped — "
                 "run 'faces reset-untrusted --yes' (or 'faces reset') first to re-detect them"
             )
+        if jobs > 1:
+            summary += f" [parallel: {jobs} workers]"
         print(summary + ".", file=sys.stderr)
         if session is not None and not interrupted:
             session.mark_completed()

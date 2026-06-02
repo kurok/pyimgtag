@@ -103,6 +103,39 @@ def scan_and_store(
     if db.is_face_scanned(path_str):
         return 0
 
+    results = detect_and_encode(
+        image_path,
+        max_dim=max_dim,
+        model=model,
+        upsample=upsample,
+        num_jitters=num_jitters,
+        min_face_size=min_face_size,
+    )
+    for detection, embedding in results:
+        db.insert_face(path_str, detection, embedding=embedding)
+
+    # Always mark as scanned so zero-face images are never re-processed.
+    db.mark_face_scanned(path_str)
+    return len(results)
+
+
+def detect_and_encode(
+    image_path: str | Path,
+    *,
+    max_dim: int = _DEFAULT_MAX_DIM,
+    model: str = "hog",
+    upsample: int = 1,
+    num_jitters: int = 1,
+    min_face_size: int = 0,
+) -> list[tuple[FaceDetection, "np.ndarray | None"]]:
+    """Detect faces and compute embeddings for one image **without** any DB access.
+
+    Pure CPU work over a single image: it takes a path + settings and returns a
+    picklable list of ``(FaceDetection, embedding-or-None)`` pairs. That makes it
+    safe to run in a worker process for a parallel scan — the caller (main
+    process) does the SQLite writes. :func:`scan_and_store` wraps this with the
+    already-scanned skip and the inserts for the serial path.
+    """
     faces = detect_faces(
         image_path,
         max_dim=max_dim,
@@ -110,24 +143,17 @@ def scan_and_store(
         upsample=upsample,
         min_face_size=min_face_size,
     )
-
-    if faces:
-        embeddings = compute_embeddings(image_path, faces, max_dim=max_dim, num_jitters=num_jitters)
-        if len(embeddings) != len(faces):
-            # Positional alignment between faces[i] and embeddings[i] only holds
-            # when the counts match; a short result means some faces are stored
-            # without an embedding. Surface it instead of failing silently.
-            logger.warning(
-                "embedding count %d != face count %d for %s; "
-                "faces beyond the encoded count are stored without embeddings",
-                len(embeddings),
-                len(faces),
-                path_str,
-            )
-        for i, detection in enumerate(faces):
-            embedding = embeddings[i] if i < len(embeddings) else None
-            db.insert_face(path_str, detection, embedding=embedding)
-
-    # Always mark as scanned so zero-face images are never re-processed.
-    db.mark_face_scanned(path_str)
-    return len(faces)
+    if not faces:
+        return []
+    embeddings = compute_embeddings(image_path, faces, max_dim=max_dim, num_jitters=num_jitters)
+    if len(embeddings) != len(faces):
+        # Positional alignment between faces[i] and embeddings[i] only holds when
+        # the counts match; a short result means some faces have no embedding.
+        logger.warning(
+            "embedding count %d != face count %d for %s; "
+            "faces beyond the encoded count are stored without embeddings",
+            len(embeddings),
+            len(faces),
+            str(Path(image_path)),
+        )
+    return [(faces[i], embeddings[i] if i < len(embeddings) else None) for i in range(len(faces))]
