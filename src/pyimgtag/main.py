@@ -54,14 +54,15 @@ Examples:
     "reprocess": (
         "Reset DB entries so photos get re-tagged",
         "Clear processed-image rows so the next run re-tags them. Omit --status to\n"
-        "reset everything, or pass --status error to retry only failed images.",
+        "reset everything (requires --yes), or pass --status error to retry only\n"
+        "failed images.",
         """\
 Examples:
   # Retry only the images that errored last run
   pyimgtag reprocess --status error
 
-  # Reset the whole database
-  pyimgtag reprocess
+  # Reset the whole database (clears all tagging progress)
+  pyimgtag reprocess --yes
 """,
     ),
     "preflight": (
@@ -357,6 +358,12 @@ def _add_status_reprocess_preflight_subcommands(subparsers: Any) -> None:
     reprocess_p.add_argument(
         "--status",
         help="Only reset entries with this status (e.g. 'error'). Omit to reset everything.",
+    )
+    reprocess_p.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Confirm resetting ALL rows (required when --status is omitted).",
     )
 
     preflight_p = _sub(subparsers, "preflight")

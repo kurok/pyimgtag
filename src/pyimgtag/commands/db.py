@@ -28,11 +28,28 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 
 def cmd_reprocess(args: argparse.Namespace) -> int:
-    """Reset DB entries so photos get re-tagged."""
+    """Reset DB entries so photos get re-tagged.
+
+    A ``--status``-scoped reset is targeted and runs immediately. The full
+    reset (no ``--status``) wipes the entire ``processed_images`` table, so it
+    requires explicit ``--yes`` confirmation — clearing every row by accident
+    discards all tagging/geocoding progress.
+    """
     with ProgressDB(db_path=args.db) as db:
         if args.status:
             count = db.reset_by_status(args.status)
         else:
+            if not getattr(args, "yes", False):
+                total = db.get_stats()["total"]
+                print(
+                    f"Refusing to reset ALL {total} processed-image row(s) without "
+                    "--yes. This clears tagging/geocoding progress so every image is "
+                    "re-tagged (it does not touch your photo files or already-written "
+                    "tags). Re-run with --yes to confirm, or use --status error to "
+                    "reset only failed images.",
+                    file=sys.stderr,
+                )
+                return 1
             count = db.reset_all()
 
     print(f"Reset {count} entries for reprocessing.", file=sys.stderr)

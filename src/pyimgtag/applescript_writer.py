@@ -90,19 +90,32 @@ def _escape_applescript_string(value: str) -> str:
     return value
 
 
-def _filename_scan_block(safe_file_name: str, indent: str = "    ") -> str:
-    """Return an AppleScript fragment that locates a photo by filename."""
+def _filename_scan_block(safe_file_name: str, indent: str = "    ", *, strict: bool = False) -> str:
+    """Return an AppleScript fragment that locates a photo by filename.
+
+    With ``strict=True`` the fragment refuses to bind ``theItem`` when more than
+    one media item shares the filename, erroring instead of arbitrarily taking
+    the first. Used for destructive operations (delete) where picking the wrong
+    of several same-named photos is unrecoverable.
+    """
     i = indent
-    return (
+    block = (
         f'{i}set _results to (every media item whose filename = "{safe_file_name}")\n'
         f"{i}if (count of _results) is 0 then\n"
         f'{i}    error "Photo not found: {safe_file_name}"\n'
         f"{i}end if\n"
-        f"{i}set theItem to item 1 of _results\n"
     )
+    if strict:
+        block += (
+            f"{i}if (count of _results) > 1 then\n"
+            f'{i}    error "Ambiguous: multiple Photos items named {safe_file_name}"\n'
+            f"{i}end if\n"
+        )
+    block += f"{i}set theItem to item 1 of _results\n"
+    return block
 
 
-def _lookup_block(file_name: str, indent: str = "    ") -> str:
+def _lookup_block(file_name: str, indent: str = "    ", *, strict_filename: bool = False) -> str:
     """Return AppleScript that binds ``theItem`` to the matching media item.
 
     The tricky case is an Apple Photos *library* original, whose on-disk path
@@ -127,10 +140,14 @@ def _lookup_block(file_name: str, indent: str = "    ") -> str:
     stem = PurePosixPath(file_name).stem
     safe_file_name = _escape_applescript_string(file_name)
     if not _looks_like_uuid(stem):
-        return _filename_scan_block(safe_file_name, indent)
+        return _filename_scan_block(safe_file_name, indent, strict=strict_filename)
 
     uuid = _escape_applescript_string(stem)
     i = indent
+    # The ``id begins with`` matches are renditions of the *same* asset, so
+    # taking the first is safe. Only the filename fallback can match *different*
+    # photos, so the strict ambiguity guard applies there alone.
+    scan = _filename_scan_block(safe_file_name, indent + "        ", strict=strict_filename)
     return (
         f"{i}set theItem to missing value\n"
         f"{i}try\n"
@@ -146,13 +163,11 @@ def _lookup_block(file_name: str, indent: str = "    ") -> str:
         f"{i}    try\n"
         f'{i}        set _results to (every media item whose id begins with "{uuid}")\n'
         f"{i}    end try\n"
-        f"{i}    if (count of _results) is 0 then\n"
-        f'{i}        set _results to (every media item whose filename = "{safe_file_name}")\n'
+        f"{i}    if (count of _results) > 0 then\n"
+        f"{i}        set theItem to item 1 of _results\n"
+        f"{i}    else\n"
+        f"{scan}"
         f"{i}    end if\n"
-        f"{i}    if (count of _results) is 0 then\n"
-        f'{i}        error "Photo not found: {safe_file_name}"\n'
-        f"{i}    end if\n"
-        f"{i}    set theItem to item 1 of _results\n"
         f"{i}end if\n"
     )
 
@@ -604,7 +619,9 @@ def _build_delete_applescript(file_name: str) -> str:
         triggers a confirmation dialog. The script tries to dismiss
         any prompt by pressing Return, but this is best-effort.
     """
-    lookup = _lookup_block(file_name)
+    # Deletion is unrecoverable, so refuse rather than guess when several
+    # different photos share the filename (the only ambiguous lookup path).
+    lookup = _lookup_block(file_name, strict_filename=True)
 
     return (
         # 1. Resolve theItem and ask Photos to spotlight it (selects in UI).
