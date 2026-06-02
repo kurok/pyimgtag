@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.24.0] - 2026-06-02
 
 ### Fixed
 - **`reprocess` wiped the whole DB with no confirmation** (#262): `pyimgtag reprocess` with no `--status` deletes every `processed_images` row (clearing all tagging/geocoding progress). It now requires an explicit `--yes`; without it the full reset is refused with a message pointing at `--status error` for a targeted reset. `--status`-scoped resets are unchanged.
