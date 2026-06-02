@@ -1,13 +1,14 @@
 """Tests for the reference-face naming engine.
 
 The matching/applying logic is exercised with synthetic 128-d embeddings, so
-these run without the optional ``[face]`` dependency. ``load_reference_embeddings``
-(which needs the detector) is covered only at the path-iteration level.
+these run without the optional ``[face]`` dependency; ``load_reference_embeddings``
+is covered by mocking the detector/encoder it delegates to.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -15,6 +16,7 @@ from pyimgtag.face_naming import (
     NameMatch,
     _iter_reference_images,
     apply_matches,
+    load_reference_embeddings,
     match_clusters_to_references,
 )
 from pyimgtag.models import FaceDetection
@@ -99,6 +101,21 @@ class TestMatchClusters:
             references = {"Alice": [_vec((0, 1.0))]}
             assert match_clusters_to_references(db, references) == []
 
+    def test_empty_references_returns_empty(self, tmp_path: Path):
+        with _db(tmp_path) as db:
+            _cluster(db, "Person 1", [_vec((0, 1.0))])
+            assert match_clusters_to_references(db, {}) == []
+            # References present but all without embeddings → still nothing.
+            assert match_clusters_to_references(db, {"Alice": []}) == []
+
+    def test_cluster_without_embeddings_skipped(self, tmp_path: Path):
+        with _db(tmp_path) as db:
+            # An auto cluster whose faces have no embeddings can't be matched.
+            pid = db.create_person(label="Person 1")
+            fid = db.insert_face("/c.jpg", FaceDetection(image_path="/c.jpg"))  # no embedding
+            db.set_person_id(fid, pid)
+            assert match_clusters_to_references(db, {"Alice": [_vec((0, 1.0))]}) == []
+
 
 # --------------------------------------------------------------------------- #
 # applying
@@ -158,3 +175,67 @@ class TestApplyMatches:
 
             alice = next(p for p in db.get_persons() if p.person_id == existing)
             assert len(alice.face_ids) == 2
+
+
+# --------------------------------------------------------------------------- #
+# load_reference_embeddings — delegates to the detector/encoder (mocked)
+# --------------------------------------------------------------------------- #
+class TestLoadReferenceEmbeddings:
+    @staticmethod
+    def _face(w: int, h: int) -> FaceDetection:
+        return FaceDetection(image_path="x", bbox_x=0, bbox_y=0, bbox_w=w, bbox_h=h)
+
+    def test_loads_and_embeds_flat_and_subfolder(self, tmp_path: Path):
+        (tmp_path / "Alice.jpg").write_bytes(b"x")
+        bob = tmp_path / "Bob"
+        bob.mkdir()
+        (bob / "01.jpg").write_bytes(b"x")
+        (bob / "02.jpg").write_bytes(b"x")
+        with (
+            patch("pyimgtag.face_detection.detect_faces", return_value=[self._face(10, 10)]),
+            patch("pyimgtag.face_embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
+        ):
+            refs = load_reference_embeddings(tmp_path)
+        assert set(refs) == {"Alice", "Bob"}
+        assert len(refs["Alice"]) == 1
+        assert len(refs["Bob"]) == 2
+
+    def test_skips_image_with_no_detected_face(self, tmp_path: Path):
+        (tmp_path / "Alice.jpg").write_bytes(b"x")
+        with (
+            patch("pyimgtag.face_detection.detect_faces", return_value=[]),
+            patch("pyimgtag.face_embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
+        ):
+            assert load_reference_embeddings(tmp_path) == {}
+
+    def test_skips_unreadable_reference(self, tmp_path: Path):
+        (tmp_path / "Alice.jpg").write_bytes(b"x")
+        with (
+            patch("pyimgtag.face_detection.detect_faces", side_effect=OSError("bad image")),
+            patch("pyimgtag.face_embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
+        ):
+            assert load_reference_embeddings(tmp_path) == {}
+
+    def test_embeds_only_the_largest_face(self, tmp_path: Path):
+        (tmp_path / "Alice.jpg").write_bytes(b"x")
+        small, big = self._face(5, 5), self._face(80, 80)
+        captured = {}
+
+        def _fake_embed(path, faces, **kwargs):
+            captured["faces"] = faces
+            return [_vec((0, 1.0))]
+
+        with (
+            patch("pyimgtag.face_detection.detect_faces", return_value=[small, big]),
+            patch("pyimgtag.face_embedding.compute_embeddings", side_effect=_fake_embed),
+        ):
+            load_reference_embeddings(tmp_path)
+        assert captured["faces"] == [big]  # bystanders ignored
+
+    def test_skips_when_encoding_fails(self, tmp_path: Path):
+        (tmp_path / "Alice.jpg").write_bytes(b"x")
+        with (
+            patch("pyimgtag.face_detection.detect_faces", return_value=[self._face(10, 10)]),
+            patch("pyimgtag.face_embedding.compute_embeddings", return_value=[]),
+        ):
+            assert load_reference_embeddings(tmp_path) == {}

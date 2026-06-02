@@ -1480,6 +1480,10 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         if not face_ids:
             raise HTTPException(status_code=400, detail="face_ids must not be empty")
         if person_id is not None:
+            # Reject unknown ids so faces are never left pointing at a person
+            # row that doesn't exist (a dangling assignment).
+            if not any(p.person_id == person_id for p in db.get_persons()):
+                raise HTTPException(status_code=404, detail="Person not found")
             target_id = person_id
         else:
             target_id = db.create_person(
@@ -1574,7 +1578,11 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
     @router.post("/api/persons/{source_id}/merge/{target_id}")
     async def merge_persons(source_id: int, target_id: int) -> dict:
-        db.merge_persons(source_id=source_id, target_id=target_id)
+        try:
+            db.merge_persons(source_id=source_id, target_id=target_id)
+        except ValueError as exc:
+            # Unknown merge target — a client error, not a 500.
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"ok": True}
 
     @router.delete("/api/persons/{person_id}")
