@@ -123,6 +123,11 @@ Examples:
   pyimgtag faces apply --write-exif
   pyimgtag faces ui            # web UI for naming and merging people
 
+  # Name auto clusters without typing — pick whichever fits your library:
+  pyimgtag faces import-photos                     # read names from the Photos DB (osxphotos)
+  pyimgtag faces match-references ~/faces/refs     # match clusters to labeled images
+  pyimgtag faces capture-names --live --apply      # OCR names off the People-view screenshot
+
   pyimgtag faces recluster --yes        # clear auto-clusters and re-cluster
   pyimgtag faces reset-untrusted --yes  # drop non-trusted faces, keep named people
   pyimgtag faces reset --yes            # wipe ALL faces/persons and start over
@@ -547,6 +552,44 @@ def _add_faces_subcommand(subparsers: Any) -> None:
         help="Max embedding distance for a match (default: 0.5; lower = stricter).",
     )
     faces_match.add_argument(
+        "--apply",
+        action="store_true",
+        default=False,
+        help="Write the names (without it, only a preview of proposed matches is shown).",
+    )
+
+    faces_capture = faces_sub.add_parser(
+        "capture-names",
+        help="Name auto clusters from a screenshot of Apple Photos' People view (Vision OCR)",
+    )
+    faces_capture_src = faces_capture.add_mutually_exclusive_group(required=True)
+    faces_capture_src.add_argument(
+        "--screenshot",
+        help="Path to an existing screenshot of the People grid (faces + name captions).",
+    )
+    faces_capture_src.add_argument(
+        "--live",
+        action="store_true",
+        default=False,
+        help="Capture the Apple Photos window now (macOS; open the People album first).",
+    )
+    faces_capture.add_argument(
+        "--save-screenshot",
+        help="With --live, also keep the captured screenshot at this path.",
+    )
+    faces_capture.add_argument(
+        "--languages",
+        help="Comma-separated Vision OCR language hints, e.g. 'ru-RU,en-US' (improves "
+        "non-Latin names).",
+    )
+    faces_capture.add_argument("--db", help=_DEFAULT_DB_HELP)
+    faces_capture.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="Max embedding distance for a match (default: 0.5; lower = stricter).",
+    )
+    faces_capture.add_argument(
         "--apply",
         action="store_true",
         default=False,

@@ -9,6 +9,7 @@ import sys
 import threading
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from pathlib import Path
+from typing import cast
 
 from pyimgtag import run_registry
 from pyimgtag.progress_db import ProgressDB
@@ -81,6 +82,8 @@ def cmd_faces(args: argparse.Namespace) -> int:
         return _handle_faces_scan(args)
     if args.faces_action == "match-references":
         return _handle_faces_match_references(args)
+    if args.faces_action == "capture-names":
+        return _handle_faces_capture_names(args)
     if args.faces_action == "cluster":
         return _handle_faces_cluster(args)
     if args.faces_action == "review":
@@ -676,6 +679,122 @@ def _handle_faces_match_references(args: argparse.Namespace) -> int:
         matches = match_clusters_to_references(db, references, threshold=threshold)
         if not matches:
             print("No clusters matched a reference within the threshold.", file=sys.stderr)
+            return 0
+
+        for m in matches:
+            cur = m.current_label or f"Person {m.person_id}"
+            print(
+                f"  {cur} ({m.face_count} face(s)) → {m.name} (distance {m.distance:.3f})",
+                file=sys.stderr,
+            )
+
+        if not getattr(args, "apply", False):
+            print(
+                f"\n{len(matches)} cluster(s) would be named. Re-run with --apply to write them.",
+                file=sys.stderr,
+            )
+            return 0
+
+        result = apply_matches(db, matches)
+    print(
+        f"\nNamed {result['renamed'] + result['merged']} cluster(s) "
+        f"({result['renamed']} renamed, {result['merged']} merged into existing people).",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _handle_faces_capture_names(args: argparse.Namespace) -> int:
+    """Name auto clusters from a screenshot of Apple Photos' People view.
+
+    The "screen OCR" path: detect+embed the face under each People tile, read
+    the caption with macOS Vision OCR, pair them by position, and match the
+    resulting names to auto clusters (same matcher as ``match-references``).
+    Source is either an existing ``--screenshot`` image or a fresh ``--live``
+    capture. Dry-run by default; ``--apply`` writes the names.
+    """
+    import tempfile
+
+    from pyimgtag.face_naming import apply_matches, match_clusters_to_references
+    from pyimgtag.face_ocr import (
+        OcrUnavailableError,
+        build_references_from_screenshot,
+        capture_people_screenshot,
+    )
+
+    screenshot = getattr(args, "screenshot", None)
+    live = getattr(args, "live", False)
+    if not screenshot and not live:
+        print("Error: pass --screenshot PATH or --live.", file=sys.stderr)
+        return 1
+
+    # Face detection/encoding must be available before we capture or read.
+    try:
+        from pyimgtag.face_detection import _check_face_recognition
+
+        _check_face_recognition()
+    except ImportError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    tmp_holder: tempfile.TemporaryDirectory | None = None
+    try:
+        if live:
+            save_to = getattr(args, "save_screenshot", None)
+            if save_to:
+                shot_path = Path(save_to)
+            else:
+                tmp_holder = tempfile.TemporaryDirectory(prefix="pyimgtag-people-")
+                shot_path = Path(tmp_holder.name) / "people.png"
+            print(
+                "Capturing the Apple Photos window… (have the People album open)",
+                file=sys.stderr,
+            )
+            try:
+                capture_people_screenshot(shot_path)
+            except OcrUnavailableError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+        else:
+            # screenshot is non-None here (guaranteed by the source check above).
+            shot_path = Path(cast(str, screenshot))
+            if not shot_path.is_file():
+                print(f"Error: screenshot not found: {shot_path}", file=sys.stderr)
+                return 1
+
+        languages = None
+        raw_langs = getattr(args, "languages", None)
+        if raw_langs:
+            languages = [c.strip() for c in raw_langs.split(",") if c.strip()]
+
+        print(f"Reading names from {shot_path}…", file=sys.stderr)
+        try:
+            references = build_references_from_screenshot(shot_path, languages=languages)
+        except OcrUnavailableError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+    finally:
+        if tmp_holder is not None:
+            tmp_holder.cleanup()
+
+    if not references:
+        print(
+            "No named faces found in the screenshot. Make sure the People grid "
+            "is visible with names under each face.",
+            file=sys.stderr,
+        )
+        return 1
+    ref_faces = sum(len(v) for v in references.values())
+    print(
+        f"Read {len(references)} name(s) from {ref_faces} face(s): {', '.join(sorted(references))}",
+        file=sys.stderr,
+    )
+
+    threshold = getattr(args, "threshold", None) or 0.5
+    with ProgressDB(db_path=args.db) as db:
+        matches = match_clusters_to_references(db, references, threshold=threshold)
+        if not matches:
+            print("No clusters matched a recognized name within the threshold.", file=sys.stderr)
             return 0
 
         for m in matches:

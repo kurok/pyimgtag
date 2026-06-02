@@ -72,7 +72,25 @@ pyimgtag judge --input-dir ~/Pictures --min-score 7
 pyimgtag faces import-photos
 ```
 
-Reads the system default Photos library automatically.
+Reads the system default Photos library automatically — names and photo UUIDs
+come straight from the library database via osxphotos (`[photos-db]` extra),
+which works even on Photos builds where AppleScript can't enumerate people (the
+`-2741` error). Two more ways to name auto clusters:
+
+```bash
+# Match clusters to a folder of labeled reference images (cross-platform, [face]):
+pyimgtag faces match-references ~/faces/refs --apply
+
+# Screen OCR: read names off a screenshot of the Photos People grid ([ocr]+[face], macOS).
+# Open Photos → People, then:
+pyimgtag faces capture-names --live --apply
+# ...or process a screenshot you already have, with language hints for non-Latin names:
+pyimgtag faces capture-names --screenshot ~/Desktop/people.png --languages ru-RU,en-US
+```
+
+`capture-names` detects + embeds the face under each People tile, reads the
+caption beneath it with Apple's Vision OCR, and applies the recognized name to
+the matching cluster. Install with `pip install 'pyimgtag[ocr]'` (macOS only).
 
 **Process exported HEIC photos:**
 
@@ -301,6 +319,7 @@ pyimgtag run --input-dir "C:\Users\YourName\Pictures" --output-json results.json
 | Apple Photos library scanning | Yes | No | No |
 | Apple Photos keyword write-back | Yes | No | No |
 | Apple Photos face import (`faces`) | Yes | No | No |
+| Face naming via screen OCR (`capture-names`) | Yes | No | No |
 
 **Install extras reference:**
 
@@ -308,10 +327,12 @@ pyimgtag run --input-dir "C:\Users\YourName\Pictures" --output-json results.json
 |---|---|---|
 | `[heic]` | pillow-heif | HEIC support on Linux/Windows |
 | `[photos]` | photoscript | Faster in-process Apple Photos access (macOS) |
+| `[photos-db]` | osxphotos | `faces import-photos` reads names from the Photos library DB (macOS) |
 | `[face]` | face-recognition, scikit-learn, setuptools | Face detection / clustering (also needs `face_recognition_models`, see below) |
+| `[ocr]` | pyobjc-framework-Vision, pyobjc-framework-Quartz | `faces capture-names` screen OCR (macOS only) |
 | `[review]` | fastapi, uvicorn, pydantic, httpx2 | Local web review / dashboard UIs |
 | `[raw]` | rawpy | RAW file support (all platforms) |
-| `[all]` | heic + photos + face + review + raw | All optional runtime features |
+| `[all]` | heic + photos + photos-db + face + ocr + review + raw | All optional runtime features |
 | `[dev]` | pytest, pytest-xdist, pytest-cov | Development and testing |
 | `[lint]` | mypy, ruff | Linting and type checking |
 | `[security]` | bandit, pip-audit | Security scanning |

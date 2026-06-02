@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Name auto clusters from a People-view screenshot (`faces capture-names`)**: the "screen OCR" path. Detects + embeds the face under each Apple Photos People tile, reads the caption beneath it with Apple's Vision OCR, pairs them by position, and applies each recognized name to the matching auto cluster (same conservative matcher as `match-references`). Source is an existing `--screenshot FILE` or a fresh `--live` capture (drives Photos + `screencapture`). Dry-run by default (`--apply` to write); `--threshold` tunes match strictness; `--languages ru-RU,en-US` steers Vision for non-Latin names (verified: Cyrillic names like "Юрій Рябіков" read verbatim). macOS-only; install with `pip install 'pyimgtag[ocr]'` (adds the `[ocr]` extra: pyobjc Vision + Quartz). New module `pyimgtag.face_ocr` with a pure, unit-tested face↔caption pairing core. This is the third cluster-naming option alongside `import-photos` (Photos DB via osxphotos) and `match-references` (labeled image folder).
+
 ## [0.26.0] - 2026-06-02
 
 ### Added

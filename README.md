@@ -125,8 +125,9 @@ brew install exiftool
 | Apple Photos library scanning | ✅ | ❌ | ❌ |
 | Apple Photos write-back | ✅ | ❌ | ❌ |
 | Face management (Apple Photos) | ✅ | ❌ | ❌ |
+| Face naming via screen OCR (`capture-names`) | ✅ Vision OCR | ❌ | ❌ |
 
-**Note:** Most features work cross-platform. Apple Photos integration and face management are macOS-only — they require AppleScript via `osascript`.
+**Note:** Most features work cross-platform. Apple Photos integration and face management are macOS-only — they require AppleScript via `osascript`. `faces capture-names` additionally uses Apple's Vision framework for OCR (the `[ocr]` extra).
 
 ### macOS Setup
 
@@ -136,7 +137,8 @@ brew install ollama exiftool
 ollama pull gemma4:e4b
 
 # Install
-pip install "pyimgtag[all]"   # includes pillow-heif, photoscript, rawpy, face-recognition, fastapi, uvicorn
+pip install "pyimgtag[all]"   # pillow-heif, photoscript, osxphotos, rawpy, face-recognition, fastapi, uvicorn, Vision OCR
+# face naming add-ons: [photos-db] (osxphotos), [ocr] (Vision screen OCR, macOS)
 # or from source
 git clone https://github.com/kurok/pyimgtag.git
 cd pyimgtag
@@ -487,13 +489,18 @@ pyimgtag query --tag beach --format paths --limit 50
 
 #### `pyimgtag faces` — face detection, clustering, naming
 
-Six sub-subcommands chain into a typical face workflow. Detection, clustering,
-review, apply, and the UI work cross-platform on `--input-dir` folders; only
-`import-photos` (and the `--photos-library` source) require macOS + Apple Photos.
+The face workflow chains a handful of sub-actions. Detection, clustering,
+review, apply, and the UI work cross-platform on `--input-dir` folders; the
+Apple Photos sources (`--photos-library`, `import-photos`, and
+`capture-names --live`) require macOS.
 
 ```bash
 # 1. Detect faces and compute embeddings (also accepts --input-dir on any platform)
 pyimgtag faces scan --photos-library ~/Pictures/Photos\ Library.photoslibrary
+
+#    Faster on multi-core machines — fan detection+embedding across processes:
+pyimgtag faces scan --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+  --quality accurate -j 8        # -j 0 = one worker per CPU core
 
 # 2. Cluster embeddings into person groups (DBSCAN)
 pyimgtag faces cluster --eps 0.5 --min-samples 2
@@ -501,8 +508,10 @@ pyimgtag faces cluster --eps 0.5 --min-samples 2
 # 3. Inspect the clusters from the CLI
 pyimgtag faces review
 
-# 4. Import named persons from Apple Photos (uses bulk AppleScript; macOS only)
-pyimgtag faces import-photos
+# 4. Name the auto clusters — pick whichever fits your library (see table below):
+pyimgtag faces import-photos                  # read names from the Photos DB (osxphotos)
+pyimgtag faces match-references ~/faces/refs  # match clusters to labeled images
+pyimgtag faces capture-names --live --apply   # OCR names off the People-view screenshot
 
 # 5. Write person keywords to image metadata (EXIF or XMP sidecar)
 pyimgtag faces apply --write-exif
@@ -517,14 +526,37 @@ or name, and supports **multi-select** to confirm or delete several people
 at once. Selecting unassigned faces lets you create a new person or assign
 them to an existing one.
 
-`scan` accepts `--detection-model {hog,cnn}` (hog = fast CPU, cnn = accurate
-GPU), `--max-dim`, `--extensions`, and `--limit`, plus the same dashboard
-flags as `run` / `judge` (`--web` / `--no-web` / `--web-host` / `--web-port`
-/ `--no-browser`).
+**Scan quality & speed.** `scan` takes a `--quality {fast,balanced,accurate}`
+preset (default `balanced`) plus granular overrides `--detection-model {hog,cnn}`,
+`--max-dim`, `--upsample`, `--num-jitters`, `--min-face-size`, `--extensions`,
+and `--limit`. `accurate` re-samples each face 10× when encoding — the slow
+part — so on a large library combine it with **`--jobs`/`-j N`** to run detection
++ embedding across CPU cores (workers do the CPU work; the main process does all
+DB writes). `-j 0` auto-picks the core count; the default `-j 1` is serial and
+unchanged. Already-scanned images are skipped, so re-runs resume. Same dashboard
+flags as `run` / `judge` (`--web` / `--no-web` / `--web-host` / `--web-port` /
+`--no-browser`).
 
-The `[face]` extra is required; see the
+**Naming the clusters.** Three ways to turn "Person 7" into real names; all are
+conservative (they leave trusted/named people untouched) and reuse the same
+embedding matcher:
+
+| Command | Gets names from | Needs | Best when |
+|---|---|---|---|
+| `import-photos` | the Apple Photos library DB via osxphotos (AppleScript/photoscript fallback) | `[photos-db]`, macOS | Photos already has your people named |
+| `match-references <dir>` | a folder of labeled images (`Alice.jpg` or `Alice/01.jpg`) | `[face]` | you have a few clean reference shots per person |
+| `capture-names` | OCR of a People-grid screenshot (`--screenshot FILE`, or `--live` to grab it now) | `[ocr]` + `[face]`, macOS | AppleScript enumeration fails (the `-2741` error) and you'd rather screenshot than curate files |
+
+`match-references` and `capture-names` are **dry-run by default** — add `--apply`
+to write the names, `--threshold` to tune match strictness. `capture-names` also
+accepts `--languages ru-RU,en-US` to steer Vision OCR for non-Latin names, and
+`--save-screenshot PATH` to keep a `--live` capture.
+
+The `[face]` extra is required for all detection/embedding; see the
 [`face_recognition_models` install note](#face-features-face_recognition_models-is-git-only)
-above.
+above. `import-photos` additionally needs `[photos-db]` (`pip install
+'pyimgtag[photos-db]'`); `capture-names` additionally needs `[ocr]` (`pip install
+'pyimgtag[ocr]'`, macOS only).
 
 #### `pyimgtag review` — launch the local review UI
 
@@ -739,7 +771,8 @@ src/pyimgtag/
     db.py              `pyimgtag status/reprocess/cleanup` handlers
     query.py           `pyimgtag query` handler
     tags.py            `pyimgtag tags` handler
-    faces.py           `pyimgtag faces` (scan / cluster / review / apply / import-photos / ui)
+    faces.py           `pyimgtag faces` (scan [--jobs] / cluster / review / apply / import-photos / match-references / capture-names / ui)
+    face_ocr.py        Screen-OCR naming: Vision OCR of a People-view screenshot → cluster names
     preflight_cmd.py   `pyimgtag preflight` handler
     review_cmd.py      `pyimgtag review` handler
   webapp/
