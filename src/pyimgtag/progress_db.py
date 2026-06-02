@@ -1304,6 +1304,20 @@ class ProgressDB:
             "SELECT COUNT(*) FROM persons WHERE trusted = 0 AND confirmed = 0"
         ).fetchone()[0]
 
+    def get_auto_person_ids(self) -> set[int]:
+        """Return the ids of auto-clustered persons (trusted=0 AND confirmed=0).
+
+        These are the only assignments a UUID-authoritative re-link (Photos
+        import) may reclaim a face from; trusted/confirmed assignments are
+        never disturbed.
+        """
+        return {
+            r[0]
+            for r in self._conn.execute(
+                "SELECT id FROM persons WHERE trusted = 0 AND confirmed = 0"
+            ).fetchall()
+        }
+
     def ignore_face(self, face_id: int) -> None:
         """Mark a face as ignored so it is excluded from auto-clustering."""
         self._conn.execute(

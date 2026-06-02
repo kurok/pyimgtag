@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`import-photos` left named/Photos people empty after a scan** (#264): the background re-cluster that runs during `faces scan` grabs freshly-detected faces into `Person N` auto clusters, but `import-photos` only linked faces that were still *unassigned*, so a named person's faces — now sitting in an auto cluster — were never linked and the person stayed at 0 faces. `import-photos` now **reclaims** a UUID-matched face from an auto cluster (the Apple Photos tag is authoritative); faces already assigned to another trusted/confirmed person are still never touched. Backed by `ProgressDB.get_auto_person_ids`.
+
 ## [0.24.0] - 2026-06-02
 
 ### Fixed
