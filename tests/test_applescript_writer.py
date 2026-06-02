@@ -1019,6 +1019,23 @@ class TestBuildDeleteApplescript:
         assert "media item id" not in script
         assert 'filename = "IMG_1234.jpg"' in script
 
+    def test_refuses_ambiguous_filename_match(self):
+        """Deletion is unrecoverable — a filename matching several photos must
+        error rather than delete an arbitrary one. Non-destructive lookups
+        (reveal) keep the take-first behaviour."""
+        from pyimgtag.applescript_writer import (
+            _build_delete_applescript,
+            _build_reveal_applescript,
+        )
+
+        del_uuid = _build_delete_applescript(_UUID_FILE)
+        del_named = _build_delete_applescript("IMG_1234.jpg")
+        assert "(count of _results) > 1" in del_uuid
+        assert "Ambiguous" in del_uuid
+        assert "(count of _results) > 1" in del_named
+        # Reveal stays lenient (selecting the wrong photo is harmless).
+        assert "Ambiguous" not in _build_reveal_applescript("IMG_1234.jpg")
+
     def test_script_invokes_delete_on_photos(self):
         """The script must use the UI-scripting path: spotlight in Photos
         then send Cmd+Delete via System Events.

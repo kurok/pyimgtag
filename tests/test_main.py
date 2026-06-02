@@ -359,7 +359,7 @@ class TestStatusSubcommand:
 class TestReprocessSubcommand:
     def test_reprocess_empty_db(self, tmp_path, capsys):
         db_path = str(tmp_path / "test.db")
-        result = main(["reprocess", "--db", db_path])
+        result = main(["reprocess", "--db", db_path, "--yes"])
         assert result == 0
         assert "Reset 0 entries" in capsys.readouterr().err
 
@@ -376,9 +376,29 @@ class TestReprocessSubcommand:
         db.mark_done(img, r)
         db.close()
 
-        result = main(["reprocess", "--db", str(db_path)])
+        result = main(["reprocess", "--db", str(db_path), "--yes"])
         assert result == 0
         assert "Reset 1 entries" in capsys.readouterr().err
+
+    def test_reprocess_all_without_yes_refuses(self, tmp_path, capsys):
+        """The whole-table reset must not run without explicit --yes."""
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        db_path = tmp_path / "test.db"
+        img = tmp_path / "photo.jpg"
+        img.write_bytes(b"\x00" * 50)
+        db = ProgressDB(db_path=db_path)
+        db.mark_done(img, ImageResult(file_path=str(img), file_name="photo.jpg", tags=["t"]))
+        db.close()
+
+        result = main(["reprocess", "--db", str(db_path)])
+        assert result == 1
+        assert "Refusing to reset" in capsys.readouterr().err
+        # Nothing was deleted.
+        db2 = ProgressDB(db_path=db_path)
+        assert db2.get_stats()["total"] == 1
+        db2.close()
 
     def test_reprocess_by_status(self, tmp_path, capsys):
         from pyimgtag.models import ImageResult
