@@ -495,6 +495,38 @@ def _build_membership_applescript() -> str:
 _MEMBERSHIP_TIMEOUT_SECONDS = 1800
 
 
+def _parse_membership_output(stdout: str) -> set[str]:
+    """Parse ``<id>\\t<filename>`` lines into a membership lookup set.
+
+    Each media item contributes up to three keys so a drift check can match a
+    DB row's on-disk path however it is spelled:
+
+    - the full media-item id (the PHAsset localIdentifier ``<UUID>/L0/001``);
+    - the bare ``<UUID>`` prefix of that id — a photo stored inside the library
+      lives on disk at ``originals/X/<UUID>.<ext>``, whose stem is the bare
+      UUID, **not** the ``/L0/001`` localIdentifier. Without this prefix every
+      library original looks absent from Photos and the drift prune deletes the
+      entire DB;
+    - the original ``filename`` (e.g. ``IMG_1234.HEIC``), for rows whose path
+      basename matches the import name rather than a UUID.
+    """
+    membership: set[str] = set()
+    for line in stdout.splitlines():
+        if not line or "\t" not in line:
+            continue
+        item_id, filename = line.split("\t", 1)
+        item_id = item_id.strip()
+        filename = filename.strip()
+        if item_id:
+            membership.add(item_id)
+            prefix = item_id.split("/", 1)[0]
+            if prefix:
+                membership.add(prefix)
+        if filename:
+            membership.add(filename)
+    return membership
+
+
 def fetch_photos_membership(
     timeout: int = _MEMBERSHIP_TIMEOUT_SECONDS,
 ) -> tuple[set[str], str | None]:
@@ -548,18 +580,7 @@ def fetch_photos_membership(
             return set(), "parse_error"
         return set(), "applescript_failed"
 
-    membership: set[str] = set()
-    for line in (proc.stdout or "").splitlines():
-        if not line or "\t" not in line:
-            continue
-        item_id, filename = line.split("\t", 1)
-        item_id = item_id.strip()
-        filename = filename.strip()
-        if item_id:
-            membership.add(item_id)
-        if filename:
-            membership.add(filename)
-    return membership, None
+    return _parse_membership_output(proc.stdout or ""), None
 
 
 def _build_delete_applescript(file_name: str) -> str:

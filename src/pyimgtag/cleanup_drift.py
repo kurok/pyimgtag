@@ -71,7 +71,14 @@ class DriftReport:
     photos_missing: int = 0
     present: int = 0
     photos_probe_error: str | None = None
+    # ``dead_paths`` is the union of both categories (used by the web panel
+    # sample). The per-category lists let callers prune conservatively:
+    # ``disk_missing`` is unambiguous (the file is gone), while
+    # ``photos_missing`` is a soft signal prone to false positives and must
+    # only be deleted on explicit opt-in.
     dead_paths: list[str] = field(default_factory=list)
+    disk_missing_paths: list[str] = field(default_factory=list)
+    photos_missing_paths: list[str] = field(default_factory=list)
 
     @property
     def dead_count(self) -> int:
@@ -145,12 +152,22 @@ def scan_drift(
 
     emit("Probing Apple Photos library for media-item ids…")
     membership, probe_error = fetcher()
+    usable: set[str] | None
     if probe_error is not None:
         emit(f"Photos probe unavailable ({probe_error}); falling back to disk-only drift check.")
         # An empty set + no membership signal means we cannot tell
         # photos_missing from present, so collapse them — this matches
         # the CLI's documented behaviour on non-macOS hosts.
-        usable: set[str] | None = None
+        usable = None
+    elif not membership:
+        # A "successful" probe that returns zero media items is almost
+        # certainly a silent enumeration failure, not a genuinely empty
+        # library. Treating every on-disk row as photos_missing here would
+        # prune the entire DB, so refuse: degrade to the disk-only check and
+        # surface it as a probe error instead of deleting everything.
+        emit("Photos probe returned no media items; falling back to disk-only drift check.")
+        probe_error = "empty_membership"
+        usable = None
     else:
         emit(f"Photos library exposes {len(membership)} media items.")
         usable = membership
@@ -163,9 +180,11 @@ def scan_drift(
         category = _classify(path, usable)
         if category == CAT_DISK_MISSING:
             report.disk_missing += 1
+            report.disk_missing_paths.append(path)
             report.dead_paths.append(path)
         elif category == CAT_PHOTOS_MISSING:
             report.photos_missing += 1
+            report.photos_missing_paths.append(path)
             report.dead_paths.append(path)
         else:
             report.present += 1

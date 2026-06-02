@@ -1121,6 +1121,11 @@ class ProgressDB:
         Raises:
             ValueError: If ``target_id`` does not exist.
         """
+        # Merging a person into itself would reassign its faces to the same id
+        # (a no-op) and then delete that very person — orphaning every face.
+        # Treat it as a no-op instead.
+        if source_id == target_id:
+            return
         if not self._conn.execute("SELECT 1 FROM persons WHERE id = ?", (target_id,)).fetchone():
             raise ValueError(f"merge target person {target_id} does not exist")
         self._conn.execute(
@@ -1258,7 +1263,9 @@ class ProgressDB:
                 "OR person_id NOT IN (SELECT id FROM persons WHERE trusted = 1 OR confirmed = 1))"
             ).fetchone()[0],
             "persons": self._conn.execute(
-                "SELECT COUNT(*) FROM persons WHERE trusted = 0 AND confirmed = 0"
+                "SELECT COUNT(*) FROM persons WHERE trusted = 0 AND confirmed = 0 "
+                "AND id NOT IN (SELECT person_id FROM faces "
+                "WHERE ignored = 1 AND person_id IS NOT NULL)"
             ).fetchone()[0],
             "scanned_images": self._conn.execute(
                 "SELECT COUNT(*) FROM face_scanned_images WHERE image_path NOT IN "
@@ -1272,7 +1279,16 @@ class ProgressDB:
             "DELETE FROM faces WHERE ignored = 0 AND (person_id IS NULL "
             "OR person_id NOT IN (SELECT id FROM persons WHERE trusted = 1 OR confirmed = 1))"
         )
-        self._conn.execute("DELETE FROM persons WHERE trusted = 0 AND confirmed = 0")
+        # Keep any untrusted person that still owns a surviving (ignored/trash)
+        # face — deleting it would leave that face pointing at a non-existent
+        # person (SQLite FK enforcement is off, so the dangling row is silent).
+        # ``ignored = 1`` faces are never touched by the face delete above, so
+        # this predicate matches the count computed before the deletes.
+        self._conn.execute(
+            "DELETE FROM persons WHERE trusted = 0 AND confirmed = 0 "
+            "AND id NOT IN (SELECT person_id FROM faces "
+            "WHERE ignored = 1 AND person_id IS NOT NULL)"
+        )
         # Only trusted and ignored faces survive now, so "no face left" is just
         # "no face row left" for the image.
         self._conn.execute(

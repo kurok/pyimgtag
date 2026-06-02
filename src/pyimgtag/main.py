@@ -395,7 +395,17 @@ def _add_cleanup_subcommands(subparsers: Any) -> None:
         "--prune",
         action="store_true",
         default=False,
-        help="Actually delete the dead rows from the DB.",
+        help="Delete rows whose backing file is gone from disk (disk_missing).",
+    )
+    drift_p.add_argument(
+        "--prune-photos-missing",
+        action="store_true",
+        default=False,
+        help=(
+            "Also delete rows whose file is still on disk but not indexed by "
+            "Apple Photos (implies --prune). Riskier: a degraded or partial "
+            "Photos probe can flag live photos, so verify the dry-run first."
+        ),
     )
 
 

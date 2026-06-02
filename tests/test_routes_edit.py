@@ -77,6 +77,7 @@ class TestRunDriftPruneJob:
                 disk_missing=2,
                 photos_missing=0,
                 dead_paths=["/fake/a.jpg", "/fake/b.jpg"],
+                disk_missing_paths=["/fake/a.jpg", "/fake/b.jpg"],
             )
 
             with (
@@ -122,6 +123,7 @@ class TestRunDriftPruneJob:
                 disk_missing=3,
                 photos_missing=0,
                 dead_paths=dead,
+                disk_missing_paths=dead,
                 photos_probe_error="photos_timeout",
             )
             with (
@@ -129,6 +131,7 @@ class TestRunDriftPruneJob:
                 patch("pyimgtag.cleanup_drift.prune_drift", return_value=3) as prune,
             ):
                 _run_drift_prune_job(db, job)
+            # Only disk_missing rows are auto-pruned by the web job.
             prune.assert_called_once_with(db, dead)
             assert job.state == "done"
             assert job.ok == 3
