@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.25.1] - 2026-06-02
 
 ### Fixed
 - **Installing the web extras no longer forces `httpx2`/`h11 0.16` on your environment** (#271): `httpx2` is only used by starlette's `TestClient` (tests), never by the running web app, but it was listed in the runtime `[review]` and `[all]` extras. Installing those upgraded `h11` to 0.16 and broke any co-installed classic `httpx`/`httpcore` (which pins `h11<0.15`). `httpx2` is now a `[dev]`-only dependency, so `pip install 'pyimgtag[review]'` / `[all]` (and `[photos-db]`) install cleanly alongside a classic-httpx environment.
