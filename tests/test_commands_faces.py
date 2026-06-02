@@ -162,6 +162,27 @@ class TestHandleFacesScan:
     @patch("pyimgtag.face_detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
+    def test_not_downloaded_images_skipped_and_reported(
+        self, mock_scan_dir, mock_store, mock_check, mock_dash, tmp_path, capsys
+    ):
+        """An iCloud-only original that isn't present on disk is skipped quietly
+        (not detected, not marked scanned, not counted as an error)."""
+        missing = tmp_path / "icloud_only.jpg"  # listed but never downloaded
+        mock_scan_dir.return_value = [missing]
+        args = _make_args(input_dir=str(tmp_path), db=str(tmp_path / "progress.db"))
+
+        rc = _handle_faces_scan(args)
+
+        assert rc == 0
+        mock_store.assert_not_called()
+        err = capsys.readouterr().err
+        assert "not downloaded locally" in err
+        assert "error(s) skipped" not in err  # not counted as an error
+
+    @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.commands.faces.scan_and_store")
+    @patch("pyimgtag.commands.faces.scan_directory")
     def test_scan_with_limit(self, mock_scan_dir, mock_store, mock_check, mock_dash, tmp_path):
         imgs = [tmp_path / f"p{i}.jpg" for i in range(3)]
         for f in imgs:

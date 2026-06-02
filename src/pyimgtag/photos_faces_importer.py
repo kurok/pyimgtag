@@ -74,6 +74,7 @@ def import_photos_persons(
     db: ProgressDB,
     *,
     progress: Callable[[str], None] | None = None,
+    library_path: str | None = None,
 ) -> tuple[int, int]:
     """Import named persons from Apple Photos into the faces DB.
 
@@ -88,16 +89,16 @@ def import_photos_persons(
       (logged as skipped). See :func:`_assign_faces_to_person`.
     - Photos not yet in the faces DB are ignored.
 
-    Two enumeration paths exist:
+    Enumeration paths, in preference order:
 
-    1. **Bulk AppleScript** (preferred). One ``osascript`` call returns
-       every ``(uuid, persons)`` pair from Photos. This avoids
-       photoscript's per-photo ``photoExists`` validation, which makes
-       the photoscript path take many minutes on a 20k+ library while
-       producing zero output.
-
-    2. **photoscript fallback**. Used when ``osascript`` is missing or
-       the bulk script fails. Same behaviour as before.
+    1. **Photos library DB via osxphotos** (preferred when installed). Reads
+       the library's SQLite directly for each person's exact name + photo
+       UUIDs — no AppleScript, so it works on builds where the ``person``
+       class isn't scriptable (the ``-2741`` failure) and returns names
+       verbatim (Cyrillic etc.) rather than via fragile OCR.
+    2. **Bulk AppleScript**. One ``osascript`` call returns every
+       ``(uuid, persons)`` pair from the running Photos app.
+    3. **photoscript fallback**. Used when osascript is missing or fails.
 
     Args:
         db: ProgressDB instance (faces must be scanned first via
@@ -106,6 +107,8 @@ def import_photos_persons(
             periodic heartbeat + final summary). When ``None`` the
             messages go to stderr by default — never silenced, because
             silence-by-default is exactly the bug this guards against.
+        library_path: Optional path to a ``.photoslibrary`` for the
+            osxphotos reader. ``None`` auto-detects the system library.
 
     Returns:
         Tuple of ``(imported_count, skipped_count)`` where
@@ -121,18 +124,25 @@ def import_photos_persons(
 
     emit("Scanning Photos library… (this can take several minutes for large libraries)")
 
-    name_to_uuids = _collect_name_to_uuids(emit)
+    name_to_uuids = _collect_name_to_uuids(emit, library_path=library_path)
 
     return _materialize_persons(db, name_to_uuids, emit)
 
 
-def _collect_name_to_uuids(emit: Callable[[str], None]) -> dict[str, list[str]]:
-    """Build the ``name -> [uuid, ...]`` map, preferring the bulk AppleScript.
+def _collect_name_to_uuids(
+    emit: Callable[[str], None], library_path: str | None = None
+) -> dict[str, list[str]]:
+    """Build the ``name -> [uuid, ...]`` map from the most reliable source.
 
-    Falls back to photoscript only when osascript is unavailable or the
-    bulk script returns nothing usable. Either path emits at least one
-    progress line so the user sees activity.
+    Prefers reading the Photos library DB via osxphotos (exact names, no
+    AppleScript), then the bulk AppleScript against the running Photos app,
+    then photoscript. Each path emits at least one progress line.
     """
+    try:
+        return _collect_via_osxphotos(emit, library_path)
+    except _OsxphotosUnavailable as exc:
+        logger.info("osxphotos path unavailable (%s); trying AppleScript", exc)
+
     if is_applescript_available():
         try:
             return _collect_via_bulk_applescript(emit)
@@ -141,15 +151,62 @@ def _collect_name_to_uuids(emit: Callable[[str], None]) -> dict[str, list[str]]:
 
     if not _has_photoscript():
         raise RuntimeError(
-            "Neither osascript nor photoscript is available. Install the [photos] extra "
-            "(pip install pyimgtag[photos]) or run on macOS with osascript."
+            "Could not read the Photos library. Install the [photos-db] extra for the "
+            "reliable reader (pip install 'pyimgtag[photos-db]'), or the [photos] extra "
+            "(pip install 'pyimgtag[photos]') / run on macOS with osascript."
         )
 
     return _collect_via_photoscript(emit)
 
 
+class _OsxphotosUnavailable(Exception):
+    """Raised when the osxphotos DB reader can't run; caller falls back."""
+
+
 class _BulkAppleScriptUnavailable(Exception):
     """Raised when the bulk AppleScript path can't run; caller falls back."""
+
+
+def _collect_via_osxphotos(
+    emit: Callable[[str], None], library_path: str | None = None
+) -> dict[str, list[str]]:
+    """Read ``name -> [photo uuid]`` straight from the Photos library DB.
+
+    The reliable enumeration path: osxphotos reads the library's SQLite
+    read-only (the Photos app need not be running) and returns each person's
+    exact name and the UUIDs of their photos — no AppleScript (so it is immune
+    to the ``-2741`` "Expected class name" failure) and no OCR. The UUIDs match
+    the ``originals/X/<uuid>.<ext>`` stems that ``faces scan`` records, so the
+    existing UUID linking in :func:`_assign_faces_to_person` ties faces to the
+    named person.
+
+    Raises:
+        _OsxphotosUnavailable: osxphotos is not installed or the library
+            cannot be opened — the caller then falls back to AppleScript.
+    """
+    try:
+        import osxphotos
+    except ImportError as exc:
+        raise _OsxphotosUnavailable(
+            "osxphotos not installed (pip install 'pyimgtag[photos-db]')"
+        ) from exc
+
+    emit("Reading the Apple Photos library database (osxphotos)…")
+    try:
+        db = osxphotos.PhotosDB(library_path) if library_path else osxphotos.PhotosDB()
+    except Exception as exc:  # noqa: BLE001 — many failure modes; degrade to AppleScript
+        raise _OsxphotosUnavailable(f"could not open Photos library: {exc}") from exc
+
+    name_to_uuids: dict[str, list[str]] = {}
+    for person in db.person_info:
+        name = (getattr(person, "name", None) or "").strip()
+        if not name or name == "_UNKNOWN_":
+            continue
+        uuids = [ph.uuid for ph in person.photos if getattr(ph, "uuid", None)]
+        if uuids:
+            name_to_uuids.setdefault(name, []).extend(uuids)
+    emit(f"Photos library DB: {len(name_to_uuids)} named person(s).")
+    return name_to_uuids
 
 
 def _bulk_applescript_every_person() -> str:

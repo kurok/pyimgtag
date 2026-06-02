@@ -21,7 +21,11 @@ import numpy as np
 import pytest
 
 from pyimgtag.models import FaceDetection
-from pyimgtag.photos_faces_importer import _assign_faces_to_person, import_photos_persons
+from pyimgtag.photos_faces_importer import (
+    _assign_faces_to_person,
+    _OsxphotosUnavailable,
+    import_photos_persons,
+)
 
 
 def _mock_photo(uuid: str, persons: list[str]) -> MagicMock:
@@ -29,6 +33,44 @@ def _mock_photo(uuid: str, persons: list[str]) -> MagicMock:
     photo.uuid = uuid
     photo.persons = persons
     return photo
+
+
+def _fake_osxphotos(persons: list[tuple[str, list[str]]]):
+    """Build a stand-in ``osxphotos`` module whose ``PhotosDB().person_info``
+    yields the given ``(name, [uuid, ...])`` people."""
+    import types
+
+    class _Photo:
+        def __init__(self, uuid):
+            self.uuid = uuid
+
+    class _Person:
+        def __init__(self, name, uuids):
+            self.name = name
+            self.photos = [_Photo(u) for u in uuids]
+
+    class _DB:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        @property
+        def person_info(self):
+            return [_Person(n, u) for n, u in persons]
+
+    module = types.ModuleType("osxphotos")
+    module.PhotosDB = _DB
+    return module
+
+
+@pytest.fixture(autouse=True)
+def _osxphotos_absent():
+    """Disable the osxphotos reader for the whole module so the AppleScript /
+    photoscript enumeration paths (what these tests cover) run, and no test
+    ever touches the real Photos library. osxphotos is now the preferred path;
+    setting it to ``None`` in ``sys.modules`` makes ``import osxphotos`` raise.
+    The osxphotos-specific tests inject a fake module to override this."""
+    with patch.dict("sys.modules", {"osxphotos": None}):
+        yield
 
 
 @contextlib.contextmanager
@@ -271,7 +313,7 @@ class TestImportPhotosPersons:
             assert {p.label for p in db.get_persons()} == {"Alice"}
 
     def test_neither_path_available_raises(self, tmp_path):
-        """When osascript and photoscript are both unavailable, raise."""
+        """When osxphotos, osascript, and photoscript are all unavailable, raise."""
         with self._make_db(tmp_path) as db:
             with (
                 patch(
@@ -280,7 +322,7 @@ class TestImportPhotosPersons:
                 ),
                 patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: False),
             ):
-                with pytest.raises(RuntimeError, match="Neither osascript nor photoscript"):
+                with pytest.raises(RuntimeError, match="Could not read the Photos library"):
                     import_photos_persons(db)
 
 
@@ -966,3 +1008,55 @@ class TestPhotoPersonNames:
         photo = MagicMock()
         type(photo).persons = property(lambda self: ["Alice", "Bob"])
         assert _photo_person_names(photo) == ["Alice", "Bob"]
+
+
+class TestCollectViaOsxphotos:
+    """The preferred enumeration path: read names + UUIDs from the Photos DB."""
+
+    def test_builds_name_to_uuids_skipping_unknown_and_empty(self):
+        from pyimgtag.photos_faces_importer import _collect_via_osxphotos
+
+        fake = _fake_osxphotos(
+            [("Kate Резниченко", ["U1", "U2"]), ("_UNKNOWN_", ["U3"]), ("", ["U4"])]
+        )
+        with patch.dict("sys.modules", {"osxphotos": fake}):
+            result = _collect_via_osxphotos(lambda _m: None)
+        assert result == {"Kate Резниченко": ["U1", "U2"]}
+
+    def test_missing_osxphotos_raises_unavailable(self):
+        # The autouse fixture already maps osxphotos -> None (import fails).
+        from pyimgtag.photos_faces_importer import _collect_via_osxphotos
+
+        with pytest.raises(_OsxphotosUnavailable):
+            _collect_via_osxphotos(lambda _m: None)
+
+    def test_open_failure_raises_unavailable(self):
+        import types
+
+        from pyimgtag.photos_faces_importer import _collect_via_osxphotos
+
+        module = types.ModuleType("osxphotos")
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("library locked")
+
+        module.PhotosDB = _boom
+        with patch.dict("sys.modules", {"osxphotos": module}):
+            with pytest.raises(_OsxphotosUnavailable):
+                _collect_via_osxphotos(lambda _m: None)
+
+    def test_import_prefers_osxphotos_and_links_face(self, tmp_path):
+        """End-to-end: osxphotos is used over AppleScript and its UUID links a
+        scanned face onto the named person."""
+        from pyimgtag.progress_db import ProgressDB
+
+        uuid = "AAAAAAAA-1111-2222-3333-444444444444"
+        with ProgressDB(db_path=tmp_path / "t.db") as db:
+            db.insert_face(f"/lib/{uuid}.jpg", FaceDetection(image_path=f"/lib/{uuid}.jpg"))
+            fake = _fake_osxphotos([("Alice", [uuid])])
+            with patch.dict("sys.modules", {"osxphotos": fake}):
+                imported, _skipped = import_photos_persons(db)
+            assert imported == 1
+            alice = next(p for p in db.get_persons() if p.label == "Alice")
+            assert alice.source == "photos"
+            assert len(alice.face_ids) == 1
