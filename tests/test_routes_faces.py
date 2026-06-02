@@ -857,7 +857,9 @@ def test_assign_batch_to_existing_person_links_faces(tmp_path):
     fids = _seed_unassigned_faces(tmp_path / "progress.db", 2)
     with client:
         r = client.post("/api/faces/assign-batch", json={"face_ids": fids, "person_id": pid})
-        assert r.status_code == 200 and r.json()["person_id"] == pid
+        body = r.json()
+        assert r.status_code == 200
+        assert body["person_id"] == pid
     person = next(p for p in db.get_persons() if p.person_id == pid)
     assert len(person.face_ids) == 2
 
@@ -867,7 +869,9 @@ def test_confirm_batch_counts_only_existing(tmp_path):
     (pid,) = _seed_persons_with_faces(tmp_path / "progress.db", [("a", False, 1)])
     with client:
         r = client.post("/api/persons/confirm-batch", json={"person_ids": [pid, 999999]})
-        assert r.status_code == 200 and r.json()["confirmed"] == 1
+        body = r.json()
+        assert r.status_code == 200
+        assert body["confirmed"] == 1
     person = next(p for p in db.get_persons() if p.person_id == pid)
     assert person.confirmed and person.trusted
 
@@ -877,7 +881,9 @@ def test_delete_batch_counts_only_existing(tmp_path):
     (pid,) = _seed_persons_with_faces(tmp_path / "progress.db", [("a", False, 1)])
     with client:
         r = client.post("/api/persons/delete-batch", json={"person_ids": [pid, 888888]})
-        assert r.status_code == 200 and r.json()["deleted"] == 1
+        body = r.json()
+        assert r.status_code == 200
+        assert body["deleted"] == 1
     assert pid not in {p.person_id for p in db.get_persons()}
 
 
@@ -904,7 +910,10 @@ def test_delete_and_face_actions_on_unknown_ids_are_noops(tmp_path):
     """Delete person / ignore / restore / unassign on unknown ids never error."""
     _db, client = _faces_client(tmp_path)
     with client:
-        assert client.delete("/api/persons/999999").status_code == 200
-        assert client.post("/api/faces/999999/ignore").status_code == 200
-        assert client.post("/api/faces/999999/restore").status_code == 200
-        assert client.post("/api/faces/999999/unassign").status_code == 200
+        statuses = [
+            client.delete("/api/persons/999999").status_code,
+            client.post("/api/faces/999999/ignore").status_code,
+            client.post("/api/faces/999999/restore").status_code,
+            client.post("/api/faces/999999/unassign").status_code,
+        ]
+    assert statuses == [200, 200, 200, 200]
