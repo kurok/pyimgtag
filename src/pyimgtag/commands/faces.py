@@ -210,6 +210,7 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
     total_faces = 0
     scanned = 0
     skipped_existing = 0
+    not_downloaded = 0
 
     session, dashboard = start_dashboard_for(args, command="faces scan")
     if session is not None:
@@ -239,6 +240,17 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
                         skipped_existing += 1
                         if session is not None:
                             session.set_counter("skipped_existing", skipped_existing)
+                            session.set_current(None)
+                        continue
+
+                    # iCloud-optimized libraries evict originals, leaving the
+                    # path absent locally. Skip those quietly (they are not an
+                    # error and must not be marked scanned) so a later run can
+                    # pick them up once downloaded.
+                    if not file_path.is_file():
+                        not_downloaded += 1
+                        if session is not None:
+                            session.set_counter("not_downloaded", not_downloaded)
                             session.set_current(None)
                         continue
 
@@ -294,6 +306,8 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         summary = f"\nScanned {scanned} new image(s), detected {total_faces} faces"
         if errors:
             summary += f", {errors} error(s) skipped"
+        if not_downloaded:
+            summary += f", {not_downloaded} not downloaded locally (skipped)"
         if skipped_existing:
             summary += (
                 f". {skipped_existing} image(s) already scanned and skipped — "
@@ -493,7 +507,9 @@ def _handle_faces_import_photos(args: argparse.Namespace) -> int:
 
     with ProgressDB(db_path=args.db) as db:
         try:
-            imported, skipped = import_photos_persons(db)
+            imported, skipped = import_photos_persons(
+                db, library_path=getattr(args, "library", None)
+            )
         except RuntimeError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 1

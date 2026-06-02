@@ -8,9 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`import-photos` reads the Photos library DB (osxphotos)** (#268): when the `[photos-db]` extra is installed, `faces import-photos` now reads each person's exact name and photo UUIDs straight from the Apple Photos library database via osxphotos — no AppleScript, so it works on Photos builds where the `person` class isn't scriptable (the `-2741` "Expected class name" failure that returned 0 people), and names come through verbatim (Cyrillic etc.) instead of via fragile OCR. Preferred over the AppleScript/photoscript paths, which remain as fallbacks. New `--library` flag (default: auto-detect the system library); install with `pip install 'pyimgtag[photos-db]'`.
 - **Name auto clusters from labeled reference faces** (#267): new `pyimgtag faces match-references <dir>` matches each auto-clustered person to the nearest *labeled* reference face by embedding and applies the name (merging into an existing trusted person of that name when one exists). Drop one image — or a sub-folder of images — per person into `<dir>` (`Alice.jpg` or `Alice/01.jpg`); dry-run by default, `--apply` to write, `--threshold` to tune. This is the escape hatch for Apple Photos libraries that can't be enumerated via AppleScript (the `-2741` failure that makes `import-photos` return 0), and the foundation for the upcoming screenshot/OCR capture. Backed by `pyimgtag.face_naming`.
 
 ### Fixed
+- **`faces scan` skips photos not downloaded locally** (#268): on an iCloud-optimized library the originals are evicted, so their paths are absent on disk. The scan now detects that and skips them quietly — they are not detected, not marked scanned (so a later run picks them up once downloaded), and reported as "N not downloaded locally (skipped)" rather than counted as errors.
 - **`faces scan` summary read as "detected 0 faces" when images were merely already scanned** (#266): a re-scan skips images detected in a previous run, but those skips were counted toward "Scanned N images, detected 0 faces" — indistinguishable from a real detection failure. The summary now reports newly-scanned images separately and, when any were skipped, says how many were already scanned and points at `faces reset-untrusted --yes` to re-detect.
 
 ## [0.24.1] - 2026-06-02

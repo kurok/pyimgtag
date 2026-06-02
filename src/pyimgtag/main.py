@@ -516,6 +516,11 @@ def _add_faces_subcommand(subparsers: Any) -> None:
         "import-photos", help="Import named persons from Apple Photos library"
     )
     faces_import.add_argument("--db", help=_DEFAULT_DB_HELP)
+    faces_import.add_argument(
+        "--library",
+        help="Path to a .photoslibrary for the osxphotos reader "
+        "(default: auto-detect the system library).",
+    )
 
     faces_match = faces_sub.add_parser(
         "match-references",
