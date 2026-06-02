@@ -524,20 +524,34 @@ def _assign_faces_to_person(
     has at least one solo/portrait shot still gets linked. When there is no
     usable reference at all, multi-face photos are skipped, not guessed.
 
-    Only faces with ``person_id IS NULL`` are touched, so existing assignments
-    are never overwritten. Returns the number of photos left unassigned
-    (skipped) for manual review.
+    Candidate faces are those that are unassigned **or** sitting in an auto
+    cluster (``trusted=0 AND confirmed=0``). The latter matters because the
+    background re-cluster during a ``faces scan`` grabs freshly-detected faces
+    into ``Person N`` clusters before ``import-photos`` runs; the Apple Photos
+    UUID tag is authoritative, so such a face is reclaimed into the named
+    person. Faces already assigned to a trusted/confirmed person are never
+    touched. Returns the number of photos left unassigned (skipped) for manual
+    review.
     """
     import numpy as np
 
-    # Collect this person's unassigned candidate faces, grouped per photo.
+    # Faces in an auto cluster may be reclaimed by an authoritative UUID match;
+    # trusted/confirmed assignments must never be disturbed.
+    reclaimable = db.get_auto_person_ids()
+
+    # Collect this person's candidate faces (unassigned or auto-clustered),
+    # grouped per photo.
     per_photo: list[tuple[str, list[int]]] = []
     candidate_ids: list[int] = []
     for uuid in uuids:
-        unassigned = [f["id"] for f in db.get_faces_by_uuid(uuid) if f["person_id"] is None]
-        if unassigned:
-            per_photo.append((uuid, unassigned))
-            candidate_ids.extend(unassigned)
+        candidates = [
+            f["id"]
+            for f in db.get_faces_by_uuid(uuid)
+            if f["person_id"] is None or f["person_id"] in reclaimable
+        ]
+        if candidates:
+            per_photo.append((uuid, candidates))
+            candidate_ids.extend(candidates)
     if not per_photo:
         return 0
 

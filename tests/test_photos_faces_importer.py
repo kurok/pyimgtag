@@ -366,6 +366,44 @@ class TestAssignFacesMultiFace:
             assert skipped == 0
             assert dave in next(p for p in db.get_persons() if p.person_id == pid).face_ids
 
+    @staticmethod
+    def _owner(db, face_id: int) -> int | None:
+        return db._conn.execute("SELECT person_id FROM faces WHERE id = ?", (face_id,)).fetchone()[
+            0
+        ]
+
+    def test_reclaims_single_face_from_auto_cluster(self, tmp_path):
+        """Regression: the scan's background recluster grabs a freshly-detected
+        face into a ``Person N`` auto cluster before import-photos runs. The
+        authoritative UUID match must reclaim it into the named person rather
+        than leave the named person empty."""
+        uuid = "AAAAAAAA-1111-2222-3333-444444444444"
+        with self._db(tmp_path) as db:
+            named = db.create_person(label="Alice", confirmed=True, source="photos", trusted=True)
+            auto = db.create_person(label="Person 1", source="auto")
+            fid = self._face(db, f"/lib/{uuid}.jpg", embedding=self._vec((0, 1.0)))
+            db.set_person_id(fid, auto)  # recluster put Alice's face in the auto cluster
+
+            skipped = _assign_faces_to_person(db, named, [uuid])
+
+            assert skipped == 0
+            assert self._owner(db, fid) == named  # reclaimed from the auto cluster
+
+    def test_does_not_reclaim_from_trusted_person(self, tmp_path):
+        """A face already owned by another trusted/confirmed person is never
+        stolen, even on a UUID match."""
+        uuid = "BBBBBBBB-1111-2222-3333-444444444444"
+        with self._db(tmp_path) as db:
+            named = db.create_person(label="Alice", confirmed=True, source="photos", trusted=True)
+            other = db.create_person(label="Bob", confirmed=True, source="photos", trusted=True)
+            fid = self._face(db, f"/lib/{uuid}.jpg", embedding=self._vec((0, 1.0)))
+            db.set_person_id(fid, other)
+
+            skipped = _assign_faces_to_person(db, named, [uuid])
+
+            assert skipped == 0  # no candidate faces — nothing to do
+            assert self._owner(db, fid) == other  # Bob keeps his face
+
 
 class TestBulkAppleScriptPath:
     """Cover the fast path: one osascript call returns ``<uuid>\\t<persons>``."""
