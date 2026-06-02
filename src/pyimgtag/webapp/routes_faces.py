@@ -198,6 +198,45 @@ let _sort = 'default';             // persons-grid sort key
 let _selectedPersons = new Set();  // person ids selected in the grid for bulk actions
 let _pageIds = [];                 // person ids rendered on the current grid page
 
+// ── View-state persistence ───────────────────────────────────────────────────
+// Mirror filter/sort/page into the URL query string so the view survives
+// opening a cluster and pressing Back (history.back returns to this URL) and a
+// plain reload. Without this the grid reloaded with the default sort each time.
+function _syncUrl() {
+  const q = new URLSearchParams();
+  if (_filter !== 'all') q.set('filter', _filter);
+  if (_sort !== 'default') q.set('sort', _sort);
+  if (_filter !== 'unassigned' && _filter !== 'trash' && _offset > 0) {
+    q.set('offset', _offset);
+  }
+  const qs = q.toString();
+  history.replaceState(null, '', qs ? ('?' + qs) : location.pathname);
+}
+
+function _initFromUrl() {
+  const q = new URLSearchParams(location.search);
+  const f = q.get('filter');
+  if (f) _filter = f;
+  const s = q.get('sort');
+  if (s) _sort = s;
+  const o = parseInt(q.get('offset') || '0', 10);
+  if (!isNaN(o) && o > 0) _offset = o;
+  const isUA = _filter === 'unassigned';
+  const isTR = _filter === 'trash';
+  const isGrid = !isUA && !isTR;
+  document.querySelectorAll('.filter-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.filter === _filter));
+  document.getElementById('persons').style.display = isGrid ? '' : 'none';
+  document.getElementById('unassigned-section').style.display = isUA ? '' : 'none';
+  document.getElementById('trash-section').style.display = isTR ? '' : 'none';
+  document.getElementById('sort-wrap').style.display = isGrid ? '' : 'none';
+  const sortSel = document.getElementById('person-sort');
+  if (sortSel) sortSel.value = _sort;
+  if (isUA) loadUnassigned();
+  else if (isTR) loadTrash();
+  else load();
+}
+
 // ── Filter ──────────────────────────────────────────────────────────────────
 function setFilter(f) {
   _filter = f;
@@ -237,6 +276,7 @@ function goPage(delta) {
 
 // ── Persons grid ─────────────────────────────────────────────────────────────
 async function load() {
+  _syncUrl();
   document.getElementById('status').textContent = 'Loading…';
   const url = '__API_BASE__/api/persons/with-faces?offset=' + _offset
     + '&limit=' + PAGE_SIZE + '&filter=' + _filter + '&sort=' + _sort;
@@ -281,6 +321,7 @@ function goUAPage(delta) {
 }
 
 async function loadUnassigned() {
+  _syncUrl();
   document.getElementById('status').textContent = 'Loading…';
   const url = '__API_BASE__/api/faces/unassigned?offset=' + _uaOffset + '&limit=' + UA_PAGE_SIZE;
   const data = await fetch(url).then(r => r.json());
@@ -474,6 +515,7 @@ function goTRPage(delta) {
 }
 
 async function loadTrash() {
+  _syncUrl();
   document.getElementById('status').textContent = 'Loading…';
   const url = '__API_BASE__/api/faces/ignored?offset=' + _trOffset + '&limit=' + UA_PAGE_SIZE;
   const data = await fetch(url).then(r => r.json());
@@ -721,7 +763,7 @@ function deleteSelectedPersons() {
   );
 }
 
-load();
+_initFromUrl();
 </script>
 </body>
 </html>"""
