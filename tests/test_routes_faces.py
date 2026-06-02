@@ -808,3 +808,112 @@ def test_build_router_without_fastapi_raises_importerror(tmp_path, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
     with pytest.raises(ImportError, match="fastapi is required"):
         build_faces_router(db, api_base="")
+
+
+# --------------------------------------------------------------------------- #
+# Web edge cases: error/no-op paths and the person-inclusion predicate
+# --------------------------------------------------------------------------- #
+def _faces_client(tmp_path):
+    db = ProgressDB(db_path=tmp_path / "progress.db")
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+    return db, TestClient(app)
+
+
+def test_list_persons_includes_empty_trusted_excludes_empty_untrusted(tmp_path):
+    """`GET /api/persons` keeps a trusted person even with 0 faces, but drops an
+    untrusted person that has none (the `p.face_ids or p.trusted` predicate)."""
+    db, client = _faces_client(tmp_path)
+    pid_trusted, pid_auto_face, pid_auto_empty = _seed_persons_with_faces(
+        tmp_path / "progress.db",
+        [("Trusted Empty", True, 0), ("Auto With Face", False, 1), ("Auto Empty", False, 0)],
+    )
+    with client:
+        r = client.get("/api/persons")
+        assert r.status_code == 200
+        ids = {p["id"] for p in r.json()}
+        assert pid_trusted in ids
+        assert pid_auto_face in ids
+        assert pid_auto_empty not in ids
+        for p in r.json():
+            assert set(p) == {"id", "label", "confirmed", "source", "trusted", "face_count"}
+
+
+def test_assign_batch_rejects_unknown_person(tmp_path):
+    """Assigning to a nonexistent person 404s rather than creating a dangling
+    assignment."""
+    db, client = _faces_client(tmp_path)
+    fids = _seed_unassigned_faces(tmp_path / "progress.db", 2)
+    with client:
+        r = client.post("/api/faces/assign-batch", json={"face_ids": fids, "person_id": 999999})
+        assert r.status_code == 404
+    # Faces stay unassigned.
+    assert len(db.get_unassigned_faces()) == 2
+
+
+def test_assign_batch_to_existing_person_links_faces(tmp_path):
+    db, client = _faces_client(tmp_path)
+    (pid,) = _seed_persons_with_faces(tmp_path / "progress.db", [("Alice", True, 0)])
+    fids = _seed_unassigned_faces(tmp_path / "progress.db", 2)
+    with client:
+        r = client.post("/api/faces/assign-batch", json={"face_ids": fids, "person_id": pid})
+        body = r.json()
+        assert r.status_code == 200
+        assert body["person_id"] == pid
+    person = next(p for p in db.get_persons() if p.person_id == pid)
+    assert len(person.face_ids) == 2
+
+
+def test_confirm_batch_counts_only_existing(tmp_path):
+    db, client = _faces_client(tmp_path)
+    (pid,) = _seed_persons_with_faces(tmp_path / "progress.db", [("a", False, 1)])
+    with client:
+        r = client.post("/api/persons/confirm-batch", json={"person_ids": [pid, 999999]})
+        body = r.json()
+        assert r.status_code == 200
+        assert body["confirmed"] == 1
+    person = next(p for p in db.get_persons() if p.person_id == pid)
+    assert person.confirmed and person.trusted
+
+
+def test_delete_batch_counts_only_existing(tmp_path):
+    db, client = _faces_client(tmp_path)
+    (pid,) = _seed_persons_with_faces(tmp_path / "progress.db", [("a", False, 1)])
+    with client:
+        r = client.post("/api/persons/delete-batch", json={"person_ids": [pid, 888888]})
+        body = r.json()
+        assert r.status_code == 200
+        assert body["deleted"] == 1
+    assert pid not in {p.person_id for p in db.get_persons()}
+
+
+def test_merge_nonexistent_target_returns_404(tmp_path):
+    """A bad merge target is a client error (404), not a 500."""
+    db, client = _faces_client(tmp_path)
+    (pid,) = _seed_persons_with_faces(tmp_path / "progress.db", [("Alice", True, 1)])
+    with client:
+        r = client.post(f"/api/persons/{pid}/merge/888888")
+        assert r.status_code == 404
+
+
+def test_merge_nonexistent_source_is_noop(tmp_path):
+    db, client = _faces_client(tmp_path)
+    (pid,) = _seed_persons_with_faces(tmp_path / "progress.db", [("Alice", True, 1)])
+    with client:
+        r = client.post(f"/api/persons/999999/merge/{pid}")
+        assert r.status_code == 200
+    # Target survives untouched.
+    assert pid in {p.person_id for p in db.get_persons()}
+
+
+def test_delete_and_face_actions_on_unknown_ids_are_noops(tmp_path):
+    """Delete person / ignore / restore / unassign on unknown ids never error."""
+    _db, client = _faces_client(tmp_path)
+    with client:
+        statuses = [
+            client.delete("/api/persons/999999").status_code,
+            client.post("/api/faces/999999/ignore").status_code,
+            client.post("/api/faces/999999/restore").status_code,
+            client.post("/api/faces/999999/unassign").status_code,
+        ]
+    assert statuses == [200, 200, 200, 200]
