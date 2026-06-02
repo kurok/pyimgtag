@@ -206,6 +206,7 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
 
     total_faces = 0
     scanned = 0
+    skipped_existing = 0
 
     session, dashboard = start_dashboard_for(args, command="faces scan")
     if session is not None:
@@ -227,6 +228,16 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
                     if session is not None:
                         session.wait_if_paused()
                         session.set_current(str(file_path))
+
+                    # Images detected in a previous run are skipped (incremental
+                    # resume). Count them separately so the summary doesn't read
+                    # as "detected 0 faces" when it actually re-detected nothing.
+                    if db.is_face_scanned(str(file_path)):
+                        skipped_existing += 1
+                        if session is not None:
+                            session.set_counter("skipped_existing", skipped_existing)
+                            session.set_current(None)
+                        continue
 
                     try:
                         count = scan_and_store(
@@ -277,11 +288,15 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
                 stop_event.set()
                 cluster_thread.join()
 
-        err_suffix = f", {errors} error(s) skipped" if errors else ""
-        print(
-            f"\nScanned {scanned} images, detected {total_faces} faces{err_suffix}.",
-            file=sys.stderr,
-        )
+        summary = f"\nScanned {scanned} new image(s), detected {total_faces} faces"
+        if errors:
+            summary += f", {errors} error(s) skipped"
+        if skipped_existing:
+            summary += (
+                f". {skipped_existing} image(s) already scanned and skipped — "
+                "run 'faces reset-untrusted --yes' (or 'faces reset') first to re-detect them"
+            )
+        print(summary + ".", file=sys.stderr)
         if session is not None and not interrupted:
             session.mark_completed()
     finally:

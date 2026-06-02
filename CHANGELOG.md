@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`faces scan` summary read as "detected 0 faces" when images were merely already scanned** (#266): a re-scan skips images detected in a previous run, but those skips were counted toward "Scanned N images, detected 0 faces" — indistinguishable from a real detection failure. The summary now reports newly-scanned images separately and, when any were skipped, says how many were already scanned and points at `faces reset-untrusted --yes` to re-detect.
+
 ## [0.24.1] - 2026-06-02
 
 ### Fixed

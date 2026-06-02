@@ -133,6 +133,35 @@ class TestHandleFacesScan:
     @patch("pyimgtag.face_detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
+    def test_already_scanned_images_skipped_and_reported(
+        self, mock_scan_dir, mock_store, mock_check, mock_dash, tmp_path, capsys
+    ):
+        """Regression: an image scanned in a prior run is reported as skipped,
+        not folded into a misleading 'detected 0 faces' (which read like a
+        detection failure)."""
+        from pyimgtag.progress_db import ProgressDB
+
+        img = tmp_path / "seen.jpg"
+        img.write_bytes(b"\xff\xd8\xff")
+        db_path = tmp_path / "progress.db"
+        with ProgressDB(db_path=db_path) as db:
+            db.mark_face_scanned(str(img))  # a previous run already scanned it
+
+        mock_scan_dir.return_value = [img]
+        args = _make_args(input_dir=str(tmp_path), db=str(db_path))
+        rc = _handle_faces_scan(args)
+
+        assert rc == 0
+        mock_store.assert_not_called()  # not re-detected
+        err = capsys.readouterr().err
+        assert "already scanned" in err
+        assert "reset-untrusted" in err
+        assert "Scanned 0 new image(s)" in err
+
+    @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.commands.faces.scan_and_store")
+    @patch("pyimgtag.commands.faces.scan_directory")
     def test_scan_with_limit(self, mock_scan_dir, mock_store, mock_check, mock_dash, tmp_path):
         imgs = [tmp_path / f"p{i}.jpg" for i in range(3)]
         for f in imgs:
