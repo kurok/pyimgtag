@@ -9,6 +9,7 @@ import sys
 import threading
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from pathlib import Path
+from typing import cast
 
 from pyimgtag import run_registry
 from pyimgtag.progress_db import ProgressDB
@@ -755,8 +756,8 @@ def _handle_faces_capture_names(args: argparse.Namespace) -> int:
                 print(f"Error: {exc}", file=sys.stderr)
                 return 1
         else:
-            assert screenshot is not None  # guaranteed by the source check above
-            shot_path = Path(screenshot)
+            # screenshot is non-None here (guaranteed by the source check above).
+            shot_path = Path(cast(str, screenshot))
             if not shot_path.is_file():
                 print(f"Error: screenshot not found: {shot_path}", file=sys.stderr)
                 return 1
