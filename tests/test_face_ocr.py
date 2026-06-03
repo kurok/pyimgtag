@@ -19,6 +19,7 @@ from pyimgtag import face_ocr
 from pyimgtag.face_ocr import (
     OcrText,
     OcrUnavailableError,
+    _photos_window_id,
     _resized_dims,
     build_references_from_screenshot,
     capture_people_screenshot,
@@ -99,9 +100,57 @@ class TestRecognizeText:
             recognize_text(img)
 
 
+class _FakeQuartz:
+    """Minimal stand-in for the Quartz module used by `_photos_window_id`."""
+
+    kCGWindowListOptionOnScreenOnly = 1
+    kCGWindowListExcludeDesktopElements = 2
+    kCGNullWindowID = 0
+
+    def __init__(self, windows):
+        self._windows = windows
+
+    def CGWindowListCopyWindowInfo(self, _options, _relative_to):
+        return self._windows
+
+
+def _win(owner, number, w, h, layer=0):
+    return {
+        "kCGWindowOwnerName": owner,
+        "kCGWindowLayer": layer,
+        "kCGWindowNumber": number,
+        "kCGWindowBounds": {"Width": w, "Height": h},
+    }
+
+
+class TestPhotosWindowId:
+    def test_picks_largest_normal_photos_window(self):
+        windows = [
+            _win("Finder", 1, 4000, 4000),  # not Photos
+            _win("Photos", 2, 500, 500, layer=25),  # a panel — skipped
+            _win("Photos", 3, 100, 100),  # small
+            _win("Photos", 4, 1200, 800),  # largest normal → winner
+        ]
+        assert _photos_window_id(_FakeQuartz(windows)) == 4
+
+    def test_none_when_no_photos_window(self):
+        assert _photos_window_id(_FakeQuartz([_win("Safari", 9, 100, 100)])) is None
+
+    def test_handles_empty_window_list(self):
+        assert _photos_window_id(_FakeQuartz(None)) is None
+
+
 class TestCapturePeopleScreenshot:
     def test_requires_macos(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "platform", "linux")
+        with pytest.raises(OcrUnavailableError):
+            capture_people_screenshot(tmp_path / "out.png")
+
+    def test_unavailable_without_quartz_on_macos(self, tmp_path, monkeypatch):
+        # On macOS but without the [ocr] extra: the Quartz import fails before
+        # any subprocess runs, so this is deterministic on CI too.
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setitem(sys.modules, "Quartz", None)
         with pytest.raises(OcrUnavailableError):
             capture_people_screenshot(tmp_path / "out.png")
 
