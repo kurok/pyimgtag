@@ -552,6 +552,13 @@ to write the names, `--threshold` to tune match strictness. `capture-names` also
 accepts `--languages ru-RU,en-US` to steer Vision OCR for non-Latin names, and
 `--save-screenshot PATH` to keep a `--live` capture.
 
+> **`--live` needs Screen Recording permission.** Programmatic window capture
+> requires it — grant it to your terminal under *System Settings → Privacy &
+> Security → Screen Recording*, then retry. (`--live` captures the Photos window
+> by its window id, so it works even on secondary displays.) If you'd rather not
+> grant it, take the screenshot yourself (Cmd-Shift-4, then Space, click the
+> Photos window) and pass `--screenshot PATH` — that path needs no permission.
+
 The `[face]` extra is required for all detection/embedding; see the
 [`face_recognition_models` install note](#face-features-face_recognition_models-is-git-only)
 above. `import-photos` additionally needs `[photos-db]` (`pip install

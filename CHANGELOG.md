@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`faces capture-names --live` now captures the Photos window by id, not by screen rectangle**: the previous `screencapture -R x,y,w,h` failed (exit 1) when the Photos window was on a secondary display at negative global coordinates (e.g. `-3203,-739,…`). It now finds the Photos window via CoreGraphics (`CGWindowListCopyWindowInfo`) and captures it with `screencapture -l <window-id>`, which is display-position-independent. The error message also now points at **Screen Recording permission** (System Settings → Privacy & Security → Screen Recording) — required for any programmatic window capture and the most common remaining cause of an exit-1 from `screencapture`. The permission-free alternative is unchanged: capture the screenshot yourself (Cmd-Shift-4) and pass `--screenshot PATH`.
+
 ## [0.27.0] - 2026-06-03
 
 ### Added

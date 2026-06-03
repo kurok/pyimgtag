@@ -273,15 +273,46 @@ def build_references_from_screenshot(
     return dict(refs)
 
 
+def _photos_window_id(quartz) -> int | None:
+    """Return the window number of Apple Photos' largest normal window, or None.
+
+    Uses the on-screen window list so we can capture by **window id** rather than
+    by screen rectangle — robust on multi-display setups where the window lives
+    at negative global coordinates (a rectangle capture with `screencapture -R`
+    fails there). ``quartz`` is injected so the geometry is unit-testable with a
+    fake module.
+    """
+    options = quartz.kCGWindowListOptionOnScreenOnly | quartz.kCGWindowListExcludeDesktopElements
+    windows = quartz.CGWindowListCopyWindowInfo(options, quartz.kCGNullWindowID) or []
+    best_id: int | None = None
+    best_area = -1.0
+    for w in windows:
+        if w.get("kCGWindowOwnerName") != "Photos":
+            continue
+        # Layer 0 = a normal app window; skip menubar items, panels, tooltips.
+        if w.get("kCGWindowLayer", 0) != 0:
+            continue
+        bounds = w.get("kCGWindowBounds", {})
+        area = float(bounds.get("Width", 0)) * float(bounds.get("Height", 0))
+        if area > best_area and w.get("kCGWindowNumber") is not None:
+            best_area = area
+            best_id = int(w["kCGWindowNumber"])
+    return best_id
+
+
 def capture_people_screenshot(out_path: str | Path) -> Path:
     """Bring Apple Photos forward and screenshot its window (macOS, best-effort).
 
-    Activates Photos, then captures its frontmost window with ``screencapture``.
-    The caller is responsible for having the People album visible. Returns the
+    Activates Photos, finds its window via CoreGraphics, and captures **that
+    window by id** (`screencapture -l`) — which works regardless of which display
+    the window is on, including secondary displays at negative coordinates. The
+    caller is responsible for having the People album visible. Returns the
     written path.
 
     Raises:
-        OcrUnavailableError: Off macOS, or if Photos/``screencapture`` fail.
+        OcrUnavailableError: Off macOS, when the ``[ocr]`` extra is missing, or
+            if Photos / ``screencapture`` fail (e.g. missing Screen Recording
+            permission, or no Photos window open).
     """
     import sys
 
@@ -289,34 +320,42 @@ def capture_people_screenshot(out_path: str | Path) -> Path:
         raise OcrUnavailableError("Live capture needs macOS (Apple Photos + screencapture).")
 
     out = Path(out_path)
-    activate = 'tell application "Photos" to activate'
-    bounds_script = (
-        'tell application "System Events" to tell process "Photos"\n'
-        "  set p to position of window 1\n"
-        "  set s to size of window 1\n"
-        '  return (item 1 of p as string) & "," & (item 2 of p as string) & "," & '
-        '(item 1 of s as string) & "," & (item 2 of s as string)\n'
-        "end tell"
-    )
     try:
-        subprocess.run(["osascript", "-e", activate], check=True, capture_output=True, timeout=15)
-        proc = subprocess.run(
-            ["osascript", "-e", bounds_script],
+        import Quartz
+    except ImportError as exc:  # pragma: no cover - environment dependent
+        raise OcrUnavailableError(f"{_OCR_INSTALL_HINT} ({exc})") from exc
+
+    try:
+        subprocess.run(
+            ["osascript", "-e", 'tell application "Photos" to activate'],
             check=True,
             capture_output=True,
             timeout=15,
-            text=True,
         )
-        region = proc.stdout.strip()
-        x, y, w, h = (int(round(float(v))) for v in region.split(","))
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        raise OcrUnavailableError(f"Could not bring Apple Photos to the front: {exc}") from exc
+
+    window_id = _photos_window_id(Quartz)
+    if window_id is None:
+        raise OcrUnavailableError(
+            "No Apple Photos window found. Open Photos and show the People album, "
+            "then retry --live (or pass --screenshot with a saved screenshot)."
+        )
+
+    try:
+        # -l <id>: capture exactly that window; -o: no window shadow.
         subprocess.run(
-            ["screencapture", "-x", "-R", f"{x},{y},{w},{h}", str(out)],
+            ["screencapture", "-x", "-o", "-l", str(window_id), str(out)],
             check=True,
             capture_output=True,
             timeout=30,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ValueError) as exc:
-        raise OcrUnavailableError(f"Could not capture the Photos window: {exc}") from exc
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise OcrUnavailableError(
+            f"Could not capture the Photos window: {exc}. If this persists, grant "
+            "Screen Recording permission to your terminal under System Settings → "
+            "Privacy & Security → Screen Recording, then retry."
+        ) from exc
     if not out.is_file():
         raise OcrUnavailableError("screencapture produced no file.")
     return out
