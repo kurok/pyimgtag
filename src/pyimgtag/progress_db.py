@@ -742,6 +742,25 @@ class ProgressDB:
             return None
         return self._image_row_to_dict(row)
 
+    def get_known_file_path(self, file_path: str) -> str | None:
+        """Return the stored path if known to tagging **or** judging, else None.
+
+        ``processed_images`` (from ``run``) and ``judge_scores`` (from ``judge``)
+        are independent: an image can be judged without ever being tagged. The
+        webapp's thumbnail/original/open-in-photos endpoints use the HTTP value
+        only as a lookup key and then read the DB-stored path, so resolving via
+        either table lets a judged-but-untagged image still preview (previously
+        only ``processed_images`` was consulted, so the Judge grid fell back to
+        filename text for every untagged image).
+        """
+        row = self._conn.execute(
+            "SELECT file_path FROM processed_images WHERE file_path = ? "
+            "UNION SELECT file_path FROM judge_scores WHERE file_path = ? "
+            "LIMIT 1",
+            (file_path, file_path),
+        ).fetchone()
+        return row[0] if row else None
+
     def update_image_tags(self, file_path: str, tags: list[str]) -> None:
         """Overwrite the tags list for an image."""
         self._conn.execute(

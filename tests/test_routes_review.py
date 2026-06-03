@@ -464,3 +464,63 @@ class TestBuildRouterImportError:
         monkeypatch.setattr(builtins, "__import__", fake_import)
         with pytest.raises(ImportError, match="fastapi and uvicorn are required"):
             build_review_router(db, api_base="")
+
+
+class TestJudgedButUntaggedPreviews:
+    """Regression: an image with a judge_scores row but no processed_images row
+    must still preview. Previously the thumbnail/original endpoints resolved the
+    path only via processed_images, so the whole Judge grid fell back to the
+    filename-text placeholder."""
+
+    def _seed_judge_only(self, tmp_path):
+        from PIL import Image
+
+        from pyimgtag.models import JudgeResult, JudgeScores
+
+        db_path = tmp_path / "progress.db"
+        db = ProgressDB(db_path=db_path)
+        img = tmp_path / "judged.png"
+        Image.new("RGB", (32, 32), "blue").save(img)  # a real, decodable image
+        db.save_judge_result(
+            JudgeResult(
+                file_path=str(img),
+                file_name="judged.png",
+                weighted_score=10,
+                scores=JudgeScores(verdict="great"),
+            )
+        )
+        # Deliberately NO db.mark_done() — this image was judged, never tagged.
+        assert db.get_image(str(img)) is None
+        return db_path, img
+
+    def test_thumbnail_serves_judged_but_untagged_image(self, tmp_path):
+        db_path, img = self._seed_judge_only(tmp_path)
+        db = ProgressDB(db_path=db_path)
+        app = FastAPI()
+        app.include_router(build_review_router(db, api_base=""))
+        client = TestClient(app)
+
+        r = client.get("/thumbnail", params={"path": str(img), "size": 200})
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "image/jpeg"
+
+    def test_original_serves_judged_but_untagged_image(self, tmp_path):
+        db_path, img = self._seed_judge_only(tmp_path)
+        db = ProgressDB(db_path=db_path)
+        app = FastAPI()
+        app.include_router(build_review_router(db, api_base=""))
+        client = TestClient(app)
+
+        r = client.get("/original", params={"path": str(img)})
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("image/")
+
+    def test_unknown_path_still_404s(self, tmp_path):
+        db_path, _ = self._seed_judge_only(tmp_path)
+        db = ProgressDB(db_path=db_path)
+        app = FastAPI()
+        app.include_router(build_review_router(db, api_base=""))
+        client = TestClient(app)
+
+        r = client.get("/thumbnail", params={"path": "/not/in/db.png"})
+        assert r.status_code == 404
