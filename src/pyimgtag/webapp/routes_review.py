@@ -596,12 +596,14 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         # Use the request value purely as a DB lookup key; the actual
         # filesystem read uses the path the DB stored when pyimgtag
         # processed the image. This keeps user input out of Image.open().
-        row = db.get_image(path)
-        if row is None:
+        # Resolve via tagging OR judging tables so judged-but-untagged images
+        # (the whole Judge grid, typically) still get a preview.
+        safe_path = db.get_known_file_path(path)
+        if safe_path is None:
             return Response(status_code=404)
         # PIL decode + JPEG encode are CPU/IO-bound; run off the event loop
         # so concurrent requests (stats, pagination) are never blocked.
-        data = await asyncio.to_thread(_make_thumbnail, row["file_path"], size)
+        data = await asyncio.to_thread(_make_thumbnail, safe_path, size)
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/jpeg")
@@ -624,11 +626,11 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         """
         import asyncio
 
-        row = db.get_image(path)
-        if row is None:
+        # ``safe_path`` is the DB-stored path (tagging or judging table); not
+        # derived from the HTTP request.
+        safe_path = db.get_known_file_path(path)
+        if safe_path is None:
             return Response(status_code=404)
-        # ``safe_path`` is the DB-stored path; not derived from the HTTP request.
-        safe_path: str = row["file_path"]
         # File I/O and PIL decode are blocking — run off the event loop so
         # concurrent requests (stats, pagination) are never stalled.
         result = await asyncio.to_thread(_serve_original, safe_path)
@@ -659,15 +661,15 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         other AppleScript failure). Downstream JS branches on the
         sentinel; the verbose stderr never reaches the browser.
         """
-        row = db.get_image(path)
-        if row is None:
+        safe_path = db.get_known_file_path(path)
+        if safe_path is None:
             return {"ok": False, "error": "image_not_found"}
         from pyimgtag.applescript_writer import reveal_in_photos
 
-        err = reveal_in_photos(row["file_path"])
+        err = reveal_in_photos(safe_path)
         if err is None:
             return {"ok": True}
-        logger.warning("open-in-photos failed for %s: %s", row["file_path"], err)
+        logger.warning("open-in-photos failed for %s: %s", safe_path, err)
         # Map verbose AppleScript errors onto a small set of stable
         # client-facing categories so a script-level trace never reaches
         # the browser.
