@@ -22,17 +22,23 @@ from typing import Any
 
 DEFAULT_PORT = 11435
 
+# Responses are served in call order. pyimgtag scans a directory alphabetically
+# (see scanner.scan_directory, which sorts by name) and makes one model call per
+# image, so this list is ordered to line up with the demo fixtures in
+# examples/fixtures/ — keeping captured output and recorded demos coherent:
+#   0 blurry_screenshot.jpg  1 city_walk.jpg     2 home_dinner.jpg
+#   3 mountain_hike.jpg       4 office_meeting.jpg 5 sunset_beach.jpg
 _RESPONSES: list[dict[str, Any]] = [
     {
-        "tags": ["sunset", "beach", "ocean", "waves", "golden-hour"],
-        "summary": "golden hour sunset over the Pacific Ocean",
-        "scene_category": "outdoor_leisure",
-        "emotional_tone": "positive",
-        "cleanup_class": "keep",
-        "has_text": False,
-        "text_summary": None,
-        "event_hint": "outing",
-        "significance": "high",
+        "tags": ["screenshot", "text", "blurry"],
+        "summary": "blurry screenshot of a webpage",
+        "scene_category": "other",
+        "emotional_tone": "neutral",
+        "cleanup_class": "delete",
+        "has_text": True,
+        "text_summary": "webpage content, partially readable",
+        "event_hint": "daily",
+        "significance": "low",
     },
     {
         "tags": ["street", "architecture", "city", "people"],
@@ -57,17 +63,6 @@ _RESPONSES: list[dict[str, Any]] = [
         "significance": "high",
     },
     {
-        "tags": ["screenshot", "text", "blurry"],
-        "summary": "blurry screenshot of a webpage",
-        "scene_category": "other",
-        "emotional_tone": "neutral",
-        "cleanup_class": "delete",
-        "has_text": True,
-        "text_summary": "webpage content, partially readable",
-        "event_hint": "daily",
-        "significance": "low",
-    },
-    {
         "tags": ["mountain", "hiking", "snow", "alpine", "trail"],
         "summary": "alpine trail with snow-capped peaks in the background",
         "scene_category": "outdoor_leisure",
@@ -88,6 +83,17 @@ _RESPONSES: list[dict[str, Any]] = [
         "text_summary": "Q2 roadmap items on whiteboard",
         "event_hint": "work",
         "significance": "medium",
+    },
+    {
+        "tags": ["sunset", "beach", "ocean", "waves", "golden-hour"],
+        "summary": "golden hour sunset over the Pacific Ocean",
+        "scene_category": "outdoor_leisure",
+        "emotional_tone": "positive",
+        "cleanup_class": "keep",
+        "has_text": False,
+        "text_summary": None,
+        "event_hint": "outing",
+        "significance": "high",
     },
 ]
 

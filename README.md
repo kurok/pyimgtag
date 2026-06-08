@@ -7,7 +7,33 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![codecov](https://codecov.io/gh/kurok/pyimgtag/graph/badge.svg)](https://codecov.io/gh/kurok/pyimgtag)
 
-Tag images using a local Gemma model for searchable tags, with optional Apple Photos integration on macOS.
+**Tag your whole photo library with a local AI model — your images never leave your machine.** `pyimgtag` runs a vision model (Gemma via [Ollama](https://ollama.ai)) over a folder or your Apple Photos library and writes 1–5 searchable tags, a scene category, location (from EXIF GPS, never guessed), and cleanup hints for every photo — on-device by default.
+
+Then `query`, filter, score, and prune your library straight from the CLI. Optional cloud backends (Claude, OpenAI, Gemini) when you want them. Runs on **macOS, Linux, and Windows**.
+
+## Demo
+
+![Tagging a folder of photos with pyimgtag and a local model, then querying the results as a table, filtering by tag, and listing cleanup candidates](https://raw.githubusercontent.com/kurok/pyimgtag/main/docs/assets/demo.gif)
+
+<sub>Recorded against the bundled mock backend with [asciinema](https://asciinema.org) + [agg](https://github.com/asciinema/agg) — regenerate with `docs/record-demo.sh`.</sub>
+
+## Install
+
+```bash
+pip install pyimgtag
+```
+
+## Minimal example
+
+```bash
+pip install pyimgtag
+ollama pull gemma4:e4b              # one-time: pull the local vision model
+pyimgtag run --input-dir ~/Photos   # tag a folder, fully on-device
+```
+
+Add `--dry-run` to preview without writing, `--limit N` to sample, or `--output-json results.json` to export — see [Quick Start](#quick-start) below.
+
+> **See also:** [Awesome-Ollama](https://github.com/EndoTheDev/Awesome-Ollama) — a curated list of apps and tools built on local Ollama models, where pyimgtag fits in.
 
 ## Overview
 
