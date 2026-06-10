@@ -17,7 +17,6 @@
 # Usage:
 #   scripts/test-smoke-local.sh
 #   PORT=8765 scripts/test-smoke-local.sh         # custom port
-#   PYIMGTAG_DB=~/my.db scripts/test-smoke-local.sh   # walk a real DB
 #   PYIMGTAG_E2E_HEADLESS=0 scripts/test-smoke-local.sh   # see the browser
 
 set -euo pipefail

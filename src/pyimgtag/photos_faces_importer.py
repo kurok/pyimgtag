@@ -67,7 +67,7 @@ def _default_progress(message: str) -> None:
     spamming scrollback. The startup banner and the final summary use
     plain ``\\n`` newlines (handed in by the caller already).
     """
-    print(message, file=sys.stderr, flush=True)
+    print(message, file=sys.stderr, flush=True, end="" if message.startswith("\r") else "\n")
 
 
 def import_photos_persons(
@@ -359,9 +359,8 @@ def _bulk_applescript() -> str:
     return _bulk_applescript_every_person()
 
 
-# osascript exit-code that means "the script could not be parsed"; used to
-# detect the ``-2741`` "Expected class name but found identifier" failure
-# without string-matching the entire stderr.
+# Stderr substrings that identify the ``-2741`` "Expected class name but
+# found identifier" compile failure; matched against osascript's stderr.
 _PARSE_ERROR_MARKERS = ("(-2741)", "syntax error", "Expected class name")
 
 
@@ -488,9 +487,13 @@ def _parse_bulk_output(
             continue
         uuid, raw_names = line.split("\t", 1)
         uuid = uuid.strip()
+        # Photos 5+ media-item ids are ``<UUID>/L0/001``; keep only the bare
+        # UUID so ``get_faces_by_uuid`` can match image path stems.
+        uuid = uuid.split("/", 1)[0]
         if not uuid:
             continue
-        if uuid not in seen_uuids:
+        is_new = uuid not in seen_uuids
+        if is_new:
             processed += 1
             seen_uuids.add(uuid)
         names = [n.strip() for n in raw_names.split(_PERSON_NAME_SEPARATOR) if n.strip()]
@@ -498,7 +501,7 @@ def _parse_bulk_output(
             name_to_uuids.setdefault(name, []).append(uuid)
             persons_found.add(name)
 
-        if processed % _PROGRESS_EVERY == 0:
+        if is_new and processed % _PROGRESS_EVERY == 0:
             elapsed = int(time.monotonic() - started)
             emit(
                 f"\r[faces] processed {processed} photos · "
@@ -597,17 +600,17 @@ def _assign_faces_to_person(
     reclaimable = db.get_auto_person_ids()
 
     # Collect this person's candidate faces (unassigned or auto-clustered),
-    # grouped per photo.
-    per_photo: list[tuple[str, list[int]]] = []
+    # grouped per photo, alongside each photo's *total* detected-face count —
+    # "single-face photo" must mean one face in the photo, not one candidate.
+    per_photo: list[tuple[str, list[int], int]] = []
     candidate_ids: list[int] = []
     for uuid in uuids:
+        all_faces = db.get_faces_by_uuid(uuid)
         candidates = [
-            f["id"]
-            for f in db.get_faces_by_uuid(uuid)
-            if f["person_id"] is None or f["person_id"] in reclaimable
+            f["id"] for f in all_faces if f["person_id"] is None or f["person_id"] in reclaimable
         ]
         if candidates:
-            per_photo.append((uuid, candidates))
+            per_photo.append((uuid, candidates, len(all_faces)))
             candidate_ids.extend(candidates)
     if not per_photo:
         return 0
@@ -617,10 +620,12 @@ def _assign_faces_to_person(
     # the unambiguous single-face shots assigned below.
     seeds = db.get_person_embeddings(person_id)
 
-    # Phase 1 — unambiguous single-face photos.
+    # Phase 1 — unambiguous single-face photos. Group photos with a single
+    # *remaining* candidate are NOT unambiguous (the leftover face may belong
+    # to a stranger), so they must pass the Phase 2 threshold+margin check.
     multi: list[tuple[str, list[int]]] = []
-    for uuid, ids in per_photo:
-        if len(ids) == 1:
+    for uuid, ids, total in per_photo:
+        if total == 1:
             db.set_person_id(ids[0], person_id)
             if ids[0] in embeddings:
                 seeds.append(embeddings[ids[0]])

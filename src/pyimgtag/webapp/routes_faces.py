@@ -9,6 +9,7 @@ keep that coercion when refactoring.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -284,6 +285,14 @@ async function load() {
   _total = data.total;
   const persons = data.items;
 
+  // The last person on the last page disappeared (deleted / merged /
+  // filtered out) — step back a page, mirroring the person-detail pager.
+  if (persons.length === 0 && _offset > 0) {
+    _offset = Math.max(0, _offset - PAGE_SIZE);
+    load();
+    return;
+  }
+
   document.getElementById('status').textContent = _total + ' person(s)';
 
   // Selection is per page; rebuild it each load.
@@ -373,6 +382,11 @@ function clearSelection() {
   _selected.clear();
   document.querySelectorAll('#unassigned-grid .face-thumb').forEach(img =>
     img.classList.remove('selected'));
+  // Trash thumbnails live in their own grid and carry a dimmed-opacity cue.
+  document.querySelectorAll('#trash-grid .face-thumb').forEach(img => {
+    img.classList.remove('selected');
+    img.style.opacity = '0.6';
+  });
   updateSelectionUI();
 }
 
@@ -532,7 +546,7 @@ async function loadTrash() {
     img.src = 'data:image/jpeg;base64,' + f.thumb;
     img.dataset.faceId = f.id;
     img.title = 'Click to select for restore';
-    img.style.opacity = '0.6';
+    img.style.opacity = _selected.has(f.id) ? '1' : '0.6';
     img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
     img.addEventListener('mouseleave', hidePreview);
     img.addEventListener('click', () => {
@@ -632,7 +646,6 @@ function renderPerson(p, faces) {
     img.addEventListener('click', async () => {
       hidePreview();
       await fetch('__API_BASE__/api/faces/' + f.id + '/unassign', {method: 'POST'});
-      _offset = Math.min(_offset, Math.max(0, _total - PAGE_SIZE - 1));
       load();
     });
     facesGrid.appendChild(img);
@@ -1515,9 +1528,13 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
             raise HTTPException(status_code=404, detail="Face not found")
 
         image_path = face["image_path"]
+        converted = None
         try:
             if is_heic(image_path):
-                image_path = str(convert_heic_to_jpeg(image_path))
+                # convert_heic_to_jpeg with no output_dir hands us a JPEG inside
+                # a fresh temp dir that *we* own — clean it up after decoding.
+                converted = convert_heic_to_jpeg(image_path)
+                image_path = str(converted)
             img = Image.open(image_path).convert("RGB")
         except Exception as exc:  # noqa: BLE001 — PIL/HEIC decode can fail many ways
             # Strip CR/LF from the request-influenced values so they cannot
@@ -1529,6 +1546,11 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                 str(exc).replace("\n", " ").replace("\r", " "),
             )
             raise HTTPException(status_code=404, detail="Image not readable") from exc
+        finally:
+            if converted is not None:
+                converted.unlink(missing_ok=True)
+                with contextlib.suppress(OSError):
+                    converted.parent.rmdir()  # removes the owned mkdtemp dir only when empty
 
         # Scale bbox from detection space (max_dim=1280) to full-image coords.
         # face_detection resizes images to 1280px on the long side before detecting,

@@ -54,6 +54,14 @@ class TestParseVersion:
         assert _is_newer("0.18.2", "0.18.2") is False
         assert _is_newer("0.18.1", "0.18.2") is False
 
+    def test_is_newer_pads_mixed_length_tuples(self):
+        """Same release with a different segment count is not an update (regression)."""
+        assert _is_newer("0.18.0", "0.18") is False
+        assert _is_newer("0.18", "0.18.0") is False
+        assert _is_newer("0.18.1", "0.18") is True
+        assert _is_newer("0.18", "0.18.1") is False
+        assert _is_newer("1.2.3.4", "1.2.3") is True
+
 
 class TestFetchLatestPypi:
     def test_returns_version_on_success(self):

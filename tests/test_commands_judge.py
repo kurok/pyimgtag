@@ -442,6 +442,27 @@ class TestCmdJudgeBasic:
 
         assert rc == 0  # no crash, just filtered output
 
+    def test_min_score_filter_still_persists_score(self, tmp_path: Path) -> None:
+        """A below-threshold score must still be saved to the DB, so
+        --skip-judged reruns don't re-send the filtered image to the model."""
+        from pyimgtag.commands.judge import cmd_judge
+
+        (tmp_path / "photo.jpg").write_bytes(b"x")
+        args = _make_args(tmp_path, min_score=9)
+        db = MagicMock()
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.OllamaClient") as mock_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.judge_image.return_value = _make_scores()  # weighted ~8, below 9
+            mock_cls.return_value = mock_client
+            rc = cmd_judge(args, db)
+
+        assert rc == 0
+        db.save_judge_result.assert_called_once()
+
     def test_output_json_written(self, tmp_path: Path) -> None:
         import json
 

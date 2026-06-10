@@ -90,7 +90,9 @@ pyimgtag faces capture-names --screenshot ~/Desktop/people.png --languages ru-RU
 
 `capture-names` detects + embeds the face under each People tile, reads the
 caption beneath it with Apple's Vision OCR, and applies the recognized name to
-the matching cluster. Install with `pip install 'pyimgtag[ocr]'` (macOS only).
+the matching cluster. Install with `pip install 'pyimgtag[ocr,face]'` (macOS only;
+`[face]` also requires `face_recognition_models` from git — see the note at the
+bottom of this page).
 
 **Process exported HEIC photos:**
 
@@ -330,10 +332,10 @@ pyimgtag run --input-dir "C:\Users\YourName\Pictures" --output-json results.json
 | `[photos-db]` | osxphotos | `faces import-photos` reads names from the Photos library DB (macOS) |
 | `[face]` | face-recognition, scikit-learn, setuptools | Face detection / clustering (also needs `face_recognition_models`, see below) |
 | `[ocr]` | pyobjc-framework-Vision, pyobjc-framework-Quartz | `faces capture-names` screen OCR (macOS only) |
-| `[review]` | fastapi, uvicorn, pydantic, httpx2 | Local web review / dashboard UIs |
+| `[review]` | fastapi, uvicorn, pydantic | Local web review / dashboard UIs |
 | `[raw]` | rawpy | RAW file support (all platforms) |
 | `[all]` | heic + photos + photos-db + face + ocr + review + raw | All optional runtime features |
-| `[dev]` | pytest, pytest-xdist, pytest-cov | Development and testing |
+| `[dev]` | pytest, pytest-xdist, pytest-cov, httpx2 | Development and testing |
 | `[lint]` | mypy, ruff | Linting and type checking |
 | `[security]` | bandit, pip-audit | Security scanning |
 

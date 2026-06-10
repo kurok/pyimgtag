@@ -63,7 +63,7 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
 - Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`
-- Photo quality scoring with professional 13-criterion rubric (new: `judge` subcommand)
+- Photo quality scoring: a single 1–10 score plus a model-written reason (`judge` subcommand)
 - Dry-run mode, date/limit filters, JSON/CSV export
 - SQLite progress DB with schema versioning for incremental re-runs
 
@@ -110,7 +110,7 @@ pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
 pyimgtag status
 
 # Re-tag all photos (e.g. after prompt improvements)
-pyimgtag reprocess
+pyimgtag reprocess --yes
 
 # List photos flagged for deletion
 pyimgtag cleanup
@@ -267,7 +267,7 @@ pyimgtag run --input-dir ~/Pictures/exported --write-exif
 pyimgtag judge --input-dir ~/Pictures/exported --min-score 7 --output-json ranking.json
 ```
 
-**Note:** `--write-back` (Apple Photos) is silently skipped on Linux with a warning. Use `--write-exif` instead.
+**Note:** `--write-back` (Apple Photos) is skipped on Linux with a warning. Use `--write-exif` instead.
 
 ### Windows Setup
 
@@ -444,7 +444,7 @@ identically for `pyimgtag judge`.
 pyimgtag status
 
 # Output:
-# Progress: 142 / 200 (71%)
+# Progress: 140 / 200 (70%)
 #   ok:      140
 #   error:   2
 #   pending: 58
@@ -453,12 +453,15 @@ pyimgtag status
 #### `pyimgtag reprocess` — reset for re-tagging
 
 ```bash
-# Reset everything (e.g. after prompt improvements)
-pyimgtag reprocess
+# Reset everything (e.g. after prompt improvements) — requires --yes
+pyimgtag reprocess --yes
 
 # Reset only failed entries
 pyimgtag reprocess --status error
 ```
+
+A full reset (no `--status`) wipes all tagging progress, so it refuses to run
+and exits 1 unless you confirm with `--yes`.
 
 #### `pyimgtag cleanup` — find photos to delete
 
@@ -629,7 +632,7 @@ pyimgtag preflight --input-dir ~/Pictures/exported
 
 #### `pyimgtag judge` — score photo quality
 
-Score each image against a 13-criterion professional rubric. Outputs a ranked list with weighted scores as **integers on a 1–10 scale** (no decimal component). Uses the same pluggable vision backends as `run` — local Ollama by default, or `--backend anthropic` / `openai` / `gemini`.
+Score each image with a single overall quality score — an **integer on a 1–10 scale** — plus a short natural-language `reason` written by the model. The prompt asks the model to weigh impact/creativity/storytelling, technical quality, and composition, but only the one score and the reason are returned. Outputs a ranked list. Uses the same pluggable vision backends as `run` — local Ollama by default, or `--backend anthropic` / `openai` / `gemini`.
 
 ```bash
 # Score all images in a folder
@@ -638,7 +641,7 @@ pyimgtag judge --input-dir ~/Pictures/exported
 # Only show photos scoring 7 or above
 pyimgtag judge --input-dir ~/Pictures/exported --min-score 7
 
-# Verbose breakdown (per-criterion scores)
+# Verbose output (score plus the model's reason)
 pyimgtag judge --input-dir ~/Pictures/exported --limit 20 --verbose
 
 # Sort by filename instead of score
@@ -655,19 +658,15 @@ pyimgtag judge --input-dir ~/Pictures/exported \
 
 **Sample output (brief mode):**
 ```
-[1/5] golden_hour.jpg → 9/10 outstanding | + impact, composition_center | - edit_integrity, noise_cleanliness
-  Golden light over the cityscape; strong composition but slight haloing on edges.
-[2/5] portrait.jpg → 7/10 solid | + focus_sharpness, lighting | - creativity_style, color_mood
-  Well-lit portrait; technically solid but conventional treatment.
+[1/5] golden_hour.jpg → 9/10 outstanding
+[2/5] portrait.jpg → 7/10 solid
 ```
 
 **Sample output (--verbose):**
 ```
 [1/5] golden_hour.jpg
-  Score:   9/10  (core: 9, visible: 8)
-  Best:    impact=10, composition_center=10, lighting=8
-  Weakest: edit_integrity=6, noise_cleanliness=6, subject_separation=6
-  Verdict: Golden light over the cityscape; strong composition but slight haloing on edges.
+  Score:   9/10
+  Reason:  Golden light over the cityscape; strong composition but slight haloing on edges.
 ```
 
 **Judge flags:**
@@ -681,7 +680,7 @@ pyimgtag judge --input-dir ~/Pictures/exported \
 | `--min-score SCORE` | — | Only show images scoring ≥ SCORE |
 | `--sort-by score\|name` | `score` | Final sort order |
 | `--output-json FILE` | — | Write ranked results to JSON |
-| `--verbose` | false | Per-criterion breakdown |
+| `--verbose` | false | Show the model's reason for each score |
 | `--no-recursive` | false | Do not scan subdirectories |
 | `--backend ollama\|anthropic\|openai\|gemini` | `ollama` | Vision-model backend (same as `pyimgtag run`) |
 | `--model NAME` | backend-specific | Model name; defaults `gemma4:e4b` / `claude-sonnet-4-6` / `gpt-4o-mini` / `gemini-1.5-flash` |
@@ -759,23 +758,11 @@ Results from `pyimgtag judge --output-json` use a different structure:
 |---|---|
 | `file_path` | Full path to image |
 | `file_name` | Filename |
-| `weighted_score` | Overall weighted score (integer 1–10) |
-| `core_score` | Artistic criteria average (integer 1–10) |
-| `visible_score` | Technical criteria average (integer 1–10) |
-| `verdict` | One-sentence summary of key strength and weakness |
-| `scores.impact` | Emotional pull and memorability (integer 1–10) |
-| `scores.story_subject` | Clear subject and meaning (integer 1–10) |
-| `scores.composition_center` | Visual flow, balance, center of interest (integer 1–10) |
-| `scores.lighting` | Quality, control, mood support (integer 1–10) |
-| `scores.creativity_style` | Originality of treatment (integer 1–10) |
-| `scores.color_mood` | Color balance and mood fit (integer 1–10) |
-| `scores.presentation_crop` | Crop, framing, aspect ratio (integer 1–10) |
-| `scores.technical_excellence` | Exposure, retouching, overall finish (integer 1–10) |
-| `scores.focus_sharpness` | Critical detail is sharp (integer 1–10) |
-| `scores.exposure_tonal` | Highlights and shadows under control (integer 1–10) |
-| `scores.noise_cleanliness` | Clean detail, no distracting grain (integer 1–10) |
-| `scores.subject_separation` | Subject stands out from background (integer 1–10) |
-| `scores.edit_integrity` | No halos, overprocessing, or clone artefacts (integer 1–10) |
+| `weighted_score` | Overall score (integer 1–10) |
+| `reason` | The model's natural-language justification for the score (2–4 sentences) |
+| `verdict` | Legacy field — **empty string** for new runs; populated only for rows produced by the old 13-criterion prompt |
+| `core_score` / `visible_score` | Legacy compatibility values — for new runs both equal `weighted_score` |
+| `scores.*` | Legacy 13-criterion fields (`impact`, `story_subject`, `composition_center`, `lighting`, `creativity_style`, `color_mood`, `presentation_crop`, `technical_excellence`, `focus_sharpness`, `exposure_tonal`, `noise_cleanliness`, `subject_separation`, `edit_integrity`) — for new runs each one mirrors `weighted_score`; they carry distinct per-criterion values only for legacy DB rows |
 
 ## Architecture
 
@@ -788,15 +775,16 @@ src/pyimgtag/
   ollama_client.py     Ollama vision API client (rich structured response)
   cloud_clients.py     Anthropic / OpenAI / Gemini vision-API adapters
   geocoder.py          Nominatim reverse geocoder with disk cache
-  filters.py           Date/GPS filter logic
+  filters.py           Date filter logic
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       SQLite progress DB with versioned migrations
   applescript_writer.py  Apple Photos keyword/description write-back
   _face_dep_check.py   Friendly preflight for face_recognition_models
+  face_ocr.py          Screen-OCR naming: Vision OCR of a People-view screenshot → cluster names
   dedup.py             Perceptual hash duplicate detection
   heic_converter.py    HEIC to JPEG conversion (macOS sips)
   cache.py             Simple JSON disk cache
-  judge_scorer.py      Weighted rubric score computation (13-criterion)
+  judge_scorer.py      Score aggregation (legacy 13-criterion weighting; a no-op for new single-score runs)
   preflight.py         Shared preflight helpers
   commands/
     run.py             `pyimgtag run` handler
@@ -805,7 +793,6 @@ src/pyimgtag/
     query.py           `pyimgtag query` handler
     tags.py            `pyimgtag tags` handler
     faces.py           `pyimgtag faces` (scan [--jobs] / cluster / review / apply / import-photos / match-references / capture-names / ui)
-    face_ocr.py        Screen-OCR naming: Vision OCR of a People-view screenshot → cluster names
     preflight_cmd.py   `pyimgtag preflight` handler
     review_cmd.py      `pyimgtag review` handler
   webapp/
@@ -846,9 +833,8 @@ the same checks locally before pushing:
 # runs unit tests, runs the Playwright smoke, then stops the app cleanly.
 scripts/test-smoke-local.sh
 
-# Custom port / real DB / visible browser:
+# Custom port / visible browser:
 PORT=8765 scripts/test-smoke-local.sh
-PYIMGTAG_DB=~/.cache/pyimgtag/progress.db scripts/test-smoke-local.sh
 PYIMGTAG_E2E_HEADLESS=0 scripts/test-smoke-local.sh
 ```
 
@@ -914,7 +900,7 @@ pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
              --db ~/my-progress.db --skip-existing
 ```
 
-Use `pyimgtag reprocess --db ~/my-progress.db` to force a full re-run for all files,
+Use `pyimgtag reprocess --db ~/my-progress.db --yes` to force a full re-run for all files,
 or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only failed files.
 
 ## Local webapp

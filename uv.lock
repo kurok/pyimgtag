@@ -1823,7 +1823,7 @@ wheels = [
 
 [[package]]
 name = "pyimgtag"
-version = "0.26.0"
+version = "0.27.1"
 source = { editable = "." }
 dependencies = [
     { name = "exifread" },

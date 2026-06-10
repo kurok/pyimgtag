@@ -229,6 +229,30 @@ class TestBuildParser:
             )
 
 
+class TestPostParseValidation:
+    """Post-parse flag-combination checks performed by main()."""
+
+    def test_run_date_with_date_from_rejected(self, monkeypatch):
+        monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+        with pytest.raises(SystemExit) as exc:
+            main(
+                ["run", "--input-dir", "/tmp", "--date", "2026-04-01", "--date-from", "2026-01-01"]
+            )
+        assert exc.value.code == 2
+
+    def test_run_date_with_date_to_rejected(self, monkeypatch):
+        monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+        with pytest.raises(SystemExit) as exc:
+            main(["run", "--input-dir", "/tmp", "--date", "2026-04-01", "--date-to", "2026-12-31"])
+        assert exc.value.code == 2
+
+    def test_cleanup_drift_dry_run_with_prune_photos_missing_rejected(self, monkeypatch):
+        monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+        with pytest.raises(SystemExit) as exc:
+            main(["cleanup-drift", "--dry-run", "--prune-photos-missing"])
+        assert exc.value.code == 2
+
+
 class TestCheckForUpdate:
     def test_skips_when_env_var_set(self, monkeypatch, capsys):
         from pyimgtag.main import _check_for_update

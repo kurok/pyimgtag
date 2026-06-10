@@ -22,11 +22,22 @@ import pytest
 
 
 def _drain(page) -> tuple[list[str], list[str], list[str]]:
-    """Return (console_errors, page_errors, bad_responses) accumulated so far."""
+    """Return (console_errors, page_errors, bad_responses) since the last drain.
+
+    The conftest listeners append to the page-scoped lists for the whole
+    page lifetime and never clear them, so drain tracks the consumed
+    prefix of each list and reports only entries new since the previous
+    call. The underlying lists are left intact for other consumers.
+    """
+    console_errors = page.console_errors  # type: ignore[attr-defined]
+    page_errors = page.page_errors  # type: ignore[attr-defined]
+    bad_responses = page.bad_responses  # type: ignore[attr-defined]
+    consumed_console, consumed_page, consumed_bad = getattr(page, "_drain_consumed", (0, 0, 0))
+    page._drain_consumed = (len(console_errors), len(page_errors), len(bad_responses))
     return (
-        list(page.console_errors),  # type: ignore[attr-defined]
-        list(page.page_errors),  # type: ignore[attr-defined]
-        list(page.bad_responses),  # type: ignore[attr-defined]
+        list(console_errors[consumed_console:]),
+        list(page_errors[consumed_page:]),
+        list(bad_responses[consumed_bad:]),
     )
 
 
@@ -96,6 +107,9 @@ def test_each_nav_link_clicks_and_renders(page, base_url: str) -> None:
     """
     page.goto(base_url + "/")
     page.wait_for_load_state("networkidle")
+    # Fail fast here so home-page errors are attributed to the home
+    # load rather than to the first nav link checked in the loop below.
+    _assert_no_errors(page, "/ (initial load)")
 
     nav_links = page.locator("nav.nav a.nav-link")
     count = nav_links.count()

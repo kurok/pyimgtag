@@ -50,11 +50,15 @@ class TestWebappMainEntrypoint:
     def test_running_webapp_module_calls_main(self):
         if "pyimgtag.webapp.__main__" in sys.modules:
             del sys.modules["pyimgtag.webapp.__main__"]
+        mock_uvicorn = MagicMock()
         with patch("pyimgtag.webapp.unified_app.create_unified_app", return_value=MagicMock()):
-            with patch.dict(sys.modules, {"uvicorn": MagicMock()}):
+            with patch.dict(sys.modules, {"uvicorn": mock_uvicorn}):
                 # run_module executes the module body, hitting the
                 # ``if __name__ == "__main__": main()`` guard.
                 runpy.run_module("pyimgtag.webapp", run_name="__main__", alter_sys=False)
+
+        # main() ran iff the guard fired — it ends in uvicorn.run(...).
+        mock_uvicorn.run.assert_called_once()
 
 
 class TestWebappMain:

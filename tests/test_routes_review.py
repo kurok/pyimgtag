@@ -175,6 +175,32 @@ class TestThumbViaSips:
             patch("subprocess.run", return_value=proc),
         ):
             assert routes_review._thumb_via_sips(str(src), 400) is None
+        # The temp file must not be leaked on the failure path (regression).
+        assert not out.exists()
+
+    def test_exception_path_removes_temp_file(self, tmp_path):
+        """A raising sips run must not leak the NamedTemporaryFile (regression)."""
+        from unittest.mock import MagicMock, patch
+
+        from pyimgtag.webapp import routes_review
+
+        src = tmp_path / "x.heic"
+        src.write_bytes(b"\x00")
+        out = tmp_path / "out.jpg"
+        out.write_bytes(b"JPEGDATA")
+
+        tmp_handle = MagicMock()
+        tmp_handle.name = str(out)
+        ctx = MagicMock()
+        ctx.__enter__.return_value = tmp_handle
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/sips"),
+            patch("tempfile.NamedTemporaryFile", return_value=ctx),
+            patch("subprocess.run", side_effect=OSError("boom")),
+        ):
+            assert routes_review._thumb_via_sips(str(src), 400) is None
+        assert not out.exists()
 
     def test_returns_none_on_subprocess_exception(self, tmp_path):
         from unittest.mock import patch

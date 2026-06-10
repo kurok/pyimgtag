@@ -287,6 +287,10 @@ def _build_read_applescript(file_name: str) -> str:
         'tell application "Photos"\n'
         + lookup
         + "    set kws to keywords of theItem\n"
+        # Photos returns `missing value` (not an empty list) for a photo with
+        # no keywords; coercing it to text would yield a literal "missing
+        # value" keyword, so return empty output instead.
+        + '    if kws is missing value then return ""\n'
         + "    set AppleScript's text item delimiters to (ASCII character 10)\n"
         + "    return kws as text\n"
         + "end tell"

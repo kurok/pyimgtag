@@ -686,7 +686,7 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     )
     judge_p.add_argument("--output-json", metavar="FILE", help="Write results to JSON file")
     judge_p.add_argument(
-        "--verbose", action="store_true", help="Show detailed per-criterion breakdown"
+        "--verbose", action="store_true", help="Show the score and the model's reason per image"
     )
     judge_p.add_argument("--no-recursive", action="store_true", help="Do not scan subdirectories")
     judge_p.add_argument(
@@ -749,7 +749,7 @@ def _add_judge_subcommand(subparsers: Any) -> None:
         type=int,
         default=120,
         metavar="SEC",
-        help="Ollama request timeout",
+        help="Model request timeout in seconds",
     )
     judge_p.add_argument(
         "--skip-judged",
@@ -854,6 +854,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.subcommand is None:
         parser.print_help()
         return 1
+
+    if args.subcommand == "run" and args.date and (args.date_from or args.date_to):
+        parser.error("--date cannot be combined with --date-from/--date-to")
+    if args.subcommand == "cleanup-drift" and args.dry_run and args.prune_photos_missing:
+        parser.error("--dry-run cannot be combined with --prune-photos-missing")
 
     _check_for_update()
 

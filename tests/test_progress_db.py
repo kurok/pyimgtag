@@ -13,6 +13,10 @@ import pytest
 from pyimgtag.models import FaceDetection, ImageResult
 from pyimgtag.progress_db import ProgressDB
 
+# Latest schema version, derived from the migration table so version bumps
+# cannot silently drift out of sync with these tests.
+LATEST_SCHEMA_VERSION = max(ver for ver, _ in ProgressDB._MIGRATIONS)
+
 
 class TestProgressDB:
     def test_creation_creates_table(self, tmp_path):
@@ -217,10 +221,10 @@ class TestSchemaVersioning:
     def _user_version(self, conn: sqlite3.Connection) -> int:
         return conn.execute("PRAGMA user_version").fetchone()[0]
 
-    def test_fresh_db_is_at_version_3(self, tmp_path):
+    def test_fresh_db_is_at_latest_version(self, tmp_path):
         """A brand-new database must be fully migrated to the latest version."""
         with ProgressDB(db_path=tmp_path / "v3.db") as db:
-            assert self._user_version(db._conn) == 11
+            assert self._user_version(db._conn) == LATEST_SCHEMA_VERSION
 
     def test_fresh_db_has_all_new_columns(self, tmp_path):
         """All version-2 columns must be present in a fresh database."""
@@ -301,7 +305,7 @@ class TestSchemaVersioning:
             assert self._table_exists(db._conn, "persons")
 
     def test_user_version_is_set_correctly_after_migration(self, tmp_path):
-        """PRAGMA user_version must equal 9 after full migration from version 1."""
+        """PRAGMA user_version must equal the latest version after full migration from v1."""
         db_path = tmp_path / "check_version.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute(
@@ -327,7 +331,7 @@ class TestSchemaVersioning:
 
         raw = sqlite3.connect(str(db_path))
         try:
-            assert raw.execute("PRAGMA user_version").fetchone()[0] == 11
+            assert raw.execute("PRAGMA user_version").fetchone()[0] == LATEST_SCHEMA_VERSION
         finally:
             raw.close()
 
@@ -506,6 +510,56 @@ class TestGetCleanupCandidates:
             assert "nearest_city" in item
             assert "nearest_country" in item
 
+    def test_returns_real_image_date_and_location(self, tmp_path):
+        """image_date must be the photo capture date (not processed_at) and the
+        stored nearest_city/nearest_country must round-trip, not be hardcoded None.
+
+        Regression test: get_cleanup_candidates used to return processed_at under
+        the image_date key and literal None for nearest_city/nearest_country.
+        """
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            img = self._make_image(tmp_path, "photo.jpg")
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name="photo.jpg",
+                    cleanup_class="delete",
+                    tags=["a"],
+                    image_date="2020-01-02T03:04:05",
+                    nearest_city="Kyiv",
+                    nearest_country="Ukraine",
+                ),
+            )
+            processed_at = db._conn.execute(
+                "SELECT processed_at FROM processed_images WHERE file_path = ?",
+                (str(img),),
+            ).fetchone()[0]
+
+            (item,) = db.get_cleanup_candidates()
+            assert item["image_date"] == "2020-01-02T03:04:05"
+            assert item["image_date"] != processed_at
+            assert item["nearest_city"] == "Kyiv"
+            assert item["nearest_country"] == "Ukraine"
+
+    def test_image_date_and_location_none_when_unset(self, tmp_path):
+        """Rows without a capture date or geocode still return None for those keys."""
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            img = self._make_image(tmp_path, "photo.jpg")
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name="photo.jpg",
+                    cleanup_class="delete",
+                    tags=["a"],
+                ),
+            )
+            (item,) = db.get_cleanup_candidates()
+            assert item["image_date"] is None
+            assert item["nearest_city"] is None
+            assert item["nearest_country"] is None
+
 
 class TestReviewMethods:
     """Tests for review UI query and update methods."""
@@ -553,6 +607,22 @@ class TestReviewMethods:
             rows = db.get_images(cleanup_class="delete")
             assert len(rows) == 1
             assert rows[0]["cleanup_class"] == "delete"
+
+    def test_get_images_name_sort_uses_basename_not_path(self, tmp_path):
+        """Regression: name_asc/name_desc sorted by LOWER(file_path), so the
+        directory prefix dominated and the "Name (A→Z)" option was just a
+        case-insensitive path sort. It must order by file basename."""
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            specs = [("zz_dir", "aaa.jpg"), ("aa_dir", "zzz.jpg"), ("mm_dir", "MMM.jpg")]
+            for dirname, name in specs:
+                img = tmp_path / dirname / name
+                img.parent.mkdir(exist_ok=True)
+                img.write_bytes(b"\x00" * 10)
+                db.mark_done(img, ImageResult(file_path=str(img), file_name=name))
+            ascending = [row["file_path"] for row in db.get_images(sort="name_asc")]
+            assert [p.rsplit("/", 1)[1] for p in ascending] == ["aaa.jpg", "MMM.jpg", "zzz.jpg"]
+            descending = [row["file_path"] for row in db.get_images(sort="name_desc")]
+            assert descending == list(reversed(ascending))
 
     def test_get_images_dict_has_tags_list(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
@@ -735,10 +805,10 @@ def _make_image(tmp_path, name: str):
 
 
 class TestMigrationV4:
-    def test_fresh_db_is_at_version_4(self, tmp_path):
+    def test_fresh_db_is_at_latest_version(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 11
+            assert ver == LATEST_SCHEMA_VERSION
 
     def test_fresh_db_has_location_columns(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:

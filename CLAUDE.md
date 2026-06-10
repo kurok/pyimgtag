@@ -9,7 +9,7 @@ macOS image tagger using local Ollama Gemma vision model with EXIF GPS reverse g
 - Nominatim reverse geocoding with disk cache
 - Optional: pillow-heif (HEIC), exiftool (reliable HEIC EXIF)
 - `pyproject.toml` with src layout
-- Optional extras: [heic], [all], [dev], [lint], [security]
+- Optional extras: [heic], [photos], [photos-db], [face], [ocr], [review], [raw], [all], [dev], [lint], [security], [screenshot], [e2e]
 
 ## Commands
 
@@ -42,19 +42,34 @@ pre-commit run --all-files
 
 ```
 src/pyimgtag/
-  main.py              CLI entry point, subcommand dispatch (run/status/reprocess/preflight/cleanup)
+  main.py              CLI entry point, subcommand dispatch (run/status/reprocess/preflight/cleanup/
+                       cleanup-drift/review/faces/query/judge/tags)
   models.py            Data classes (ExifData, TagResult, GeoResult, ImageResult)
   scanner.py           Directory and Photos library scanning
   exif_reader.py       EXIF GPS + date (exiftool primary, Pillow fallback)
+  exif_writer.py       EXIF tag/description write-back
   ollama_client.py     Ollama vision API client (1 call/image, rich structured response)
+  cloud_clients.py     Anthropic / OpenAI / Gemini vision-API adapters
   geocoder.py          Nominatim reverse geocoder with JSON disk cache
-  filters.py           Date range, GPS, limit filters
+  filters.py           Date range filters
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       SQLite progress DB with versioned migrations (PRAGMA user_version)
   applescript_writer.py  Apple Photos keyword/description write-back via osascript
   dedup.py             Perceptual hash duplicate detection
   heic_converter.py    HEIC to JPEG conversion (macOS sips)
+  raw_converter.py     RAW image thumbnail extraction (exiftool)
   cache.py             Simple JSON file cache
+  judge_scorer.py      Score aggregation (legacy 13-criterion weighting)
+  preflight.py         Shared preflight helpers
+  run_session.py / run_registry.py  Run lifecycle/session tracking
+  cleanup_drift.py     Drift detection for DB rows whose backing file is gone
+  _face_dep_check.py   Friendly preflight for face_recognition_models
+  face_detection.py / face_embedding.py / face_clustering.py / face_naming.py /
+  face_ocr.py / face_thumb.py        Face pipeline (detect, embed, cluster, name, OCR, thumbs)
+  photos_faces_importer.py  Apple Photos face/people import
+  review_server.py / faces_review_server.py  FastAPI review and face-management UI servers
+  commands/            Per-subcommand handlers (run, judge, db, query, tags, faces, ...)
+  webapp/              FastAPI dashboard + review/faces/tags/query/judge UIs
 tests/                 Unit tests (no network, no Ollama required)
 ```
 
@@ -145,22 +160,23 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 - Tests must not require network access, Ollama, or external services
 - Tests run in parallel (`pytest-xdist`) — no shared state between tests
 - Use `tmp_path` fixture for all filesystem operations
-- 85% coverage threshold enforced in CI
+- Coverage is uploaded to Codecov (informational, non-blocking — no enforced threshold)
 
 ## Dependencies
 
-- Keep runtime dependencies minimal (currently: `requests`, `Pillow`, `imagehash`)
+- Keep runtime dependencies minimal (currently: `requests`, `Pillow`, `imagehash`, `exifread`)
 - Optional features go in `[project.optional-dependencies]` in `pyproject.toml`
 - Guard optional imports with `try/except ImportError`
 - New dependencies require justification in the PR description
 
-## CI Pipeline (5 Jobs)
+## CI Pipeline (6 Jobs)
 
-1. quality — ruff format check + lint + mypy (combined, uv install)
-2. pre-commit — hooks
-3. test — matrix: ubuntu x (3.11–3.14), macos x (3.12–3.14), windows x (3.13–3.14); coverage only on ubuntu/3.14
-4. security — bandit + pip-audit
-5. docker — build + smoke tests
+1. lint — ruff format check + ruff check (uv install)
+2. typecheck — mypy (uv install)
+3. pre-commit — hooks
+4. test — matrix: ubuntu/macos/windows x Python 3.14 only; coverage uploaded only from ubuntu
+5. security — bandit + pip-audit
+6. docker — build + smoke tests
 
 ## Workflow: Creating a Clean PR
 
@@ -198,7 +214,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 
 ## Important Notes
 
-- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag cleanup`, `pyimgtag preflight`, `pyimgtag query`, `pyimgtag tags`
+- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag preflight`, `pyimgtag cleanup`, `pyimgtag cleanup-drift`, `pyimgtag review`, `pyimgtag faces`, `pyimgtag query`, `pyimgtag judge`, `pyimgtag tags`
 - `--write-back` flag enables writing tags/description back to Apple Photos via AppleScript
 - One Ollama call per image with structured JSON prompt (rich metadata)
 - EXIF GPS is source of truth for location — model does not guess location
@@ -206,6 +222,6 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 - Nominatim rate limit: max 1 request/sec
 - exiftool preferred for HEIC EXIF; Pillow is fallback
 - Never commit `.env` or secrets
-- Release: update version in `pyproject.toml` AND `src/pyimgtag/__init__.py`
+- Release: update version in `pyproject.toml` AND `src/pyimgtag/__init__.py`, run `uv lock` to refresh `uv.lock`, and check that `SECURITY.md` (supported versions) is still accurate
 - Release automation triggers on `v*` tags
 - Bandit skips: B404/B603/B607 (exiftool subprocess with fixed args)

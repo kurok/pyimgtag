@@ -35,6 +35,8 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
                  border-radius:5px;font-size:11px;font-weight:600}
     .cleanup-rev{background:rgba(255,159,10,.1);color:var(--warn);padding:2px 7px;
                  border-radius:5px;font-size:11px;font-weight:600}
+    .cleanup-keep{background:rgba(52,199,89,.1);color:var(--ok,#16a34a);padding:2px 7px;
+                  border-radius:5px;font-size:11px;font-weight:600}
     .status-ok{color:var(--ok,#16a34a);font-size:11px;font-weight:600}
     .status-error{color:var(--danger);font-size:11px;font-weight:600}
     .err-msg{font-size:11px;color:var(--danger);margin-top:3px;
@@ -234,7 +236,8 @@ async function search() {
     const tdClean = document.createElement('td');
     if (row.cleanup_class) {
       const badge = document.createElement('span');
-      badge.className = row.cleanup_class === 'delete' ? 'cleanup-del' : 'cleanup-rev';
+      badge.className = row.cleanup_class === 'delete' ? 'cleanup-del'
+        : row.cleanup_class === 'review' ? 'cleanup-rev' : 'cleanup-keep';
       badge.textContent = row.cleanup_class;
       tdClean.appendChild(badge);
     } else {

@@ -1,7 +1,12 @@
 name: sanitize-pr-description
 
+# pull_request_target (not pull_request) so GITHUB_TOKEN keeps write access on
+# fork PRs — a plain pull_request event gets a read-only token for forks and the
+# pulls.update call would 403. Safe here: this workflow never checks out or
+# executes PR code; it only reads the PR body from the event payload and calls
+# the REST API.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited, synchronize]
 
 permissions:

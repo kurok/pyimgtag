@@ -51,15 +51,21 @@ def start_dashboard_for(
         return None, None
 
     ready = dashboard.start()
+    alive = ready or dashboard.is_alive()
     session.web_url = dashboard.url
     if ready:
         print(f"Dashboard: {dashboard.url}", flush=True)
-    else:
+    elif alive:
         print(
-            f"Dashboard: {dashboard.url} (not yet ready; retrying in background)",
+            f"Dashboard: {dashboard.url} (not ready yet; still starting in background)",
             flush=True,
         )
-    if not getattr(args, "no_browser", False):
+    else:
+        print(
+            f"Warning: dashboard failed to start on {dashboard.url} (port may be in use)",
+            file=sys.stderr,
+        )
+    if alive and not getattr(args, "no_browser", False):
         import webbrowser
 
         try:

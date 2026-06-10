@@ -37,6 +37,7 @@ def test_start_serves_and_stop_shuts_down():
             except OSError:
                 time.sleep(0.05)
         assert body is not None, "server never became ready"
+        assert server.is_alive() is True
     finally:
         server.stop()
 
@@ -74,3 +75,27 @@ def test_start_returns_false_when_server_never_ready():
     started_ok = server.start(ready_timeout=0.1)
     assert started_ok is False
     server.stop(timeout=0.5)
+
+
+def test_start_bails_out_early_when_thread_dies():
+    """A dead server thread (e.g. port already in use) must not burn the full timeout."""
+    import threading as _t
+
+    server = DashboardServer(create_app(), host="127.0.0.1", port=0)
+
+    class _DiesAtBind:
+        started = False
+        should_exit = False
+
+        def run(self):
+            return  # uvicorn exits immediately when it cannot bind
+
+    stub = _DiesAtBind()
+    server._server = stub
+    server._thread = _t.Thread(target=stub.run, name="pyimgtag-dies-at-bind", daemon=True)
+
+    t0 = time.monotonic()
+    assert server.start(ready_timeout=5.0) is False
+    assert time.monotonic() - t0 < 4.0, "start() should bail before the 5s timeout"
+    server._thread.join(timeout=1.0)
+    assert server.is_alive() is False

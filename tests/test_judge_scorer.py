@@ -58,12 +58,23 @@ class TestComputeScores:
     def test_weighted_score_not_just_average(self):
         from pyimgtag.judge_scorer import compute_scores
 
-        s = _scores(impact=10, edit_integrity=2)
+        # Skew high-weight criteria (impact=10, composition_center=10,
+        # technical_excellence=9) high and low-weight criteria
+        # (noise_cleanliness=4, subject_separation=3, edit_integrity=4) low,
+        # so the weighted average provably diverges from the simple average:
+        # weighted = round(661 / 85) == 8, simple = round(89 / 13) == 7.
+        s = _scores(
+            impact=10,
+            composition_center=10,
+            technical_excellence=10,
+            noise_cleanliness=1,
+            subject_separation=1,
+            edit_integrity=1,
+        )
         w, _, _ = compute_scores(s)
-        simple_avg = round((8 * 11 + 10 + 2) / 13)
-        # The weighted score uses per-criterion weights so it should differ
-        # from the unweighted simple average for the same inputs.
-        assert w != simple_avg or w == 8  # tolerate the rare exact match
+        simple_avg = round((10 * 3 + 8 * 7 + 1 * 3) / 13)
+        assert w == 8
+        assert w != simple_avg
 
     def test_returns_three_ints(self):
         from pyimgtag.judge_scorer import compute_scores

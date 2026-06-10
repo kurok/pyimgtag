@@ -15,8 +15,9 @@ The CLI and the Edit web page both use this module:
     a media item with this UUID/filename. The DB row is stale even
     though the bytes still exist.
 
-- :func:`prune_drift` deletes the dead rows in batches (``executemany``
-  inside :meth:`pyimgtag.progress_db.ProgressDB.delete_image_rows`).
+- :func:`prune_drift` deletes the dead rows in batches (a single
+  ``DELETE … WHERE file_path IN (…)`` statement per batch inside
+  :meth:`pyimgtag.progress_db.ProgressDB.delete_image_rows`).
 
 The scan is intentionally cheap: it never reads file contents, only
 ``Path.is_file()``. The Photos.app membership probe is one bulk
@@ -210,8 +211,10 @@ def prune_drift(
 ) -> int:
     """Delete every path in *paths* from ``processed_images``.
 
-    Batched ``executemany`` keeps the DB writer single-statement-per-
-    batch, which matters when the dead set is in the thousands.
+    Each batch becomes one ``DELETE … WHERE file_path IN (…)`` statement
+    (see :meth:`pyimgtag.progress_db.ProgressDB.delete_image_rows`), which
+    keeps the DB writer single-statement-per-batch — that matters when the
+    dead set is in the thousands.
 
     Returns the number of rows actually deleted (paths that were
     already gone are silently counted as 0).

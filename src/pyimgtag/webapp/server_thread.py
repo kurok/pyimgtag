@@ -47,15 +47,23 @@ class DashboardServer:
     def start(self, ready_timeout: float = 5.0) -> bool:
         """Start the thread and wait until uvicorn reports started.
 
-        Returns True if ready within ``ready_timeout``, False otherwise.
+        Returns True if ready within ``ready_timeout``. Returns False if the
+        timeout elapses or the server thread dies first (e.g. the port is
+        already in use, which makes uvicorn exit at bind time).
         """
         self._thread.start()
         deadline = time.monotonic() + ready_timeout
         while time.monotonic() < deadline:
             if getattr(self._server, "started", False):
                 return True
+            if not self._thread.is_alive():
+                return False
             time.sleep(0.05)
         return False
+
+    def is_alive(self) -> bool:
+        """Return True while the server thread is still running."""
+        return self._thread.is_alive()
 
     def stop(self, timeout: float = 3.0) -> None:
         """Signal uvicorn to exit and join the daemon thread.

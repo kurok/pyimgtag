@@ -120,12 +120,14 @@ class TestLoadAndResize:
         result = _load_and_resize(path, max_dim=1280)
         assert result.mode == "RGB"
 
-    def test_keeps_grayscale(self, tmp_path):
+    def test_converts_grayscale_to_rgb(self, tmp_path):
+        # dlib's compute_face_descriptor requires 3-channel input, so grayscale
+        # must be converted or encoding crashes after detection succeeds.
         img = Image.new("L", (100, 100))
         path = tmp_path / "gray.jpg"
         img.save(path)
         result = _load_and_resize(path, max_dim=1280)
-        assert result.mode == "L"
+        assert result.mode == "RGB"
 
     def test_converts_palette_to_rgb(self, tmp_path):
         img = Image.new("P", (100, 100))
@@ -149,6 +151,28 @@ class TestLoadAndResize:
         ):
             result = _load_and_resize(heic_path, max_dim=1280)
             assert result.size == (100, 100)
+
+    def test_heic_temp_conversion_cleaned_up_after_load(self, tmp_path):
+        """Regression: the owned mkdtemp dir from convert_heic_to_jpeg must be
+        removed once pixel data is loaded — every HEIC scan used to leak a
+        full-resolution JPEG in a ``pyimgtag_heic_*`` temp dir."""
+        owned_dir = tmp_path / "pyimgtag_heic_fake"
+        owned_dir.mkdir()
+        jpeg_path = owned_dir / "converted.jpg"
+        Image.new("RGB", (100, 100), color="blue").save(jpeg_path)
+
+        heic_path = tmp_path / "photo.heic"
+        heic_path.write_bytes(b"fake")
+
+        with (
+            patch("pyimgtag.face_detection.is_heic", return_value=True),
+            patch("pyimgtag.face_detection.convert_heic_to_jpeg", return_value=jpeg_path),
+        ):
+            result = _load_and_resize(heic_path, max_dim=1280)
+
+        assert result.size == (100, 100)
+        assert not jpeg_path.exists()
+        assert not owned_dir.exists()
 
 
 class TestDetectFaces:

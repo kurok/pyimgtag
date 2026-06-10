@@ -97,6 +97,60 @@ def test_start_dashboard_for_warns_and_returns_none_on_import_error(monkeypatch,
     assert "dashboard disabled" in err
 
 
+def test_start_dashboard_for_dead_server_warns_and_skips_browser(monkeypatch, capsys):
+    """A server thread that died at bind time gets a distinct warning and no browser tab."""
+    pytest.importorskip("fastapi")
+    pytest.importorskip("uvicorn")
+    monkeypatch.delenv("PYIMGTAG_NO_WEB", raising=False)
+
+    from pyimgtag.webapp.bootstrap import start_dashboard_for
+    from pyimgtag.webapp.server_thread import DashboardServer
+
+    monkeypatch.setattr(DashboardServer, "start", lambda self, ready_timeout=5.0: False)
+    monkeypatch.setattr(DashboardServer, "is_alive", lambda self: False)
+    opened: list[str] = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+
+    args = _parser_with_flags().parse_args(["--web"])
+    session, dashboard = start_dashboard_for(args, command="run")
+    try:
+        assert session is not None
+        assert dashboard is not None
+        captured = capsys.readouterr()
+        assert "failed to start" in captured.err
+        assert "port may be in use" in captured.err
+        assert "retrying" not in captured.out + captured.err
+        assert opened == []
+    finally:
+        run_registry.set_current(None)
+
+
+def test_start_dashboard_for_slow_start_still_opens_browser(monkeypatch, capsys):
+    """A not-yet-ready but alive server keeps the browser open + honest message."""
+    pytest.importorskip("fastapi")
+    pytest.importorskip("uvicorn")
+    monkeypatch.delenv("PYIMGTAG_NO_WEB", raising=False)
+
+    from pyimgtag.webapp.bootstrap import start_dashboard_for
+    from pyimgtag.webapp.server_thread import DashboardServer
+
+    monkeypatch.setattr(DashboardServer, "start", lambda self, ready_timeout=5.0: False)
+    monkeypatch.setattr(DashboardServer, "is_alive", lambda self: True)
+    opened: list[str] = []
+    monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url))
+
+    args = _parser_with_flags().parse_args(["--web"])
+    session, dashboard = start_dashboard_for(args, command="run")
+    try:
+        assert dashboard is not None
+        captured = capsys.readouterr()
+        assert "still starting in background" in captured.out
+        assert "retrying" not in captured.out + captured.err
+        assert opened == [dashboard.url]
+    finally:
+        run_registry.set_current(None)
+
+
 def test_bootstrap_serves_unified_app(monkeypatch):
     """The dashboard started by start_dashboard_for must also serve /review and /faces."""
     pytest.importorskip("fastapi")

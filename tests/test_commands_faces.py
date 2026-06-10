@@ -16,6 +16,7 @@ from pyimgtag.commands.faces import (
     _handle_faces_capture_names,
     _handle_faces_cluster,
     _handle_faces_import_photos,
+    _handle_faces_match_references,
     _handle_faces_recluster,
     _handle_faces_reset,
     _handle_faces_reset_untrusted,
@@ -66,6 +67,12 @@ class TestCmdFaces:
         args = _make_args(faces_action=None)
         assert cmd_faces(args) == 1
 
+    def test_no_action_usage_lists_capture_names(self, tmp_path, capsys):
+        """The bare-`faces` usage line must list every dispatched action."""
+        args = _make_args(faces_action=None)
+        assert cmd_faces(args) == 1
+        assert "capture-names" in capsys.readouterr().err
+
     def test_unknown_action_returns_1(self, tmp_path):
         args = _make_args(faces_action="unknown")
         assert cmd_faces(args) == 1
@@ -97,6 +104,27 @@ class TestHandleFacesScan:
         assert "pip install pyimgtag[face]" in captured.err
         # Database should not have been created
         assert not (tmp_path / "test.db").exists()
+
+    def test_extensions_leading_dots_stripped(self, tmp_path):
+        """`--extensions .jpg,.PNG` must scan for jpg/png, matching run and judge."""
+        captured: dict[str, set[str]] = {}
+
+        def fake_scan(path, extensions):
+            captured["extensions"] = extensions
+            return []
+
+        args = _make_args(
+            input_dir=str(tmp_path), db=str(tmp_path / "test.db"), extensions=".jpg,.PNG"
+        )
+        with (
+            patch("pyimgtag.commands.faces.scan_and_store", MagicMock()),
+            patch("pyimgtag.face_detection._check_face_recognition"),
+            patch("pyimgtag.commands.faces.scan_directory", side_effect=fake_scan),
+        ):
+            rc = _handle_faces_scan(args)
+
+        assert rc == 0  # empty scan exits cleanly
+        assert captured["extensions"] == {"jpg", "png"}
 
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_file_not_found_returns_1(self, mock_scan, tmp_path):
@@ -1107,6 +1135,27 @@ class TestScanResolvesQuality:
         mock_store.assert_not_called()  # never reached the scan loop
 
 
+class TestHandleFacesMatchReferences:
+    """`faces match-references` — reference-folder cluster naming."""
+
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face_naming.match_clusters_to_references", return_value=[])
+    @patch("pyimgtag.face_naming.load_reference_embeddings", return_value={"Alice": [np.ones(128)]})
+    def test_explicit_zero_threshold_is_honored(
+        self, _mock_load, mock_match, _mock_check, tmp_path
+    ):
+        """`--threshold 0` (strictest) must not be silently replaced by 0.5."""
+        args = _make_args(
+            faces_action="match-references",
+            reference_dir=str(tmp_path),
+            threshold=0.0,
+            apply=False,
+            db=str(tmp_path / "faces.db"),
+        )
+        assert _handle_faces_match_references(args) == 0
+        assert mock_match.call_args.kwargs["threshold"] == 0.0
+
+
 class TestHandleFacesCaptureNames:
     """`faces capture-names` — screenshot OCR → cluster naming."""
 
@@ -1201,6 +1250,21 @@ class TestHandleFacesCaptureNames:
         args = self._args(tmp_path, screenshot=str(shot))
         assert _handle_faces_capture_names(args) == 0
         assert "No clusters matched" in capsys.readouterr().err
+
+    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face_naming.match_clusters_to_references", return_value=[])
+    @patch(
+        "pyimgtag.face_ocr.build_references_from_screenshot", return_value={"Alice": [np.ones(128)]}
+    )
+    def test_explicit_zero_threshold_is_honored(
+        self, _mock_build, mock_match, _mock_check, tmp_path
+    ):
+        """`--threshold 0` (strictest) must not be silently replaced by 0.5."""
+        shot = tmp_path / "shot.png"
+        Image.new("RGB", (10, 10)).save(shot)
+        args = self._args(tmp_path, screenshot=str(shot), threshold=0.0)
+        assert _handle_faces_capture_names(args) == 0
+        assert mock_match.call_args.kwargs["threshold"] == 0.0
 
     @patch("pyimgtag.face_detection._check_face_recognition")
     @patch("pyimgtag.face_ocr.capture_people_screenshot")

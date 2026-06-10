@@ -302,6 +302,33 @@ class TestCmdCleanupDrift:
         assert "Photos.app probe degraded" in captured.err
 
 
+class TestDryRunPrunePhotosMissingRejected:
+    """Regression: --dry-run combined with --prune-photos-missing must never prune."""
+
+    def test_main_rejects_combination_and_leaves_rows_intact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pyimgtag.main import main
+
+        monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+        db_path = tmp_path / "drift.db"
+        present, _, _ = _seed(db_path, tmp_path)
+        # If the post-parse rejection ever regressed, the handler must not
+        # shell out to osascript — keep the probe mocked either way.
+        monkeypatch.setattr(
+            "pyimgtag.cleanup_drift.fetch_photos_membership",
+            _membership_factory([present]),
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            main(["cleanup-drift", "--db", str(db_path), "--dry-run", "--prune-photos-missing"])
+        assert exc.value.code == 2
+
+        # No row was pruned — the explicit dry run stayed a dry run.
+        with ProgressDB(db_path=db_path) as db:
+            assert db.count_images() == 3
+
+
 class TestDriftReport:
     def test_sample_clipped_to_n(self) -> None:
         report = DriftReport(dead_paths=[f"/p/{i}.jpg" for i in range(50)])

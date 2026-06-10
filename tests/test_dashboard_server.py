@@ -92,6 +92,31 @@ def test_dashboard_html_contains_polling_and_controls():
     assert 'id="recent"' in body
 
 
+def test_dashboard_js_reads_snapshot_key_names():
+    """The inline JS must read the exact keys RunSession.snapshot() emits.
+
+    Regression guard: the dashboard once read ``d.current_file`` and
+    ``d.error`` while the API payload uses ``current_item`` / ``last_error``,
+    leaving the current-item link and the error banner permanently blank.
+    """
+    client = TestClient(create_app())
+    body = client.get("/").text
+    snapshot_keys = RunSession(command="run").snapshot().keys()
+    assert "current_item" in snapshot_keys
+    assert "last_error" in snapshot_keys
+    assert "d.current_item" in body
+    assert "d.current_file" not in body
+    assert "d.last_error" in body
+    assert "d.error" not in body
+
+
+def test_dashboard_js_allows_unpause_while_pausing():
+    """Unpause must stay enabled in the 'pausing' window (resume cancels it)."""
+    client = TestClient(create_app())
+    body = client.get("/").text
+    assert "d.state !== 'paused' && d.state !== 'pausing'" in body
+
+
 def test_dashboard_html_has_nav_links_to_review_and_faces():
     client = TestClient(create_app())
     body = client.get("/").text

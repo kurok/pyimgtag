@@ -208,6 +208,22 @@ class TestTerminalGuards:
         assert snap["state"] == "completed"
         assert snap["last_error"] is None
 
+    def test_mark_interrupted_does_not_override_completed(self):
+        s = RunSession(command="run")
+        s.mark_running()
+        s.mark_completed()
+        s.mark_interrupted()
+        assert s.snapshot()["state"] == "completed"
+
+    def test_mark_interrupted_does_not_override_failed(self):
+        s = RunSession(command="run")
+        s.mark_running()
+        s.mark_failed("boom")
+        s.mark_interrupted()
+        snap = s.snapshot()
+        assert snap["state"] == "failed"
+        assert snap["last_error"] == "boom"
+
 
 class TestStopRequest:
     def test_request_stop_raises_keyboard_interrupt_on_wait(self):

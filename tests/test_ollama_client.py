@@ -843,6 +843,17 @@ class TestRepairTruncatedJson:
         # The truncated trailing key/value is dropped.
         assert "b" not in result
 
+    def test_truncated_inside_nested_array_recovers_earlier_fields(self):
+        # Regression: truncation inside a nested container must still recover
+        # the depth-1 fields completed before it. Only the top-level closer is
+        # synthesised — closers for nested containers opened after last_safe
+        # were trimmed away with their openers.
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        text = '{"summary": "a dog", "tags": ["dog", "park"'
+        result = _repair_truncated_json(text)
+        assert result == {"summary": "a dog"}
+
     def test_returns_none_when_candidate_unparseable(self):
         # ollama_client lines 524-525: a comma at depth 1 sets last_safe, but the
         # trimmed-and-closed candidate is still invalid JSON, so json.loads fails.

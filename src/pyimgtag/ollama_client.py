@@ -517,8 +517,10 @@ def _repair_truncated_json(text: str) -> dict | None:
 
     if last_safe < 0 or not stack:
         return None
-    # Trim the trailing garbage and synthesise the closers.
-    candidate = text[:last_safe] + "".join(reversed(stack))
+    # last_safe was recorded at depth 1, so the trimmed prefix has exactly one
+    # unclosed container — the top-level one. Closers for nested containers
+    # opened after last_safe were trimmed away with their openers.
+    candidate = text[:last_safe] + stack[0]
     try:
         obj = json.loads(candidate)
     except (json.JSONDecodeError, ValueError):

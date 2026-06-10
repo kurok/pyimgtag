@@ -220,6 +220,16 @@ class TestBuildReadApplescript:
         script = _build_read_applescript("IMG_1234.jpg")
         assert "ASCII character 10" in script
 
+    def test_guards_missing_value_before_text_coercion(self):
+        """Photos returns `missing value` for keyword-less photos; without a
+        guard the text coercion yields a literal "missing value" keyword that
+        append mode would then write back into Photos."""
+        script = _build_read_applescript("IMG_1234.jpg")
+        guard = 'if kws is missing value then return ""'
+        assert guard in script
+        # The guard must run before the text coercion.
+        assert script.index(guard) < script.index("text item delimiters")
+
 
 # ---------------------------------------------------------------------------
 # is_applescript_available
@@ -695,6 +705,9 @@ class TestReadKeywordsFromPhotos:
         assert result is None
 
     def test_returns_empty_list_when_no_keywords(self):
+        # With the missing-value guard in _build_read_applescript, a
+        # keyword-less photo makes the script return "" — osascript then
+        # prints just a trailing newline.
         with (
             patch("pyimgtag.applescript_writer._IS_MACOS", True),
             patch("pyimgtag.applescript_writer._has_photoscript", new=lambda: False),

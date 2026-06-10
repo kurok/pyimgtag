@@ -167,5 +167,8 @@ def apply_matches(db: ProgressDB, matches: list[NameMatch]) -> dict[str, int]:
             merged += 1
         else:
             db.update_person_label(m.person_id, m.name)
+            # The rename marks the cluster trusted; register it so a later
+            # match with the same name merges instead of duplicating the person.
+            trusted_by_name[m.name] = m.person_id
             renamed += 1
     return {"renamed": renamed, "merged": merged}

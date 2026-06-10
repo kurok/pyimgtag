@@ -216,6 +216,12 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
                     visible_score=visible,
                 )
 
+                # Persist every computed score — even below-threshold ones —
+                # so --skip-judged reruns don't re-send filtered images to
+                # the model. --min-score only filters display and write-back.
+                if _db is not None:
+                    _db.save_judge_result(result)
+
                 if args.min_score is not None and weighted < args.min_score:
                     if session is not None:
                         session.increment("skipped_min_score")
@@ -223,9 +229,6 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
                     continue
 
                 results.append(result)
-
-                if _db is not None:
-                    _db.save_judge_result(result)
 
                 if write_back and getattr(args, "photos_library", None):
                     score_tag = f"score:{weighted}"
