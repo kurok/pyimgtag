@@ -643,11 +643,16 @@ class ProgressDB:
 
     # --- review UI query/update methods ---
 
-    # SQLite basename idiom: replace(p, '/', '') yields the set of non-slash
-    # characters, rtrim(p, <that>) strips the basename off the right (stopping
-    # at the last '/'), and the outer replace() removes that directory prefix.
+    # SQLite basename idiom over the separator-normalized path NORM
+    # (backslashes folded to '/' so Windows paths work too):
+    # replace(NORM, '/', '') yields the set of non-slash characters,
+    # rtrim(NORM, <that>) strips the basename off the right (stopping at the
+    # last '/'), and the outer replace() removes that directory prefix.
     # A file_path tie-breaker keeps pagination stable for duplicate basenames.
-    _NAME_SORT_EXPR = "LOWER(replace(file_path, rtrim(file_path, replace(file_path, '/', '')), ''))"
+    _NORM_PATH = "replace(file_path, '\\', '/')"
+    _NAME_SORT_EXPR = (
+        f"LOWER(replace({_NORM_PATH}, rtrim({_NORM_PATH}, replace({_NORM_PATH}, '/', '')), ''))"
+    )
 
     _GET_IMAGES_SORTS: dict[str, str] = {
         "path_asc": "file_path ASC",

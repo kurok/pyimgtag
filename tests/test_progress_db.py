@@ -620,7 +620,7 @@ class TestReviewMethods:
                 img.write_bytes(b"\x00" * 10)
                 db.mark_done(img, ImageResult(file_path=str(img), file_name=name))
             ascending = [row["file_path"] for row in db.get_images(sort="name_asc")]
-            assert [p.rsplit("/", 1)[1] for p in ascending] == ["aaa.jpg", "MMM.jpg", "zzz.jpg"]
+            assert [Path(p).name for p in ascending] == ["aaa.jpg", "MMM.jpg", "zzz.jpg"]
             descending = [row["file_path"] for row in db.get_images(sort="name_desc")]
             assert descending == list(reversed(ascending))
 
