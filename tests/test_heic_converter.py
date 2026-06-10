@@ -139,11 +139,20 @@ class TestConvertHeicToJpeg:
             convert_heic_to_jpeg(missing)
 
     @patch("pyimgtag.heic_converter.sips_available", return_value=True)
+    @patch("pyimgtag.heic_converter.tempfile.mkdtemp")
     @patch("pyimgtag.heic_converter.subprocess.run")
     def test_timeout_cleans_up_temp_dir(
-        self, mock_run: MagicMock, mock_sips: MagicMock, tmp_path: Path
+        self,
+        mock_run: MagicMock,
+        mock_mkdtemp: MagicMock,
+        mock_sips: MagicMock,
+        tmp_path: Path,
     ) -> None:
         import subprocess as _subprocess
+
+        owned = tmp_path / "pyimgtag_heic_owned"
+        owned.mkdir()
+        mock_mkdtemp.return_value = str(owned)
 
         input_file = tmp_path / "photo.heic"
         input_file.write_bytes(b"fake heic data")
@@ -152,6 +161,8 @@ class TestConvertHeicToJpeg:
 
         with pytest.raises(RuntimeError, match="sips conversion timed out"):
             convert_heic_to_jpeg(input_file)
+
+        assert not owned.exists(), "owned temp dir leaked after sips timeout"
 
     @patch("pyimgtag.heic_converter.sips_available", return_value=True)
     @patch("pyimgtag.heic_converter.subprocess.run")

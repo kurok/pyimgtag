@@ -43,14 +43,15 @@ def hamming_distance(hash1: str, hash2: str) -> int:
 
     Raises:
         ValueError: If hash1 or hash2 is not a valid hex hash string parseable
-            by imagehash.hex_to_hash().
+            by imagehash.hex_to_hash(), or if the two hashes have different
+            lengths (imagehash refuses to subtract differently shaped hashes).
     """
     try:
         h1 = imagehash.hex_to_hash(hash1)
         h2 = imagehash.hex_to_hash(hash2)
+        return int(h1 - h2)
     except (ValueError, TypeError) as exc:
         raise ValueError(f"Invalid perceptual hash: {exc}") from exc
-    return int(h1 - h2)
 
 
 def find_duplicate_groups(records: list[tuple[str, str]], threshold: int = 5) -> list[list[str]]:

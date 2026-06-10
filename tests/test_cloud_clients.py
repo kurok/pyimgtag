@@ -287,9 +287,10 @@ class TestGeminiClient:
             result = client.judge_image(jpg)
         assert isinstance(result, JudgeScores)
         assert result.story_subject == 7
-        # API key goes in the URL query string for Gemini
+        # API key travels in the x-goog-api-key header, never in the URL
         url = mock_post.call_args[0][0]
-        assert "key=g-key" in url
+        assert "g-key" not in url
+        assert client._session.headers["x-goog-api-key"] == "g-key"
         assert "gemini-1.5-flash:generateContent" in url
 
     def test_judge_returns_none_on_unexpected_shape(self, jpg):
@@ -335,6 +336,25 @@ class TestGeminiClient:
         with patch.object(client._session, "post", return_value=mock_resp):
             result = client.tag_image(jpg)
         assert "gemini response shape unexpected" in (result.error or "")
+
+    def test_http_error_message_does_not_leak_api_key(self, jpg):
+        # Regression: HTTPError stringifies with the full request URL; the API
+        # key must not be in the URL, so it must not end up in TagResult.error
+        # (which is persisted to the progress DB and JSON/CSV output).
+        client = GeminiClient(api_key="g-key")
+
+        def fake_post(url, json=None, timeout=None):
+            resp = requests.Response()
+            resp.status_code = 403
+            resp.reason = "Forbidden"
+            resp.url = url
+            return resp
+
+        with patch.object(client._session, "post", side_effect=fake_post):
+            result = client.tag_image(jpg)
+        assert "gemini request failed" in (result.error or "")
+        assert "403" in (result.error or "")
+        assert "g-key" not in (result.error or "")
 
     def test_tag_returns_empty_response_when_text_none(self, jpg):
         # text key present but null -> _call returns None -> "empty response" (line 373).

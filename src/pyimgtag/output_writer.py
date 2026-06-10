@@ -44,7 +44,8 @@ def write_json(results: list[ImageResult], output_path: str | Path) -> None:
     """
     try:
         Path(output_path).write_text(
-            json.dumps([asdict(r) for r in results], indent=2, ensure_ascii=False, default=str)
+            json.dumps([asdict(r) for r in results], indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
         )
     except OSError as e:
         raise OSError(f"Failed to write JSON to {output_path}: {e}") from e
@@ -59,7 +60,7 @@ def write_csv(results: list[ImageResult], output_path: str | Path) -> None:
         OSError: If writing the file fails.
     """
     try:
-        with open(output_path, "w", newline="") as f:
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=_CSV_FIELDS)
             writer.writeheader()
             for r in results:

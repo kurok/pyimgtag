@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import logging
 import math
@@ -42,10 +43,13 @@ def face_thumbnail_b64(
     if bbox_w <= 0 or bbox_h <= 0:
         return None
 
+    converted = None
     try:
         from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic
 
         if is_heic(image_path):
+            # convert_heic_to_jpeg with no output_dir hands us a JPEG inside a
+            # fresh temp dir that *we* own — clean it up once pixels are read.
             converted = convert_heic_to_jpeg(image_path)
             src_path = str(converted)
         else:
@@ -79,6 +83,11 @@ def face_thumbnail_b64(
     except Exception as exc:  # noqa: BLE001 — thumbnail rendering must never crash the faces UI
         logger.debug("face thumbnail failed for %s: %s", image_path, exc)
         return None
+    finally:
+        if converted is not None:
+            converted.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                converted.parent.rmdir()  # removes the owned mkdtemp dir only when empty
 
     thumb = cropped.resize((size, size), Image.Resampling.LANCZOS)
 

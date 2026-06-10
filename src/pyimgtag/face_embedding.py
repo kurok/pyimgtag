@@ -82,7 +82,8 @@ def scan_and_store(
 ) -> int:
     """Detect faces, compute embeddings, and store everything in the DB.
 
-    Skips images that already have faces recorded in the database.
+    Skips images already marked as scanned in a previous run, even if no
+    faces were found.
 
     Args:
         image_path: Path to the image file.

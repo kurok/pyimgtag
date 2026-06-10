@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 
@@ -31,14 +32,26 @@ def _check_face_recognition() -> None:
 
 def _load_and_resize(image_path: Path, max_dim: int) -> Image.Image:
     """Load an image, converting HEIC if needed, and resize to fit max_dim."""
+    converted: Path | None = None
     path = image_path
     if is_heic(image_path):
-        path = convert_heic_to_jpeg(image_path)
+        # convert_heic_to_jpeg with no output_dir hands us a JPEG inside a
+        # fresh temp dir that *we* own — clean it up once pixels are loaded.
+        converted = convert_heic_to_jpeg(image_path)
+        path = converted
 
-    img = Image.open(path)
-    img.load()
+    try:
+        img = Image.open(path)
+        img.load()
+    finally:
+        if converted is not None:
+            converted.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                converted.parent.rmdir()  # removes the owned mkdtemp dir only when empty
 
-    if img.mode not in ("RGB", "L"):
+    # dlib's compute_face_descriptor (encoding) requires 3-channel RGB input,
+    # so grayscale ("L") images must be converted too — detection is unaffected.
+    if img.mode != "RGB":
         img = img.convert("RGB")  # type: ignore[assignment]
 
     w, h = img.size

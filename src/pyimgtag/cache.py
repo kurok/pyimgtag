@@ -30,8 +30,10 @@ class DiskCache:
     def _load(self) -> None:
         if self._path.exists():
             try:
-                self._data = json.loads(self._path.read_text())
-            except (json.JSONDecodeError, OSError) as e:
+                # _save writes UTF-8; read with the same explicit encoding so
+                # non-ASCII place names survive regardless of the locale codec.
+                self._data = json.loads(self._path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
                 # Non-critical cache: drop the unreadable contents and carry on,
                 # but leave a breadcrumb so a recurring corruption is findable.
                 logger.debug("discarding unreadable cache %s: %s", self._path, e)

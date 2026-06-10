@@ -12,7 +12,7 @@ Exposes:
                           current PyPI release; ``update`` is True iff
                           the running version is older.
 
-The PyPI lookup is best-effort (3-second timeout, single retry) and
+The PyPI lookup is best-effort (3-second timeout, no retry) and
 cached for an hour so loading the dashboard doesn't issue an HTTP call
 every refresh.
 """
@@ -33,9 +33,9 @@ _CACHE: dict[str, Any] = {"at": 0.0, "value": None}
 def _parse_version(s: str) -> tuple[int, ...]:
     """Tolerant version-tuple parser.
 
-    Handles ``0.10.0`` (3 ints), ``1.2`` (2 ints), and falls back to a
-    trailing-zero pad. Anything non-numeric in a segment short-circuits
-    that segment to 0 so a pre-release suffix never crashes the compare.
+    Handles ``0.10.0`` (3 ints) and ``1.2`` (2 ints). Anything non-numeric
+    in a segment short-circuits that segment to 0 so a pre-release suffix
+    never crashes the compare.
     """
     parts: list[int] = []
     for raw in s.split("."):
@@ -50,7 +50,17 @@ def _parse_version(s: str) -> tuple[int, ...]:
 
 
 def _is_newer(latest: str, installed: str) -> bool:
-    return _parse_version(latest) > _parse_version(installed)
+    """True iff ``latest`` > ``installed``.
+
+    Tuples of different lengths are padded with trailing zeros before the
+    compare so ``0.18.0`` and ``0.18`` are treated as the same release.
+    """
+    a = _parse_version(latest)
+    b = _parse_version(installed)
+    n = max(len(a), len(b))
+    a += (0,) * (n - len(a))
+    b += (0,) * (n - len(b))
+    return a > b
 
 
 def _fetch_latest_pypi(timeout: float = 3.0) -> str | None:

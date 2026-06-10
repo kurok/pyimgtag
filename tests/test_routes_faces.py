@@ -259,6 +259,24 @@ def test_faces_grid_html_has_sort_and_bulk_controls(tmp_path):
     assert not re.findall(r"__[A-Z][A-Z0-9_]+__", html)
 
 
+def test_faces_grid_html_trash_clear_and_pager_guard(tmp_path):
+    """Pin two embedded-JS regressions:
+
+    - "Clear selection" in the Trash view must also de-select #trash-grid
+      thumbnails (it used to only touch #unassigned-grid).
+    - Unassigning from the persons grid must not clamp _offset to a
+      non-page-boundary; the empty-page guard steps back a full page instead.
+    """
+    db = ProgressDB(db_path=tmp_path / "progress.db")
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base="/faces"), prefix="/faces")
+
+    html = TestClient(app).get("/faces/").text
+    assert "#trash-grid .face-thumb" in html
+    assert "_total - PAGE_SIZE - 1" not in html
+    assert "persons.length === 0 && _offset > 0" in html
+
+
 def test_faces_grid_persists_view_state_in_url(tmp_path):
     """Sort/filter/page are mirrored into the URL and restored on load, so the
     view survives opening a cluster and pressing Back (regression)."""

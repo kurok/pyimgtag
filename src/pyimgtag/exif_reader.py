@@ -85,6 +85,8 @@ def _read_exiftool(path: Path) -> ExifData | None:
         lon = info.get("GPSLongitude")
         date_str = info.get("DateTimeOriginal") or info.get("CreateDate")
         date_iso = _parse_exif_date(date_str) if date_str else None
+        if date_iso is None:
+            date_iso = _get_file_date(path)
         has_gps = lat is not None and lon is not None
 
         return ExifData(

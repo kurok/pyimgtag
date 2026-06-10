@@ -93,6 +93,17 @@ def test_query_router_html_includes_nav(client_factory) -> None:
     assert "nav-link active" in r.text
 
 
+def test_query_html_maps_all_three_cleanup_classes(client_factory) -> None:
+    """'keep' must get its own badge style, not the 'review' warning one (regression)."""
+    html = client_factory().get("/").text
+    assert "'cleanup-del'" in html
+    assert "'cleanup-rev'" in html
+    assert "'cleanup-keep'" in html
+    assert ".cleanup-keep{" in html
+    # The old two-way conditional collapsed keep into the warning style.
+    assert "'cleanup-del' : 'cleanup-rev'" not in html
+
+
 def test_query_images_no_filter_returns_all(client_factory) -> None:
     client = client_factory()
     r = client.get("/api/images")

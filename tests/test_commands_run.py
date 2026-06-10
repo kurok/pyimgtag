@@ -13,24 +13,74 @@ class TestNewestFirstSort:
     """Bug: newest_first sort crashes if a file is deleted between scan and sort."""
 
     def test_sort_survives_deleted_file(self, tmp_path: Path) -> None:
-        """Files deleted after scanning must be handled gracefully, not crash."""
-        p1 = tmp_path / "a.jpg"
-        p2 = tmp_path / "b.jpg"
-        p1.write_bytes(b"x")
-        p2.write_bytes(b"x")
+        """cmd_run --newest-first must sort via the real code path even when a
+        scanned file is deleted before the sort, keying the gone file to 0.0."""
+        import os
 
-        files = [p1, p2]
-        p2.unlink()
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
 
-        # Reproduce the sort from cmd_run with the fix applied
-        def _mtime(f: Path) -> float:
-            try:
-                return f.stat().st_mtime
-            except OSError:
-                return 0.0
+        old = tmp_path / "old.jpg"
+        old.write_bytes(b"x")
+        os.utime(old, (1_000_000_000, 1_000_000_000))
+        new = tmp_path / "new.jpg"
+        new.write_bytes(b"x")
+        gone = tmp_path / "gone.jpg"
+        gone.write_bytes(b"x")
 
-        files.sort(key=_mtime, reverse=True)
-        assert p1 in files
+        args = MagicMock()
+        args.input_dir = str(tmp_path)
+        args.photos_library = None
+        args.extensions = "jpg"
+        args.newest_first = True
+        args.no_cache = True
+        args.dedup = False
+        args.limit = None
+        args.date = None
+        args.date_from = None
+        args.date_to = None
+        args.skip_no_gps = False
+        args.write_back = False
+        args.write_exif = False
+        args.sidecar_only = False
+        args.dry_run = True
+        args.verbose = False
+        args.jsonl_stdout = False
+        args.output_json = None
+        args.output_csv = None
+        args.ollama_url = "http://localhost:11434"
+        args.model = "test"
+        args.max_dim = 512
+        args.timeout = 5
+        args.cache_dir = None
+
+        processed: list[str] = []
+
+        def mock_tag_image(path, context=None):
+            processed.append(Path(path).name)
+            return TagResult(tags=["test"], summary="test")
+
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.run.OllamaClient") as mock_client_cls,
+        ):
+            mock_client = MagicMock()
+            mock_client.tag_image.side_effect = mock_tag_image
+            mock_client_cls.return_value = mock_client
+
+            def patched_scan(path, extensions, recursive=True):
+                result = scan_directory(path, extensions, recursive=recursive)
+                gone.unlink()  # deleted between scan and sort
+                return result
+
+            with patch("pyimgtag.commands.run.scan_directory", side_effect=patched_scan):
+                # Must not raise OSError from the newest-first sort key.
+                rc = cmd_run(args, MagicMock())
+
+        assert rc == 0
+        # Live files are processed newest-first; the deleted file keys to
+        # mtime 0.0 and therefore sorts last (and may be skipped entirely).
+        assert processed[:2] == ["new.jpg", "old.jpg"]
 
     def test_cmd_run_newest_first_with_deleted_file(self, tmp_path: Path) -> None:
         """cmd_run --newest-first must not raise when a file disappears mid-run."""

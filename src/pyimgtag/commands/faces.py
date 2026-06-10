@@ -72,8 +72,8 @@ def cmd_faces(args: argparse.Namespace) -> int:
     if args.faces_action is None:
         print(
             "Usage: pyimgtag faces "
-            "{scan,cluster,review,apply,import-photos,match-references,ui,recluster,"
-            "reset-untrusted,reset}",
+            "{scan,cluster,review,apply,import-photos,match-references,capture-names,"
+            "ui,recluster,reset-untrusted,reset}",
             file=sys.stderr,
         )
         return 1
@@ -338,7 +338,7 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    extensions = {e.strip().lower() for e in args.extensions.split(",")}
+    extensions = {e.strip().lstrip(".").lower() for e in args.extensions.split(",")}
 
     try:
         if args.input_dir:
@@ -674,7 +674,8 @@ def _handle_faces_match_references(args: argparse.Namespace) -> int:
     ref_faces = sum(len(v) for v in references.values())
     print(f"Loaded {len(references)} name(s) from {ref_faces} reference face(s).", file=sys.stderr)
 
-    threshold = getattr(args, "threshold", None) or 0.5
+    raw_threshold = getattr(args, "threshold", None)
+    threshold = 0.5 if raw_threshold is None else raw_threshold
     with ProgressDB(db_path=args.db) as db:
         matches = match_clusters_to_references(db, references, threshold=threshold)
         if not matches:
@@ -790,7 +791,8 @@ def _handle_faces_capture_names(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
 
-    threshold = getattr(args, "threshold", None) or 0.5
+    raw_threshold = getattr(args, "threshold", None)
+    threshold = 0.5 if raw_threshold is None else raw_threshold
     with ProgressDB(db_path=args.db) as db:
         matches = match_clusters_to_references(db, references, threshold=threshold)
         if not matches:

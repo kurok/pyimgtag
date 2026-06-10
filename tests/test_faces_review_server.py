@@ -150,7 +150,9 @@ class TestFacesReviewServerFaces:
         db.set_person_id(fid, pid)
         resp = client.get(f"/api/persons/{pid}/faces")
         assert resp.status_code == 200
-        faces = resp.json()
+        body = resp.json()  # paginated envelope: {"total": N, "items": [...]}
+        assert body["total"] == 1
+        faces = body["items"]
         assert len(faces) == 1
         assert faces[0]["id"] == fid
         assert faces[0]["image_path"] == "img.jpg"

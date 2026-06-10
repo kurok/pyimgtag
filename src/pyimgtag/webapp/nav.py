@@ -114,7 +114,7 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
 """
 
-# Backward-compatibility alias — keeps dashboard_server.py and any other caller working.
+# Backward-compatibility alias — used by the routes_*.py page templates (__NAV_STYLES__).
 NAV_STYLES = DESIGN_CSS
 
 MODAL_HTML = (

@@ -99,8 +99,10 @@ def write_exif_description(
             fields (default). An unrecognized value writes none of the
             description/keyword fields (only date fields are restored).
         merge: When True, existing keywords are preserved and new keywords
-            are added alongside them. When False (default), existing
-            keywords are cleared before writing.
+            are added alongside them (XPKeywords is skipped — it is a flat
+            semicolon-joined string that cannot be merged without reading
+            it first). When False (default), existing keywords are cleared
+            before writing.
 
     Returns:
         None on success, or an error message string on failure.
@@ -130,20 +132,32 @@ def write_exif_description(
             args.append(f"-IPTC:Caption-Abstract={description}")
 
     if keywords:
+        # Plain '=' on a list tag always replaces the whole list, so merge mode
+        # uses exiftool's idempotent add idiom: '-TAG-=kw' then '-TAG+=kw'
+        # (remove-then-add avoids duplicate entries on re-runs).
         if _write_iptc:
-            if not merge:
+            if merge:
+                for kw in keywords:
+                    args.append(f"-IPTC:Keywords-={kw}")
+                    args.append(f"-IPTC:Keywords+={kw}")
+            else:
                 args.append("-IPTC:Keywords=")
-            for kw in keywords:
-                args.append(f"-IPTC:Keywords={kw}")
+                for kw in keywords:
+                    args.append(f"-IPTC:Keywords={kw}")
         if _write_xmp:
-            if not merge:
+            if merge:
+                for kw in keywords:
+                    args.append(f"-XMP:Subject-={kw}")
+                    args.append(f"-XMP:Subject+={kw}")
+            else:
                 args.append("-XMP:Subject=")
-            for kw in keywords:
-                args.append(f"-XMP:Subject={kw}")
-        if _write_exif_fields:
-            if not merge:
-                args.append("-XPKeywords=")
-            # XPKeywords is a semicolon-separated single value
+                for kw in keywords:
+                    args.append(f"-XMP:Subject={kw}")
+        if _write_exif_fields and not merge:
+            # XPKeywords is a semicolon-separated single string, not a list:
+            # '+=' does not apply and rewriting it would drop existing
+            # keywords, so it is skipped entirely in merge mode.
+            args.append("-XPKeywords=")
             args.append(f"-XPKeywords={';'.join(keywords)}")
 
     # Restore date fields to prevent silent timestamp changes

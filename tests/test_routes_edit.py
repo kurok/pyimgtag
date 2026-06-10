@@ -139,6 +139,34 @@ class TestRunDriftPruneJob:
             assert job.last_error == "photos_timeout"
             assert len(job.recent) == 3
 
+    def test_mixed_report_prunes_and_records_only_disk_missing(self, tmp_path):
+        """photos_missing rows are neither pruned nor logged as deleted (regression)."""
+        from pyimgtag.cleanup_drift import DriftReport
+
+        _reset_job_for_tests()
+        with ProgressDB(db_path=tmp_path / "test.db") as db:
+            job = _Job(job_id="drift-mixed", state="running")
+            disk_missing = ["/gone/a.jpg"]
+            photos_missing = ["/photos/b.jpg", "/photos/c.jpg"]
+            report = DriftReport(
+                total=10,
+                disk_missing=1,
+                photos_missing=2,
+                dead_paths=disk_missing + photos_missing,
+                disk_missing_paths=disk_missing,
+            )
+            with (
+                patch("pyimgtag.cleanup_drift.scan_drift", return_value=report),
+                patch("pyimgtag.cleanup_drift.prune_drift", return_value=1) as prune,
+            ):
+                _run_drift_prune_job(db, job)
+            prune.assert_called_once_with(db, disk_missing)
+            assert job.state == "done"
+            assert job.total == 1
+            assert job.done == 1
+            # The recent-events sample must only contain actually-pruned rows.
+            assert [e["file_name"] for e in job.recent] == disk_missing
+
 
 class TestCategoriseApplescriptError:
     """Cover every branch of _categorise_applescript_error (lines 96-122)."""
@@ -267,6 +295,19 @@ class TestEditRouterEndpoints:
         html = render_edit_html("/edit")
         assert "/edit/api/marked" in html
         assert 'href="/edit"' in html
+
+    def test_html_prune_button_counts_disk_missing_only(self):
+        """The destructive button label/gating must match what the backend deletes."""
+        html = render_edit_html("/edit")
+        assert "_pruneCount = d.disk_missing;" in html
+        assert "_pruneCount > 0" in html
+        # The danger-note names the CLI flag required for photos_missing rows.
+        assert "--prune-photos-missing" in html
+
+    def test_html_poll_status_resumes_polling_for_inflight_job(self):
+        """Navigating back mid-run must restart the 1 s polling loop."""
+        html = render_edit_html("/edit")
+        assert "if (d.state === 'running' && !_pollHandle)" in html
 
     def test_marked_endpoint(self, tmp_path):
         _reset_job_for_tests()

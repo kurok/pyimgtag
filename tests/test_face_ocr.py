@@ -154,6 +154,22 @@ class TestCapturePeopleScreenshot:
         with pytest.raises(OcrUnavailableError):
             capture_people_screenshot(tmp_path / "out.png")
 
+    def test_missing_screencapture_binary_raises_unavailable(self, tmp_path, monkeypatch):
+        """Regression: a missing ``screencapture`` binary must surface as the
+        documented OcrUnavailableError, not a raw FileNotFoundError."""
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setitem(sys.modules, "Quartz", _FakeQuartz([]))
+        monkeypatch.setattr(face_ocr, "_photos_window_id", lambda _quartz: 42)
+
+        def fake_run(cmd, **_kwargs):
+            if cmd[0] == "screencapture":
+                raise FileNotFoundError("screencapture not on PATH")
+            return None  # osascript activate succeeds
+
+        monkeypatch.setattr(face_ocr.subprocess, "run", fake_run)
+        with pytest.raises(OcrUnavailableError):
+            capture_people_screenshot(tmp_path / "out.png")
+
 
 class TestBuildReferencesFromScreenshot:
     def _png(self, tmp_path, w=1000, h=800):

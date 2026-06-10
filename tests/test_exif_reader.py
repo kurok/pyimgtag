@@ -189,12 +189,15 @@ class TestReadExifread:
         mock_tag.__bool__ = lambda _: True
         mock_tag.__str__ = lambda _: "not a date"
         tags = {"EXIF DateTimeOriginal": mock_tag}
-        with patch("pyimgtag.exif_reader.exifread") as mock_er:
+        with (
+            patch("pyimgtag.exif_reader.exifread") as mock_er,
+            patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
+        ):
             mock_er.process_file.return_value = tags
             result = _read_exifread(fake_img)
         assert result is not None
-        # date_iso will be None from parse and then fallback to file date
-        assert result.date_original is not None or result.date_original is None  # no crash
+        # date parse fails ("not a date") → falls back to the file date
+        assert result.date_original == "2026-01-01 00:00:00"
 
 
 class TestReadExif:
@@ -283,6 +286,26 @@ class TestReadExiftool:
         assert result.has_gps
         assert abs(result.gps_lat - 48.8566) < 1e-6
         assert result.date_original == "2026-04-01 14:30:00"
+
+    def test_no_exif_date_falls_back_to_file_date(self, tmp_path: Path):
+        """exiftool tier must apply the same file-date fallback as the
+        exifread and Pillow tiers when the image has no EXIF date."""
+        import json
+
+        from pyimgtag.exif_reader import _read_exiftool
+
+        fake_img = tmp_path / "photo.jpg"
+        fake_img.write_bytes(b"fake")
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = json.dumps([{"SourceFile": str(fake_img)}])
+        with (
+            patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc),
+            patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
+        ):
+            result = _read_exiftool(fake_img)
+        assert result is not None
+        assert result.date_original == "2026-01-01 00:00:00"
 
     def test_nonzero_returncode_returns_none(self, tmp_path: Path):
         """exiftool exit != 0 returns None (line 78)."""

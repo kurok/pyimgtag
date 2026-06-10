@@ -444,16 +444,21 @@ def _thumb_via_sips(image_path: str, size: int) -> bytes | None:
             return None
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             tmp_path = tmp.name
-        proc = subprocess.run(  # noqa: S603
-            ["sips", "-s", "format", "jpeg", "-Z", str(size), image_path, "--out", tmp_path],
-            capture_output=True,
-            timeout=30,
-        )
-        if proc.returncode != 0 or not _P(tmp_path).is_file():
-            return None
-        data = _P(tmp_path).read_bytes()
-        _P(tmp_path).unlink(missing_ok=True)
-        return data if data else None
+        try:
+            proc = subprocess.run(  # noqa: S603
+                ["sips", "-s", "format", "jpeg", "-Z", str(size), image_path, "--out", tmp_path],
+                capture_output=True,
+                timeout=30,
+            )
+            if proc.returncode != 0 or not _P(tmp_path).is_file():
+                return None
+            data = _P(tmp_path).read_bytes()
+            return data if data else None
+        finally:
+            # Remove the temp file on every exit path — a failing sips run
+            # (nonzero exit, timeout, OSError) must not leak orphaned .jpg
+            # files in the temp directory.
+            _P(tmp_path).unlink(missing_ok=True)
     except Exception:  # noqa: BLE001
         return None
 

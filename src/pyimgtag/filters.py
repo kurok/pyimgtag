@@ -1,4 +1,4 @@
-"""CLI filter logic for date ranges, GPS presence, and limit."""
+"""CLI filter logic for date ranges."""
 
 from __future__ import annotations
 

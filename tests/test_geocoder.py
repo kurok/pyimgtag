@@ -99,6 +99,22 @@ class TestFetchErrors:
         assert "unexpected payload" in result.error
         assert result.nearest_place is None
 
+    def test_error_payload_returns_error_and_is_not_cached(self, tmp_path):
+        # Nominatim signals lookup failure with HTTP 200 and a body like
+        # {"error": "Unable to geocode"}. It must map to an error GeoResult
+        # and never be written to the disk cache as a successful lookup.
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"error": "Unable to geocode"}
+        mock_resp.raise_for_status.return_value = None
+        with patch.object(geo._session, "get", return_value=mock_resp):
+            with patch("time.sleep"):
+                result = geo.resolve(45.0, -30.0)
+        assert result.error is not None
+        assert "Unable to geocode" in result.error
+        assert result.nearest_place is None
+        assert geo._cache.get("45.0,-30.0") is None
+
     def test_invalid_json_returns_error(self, tmp_path):
         # requests' Response.json() raises requests.exceptions.JSONDecodeError
         # (a subclass of BOTH RequestException and ValueError) on a malformed

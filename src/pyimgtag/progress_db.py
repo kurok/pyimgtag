@@ -411,7 +411,8 @@ class ProgressDB:
             judged: True = only images with a judge_scores row; False = only un-judged;
                 None = any.
             sort: One of ``path_asc`` (default), ``path_desc``, ``newest``,
-                ``oldest``, ``judge_desc``, ``judge_asc``.
+                ``oldest``, ``judge_desc``, ``judge_asc``, ``shot_desc``,
+                ``shot_asc``.
 
         Returns:
             List of image metadata dicts.
@@ -437,9 +438,10 @@ class ProgressDB:
     def _query_row_to_dict(row: tuple) -> dict:
         """Convert a query_images SELECT row to a metadata dict.
 
-        The trailing three columns ``js.weighted_score``, ``js.reason``,
-        ``js.verdict`` come from the LEFT JOIN with ``judge_scores`` and
-        are ``None`` for any image that has not been judged yet.
+        Columns 14-16 (``js.weighted_score``, ``js.reason``, ``js.verdict``)
+        come from the LEFT JOIN with ``judge_scores`` and are ``None`` for any
+        image that has not been judged yet; the trailing column 17 is
+        ``pi.image_date``.
         """
         file_path: str = row[0]
         tags_raw: str | None = row[1]
@@ -612,7 +614,8 @@ class ProgressDB:
             params = ("delete",)
         # Parameterized query; placeholders are code-controlled literals
         query = (  # nosec B608
-            "SELECT file_path, tags, scene_summary, processed_at, cleanup_class "
+            "SELECT file_path, tags, scene_summary, image_date, cleanup_class, "
+            "nearest_city, nearest_country "
             "FROM processed_images "
             "WHERE cleanup_class IN ("
             + placeholders  # nosec B608
@@ -632,21 +635,32 @@ class ProgressDB:
                     "scene_summary": row[2],
                     "image_date": row[3],
                     "cleanup_class": row[4],
-                    "nearest_city": None,
-                    "nearest_country": None,
+                    "nearest_city": row[5],
+                    "nearest_country": row[6],
                 }
             )
         return result
 
     # --- review UI query/update methods ---
 
+    # SQLite basename idiom over the separator-normalized path NORM
+    # (backslashes folded to '/' so Windows paths work too):
+    # replace(NORM, '/', '') yields the set of non-slash characters,
+    # rtrim(NORM, <that>) strips the basename off the right (stopping at the
+    # last '/'), and the outer replace() removes that directory prefix.
+    # A file_path tie-breaker keeps pagination stable for duplicate basenames.
+    _NORM_PATH = "replace(file_path, '\\', '/')"
+    _NAME_SORT_EXPR = (
+        f"LOWER(replace({_NORM_PATH}, rtrim({_NORM_PATH}, replace({_NORM_PATH}, '/', '')), ''))"
+    )
+
     _GET_IMAGES_SORTS: dict[str, str] = {
         "path_asc": "file_path ASC",
         "path_desc": "file_path DESC",
         "newest": "processed_at DESC, file_path ASC",
         "oldest": "processed_at ASC, file_path ASC",
-        "name_asc": "LOWER(file_path) ASC",
-        "name_desc": "LOWER(file_path) DESC",
+        "name_asc": f"{_NAME_SORT_EXPR} ASC, file_path ASC",
+        "name_desc": f"{_NAME_SORT_EXPR} DESC, file_path DESC",
     }
 
     def get_images(
@@ -1771,7 +1785,12 @@ class ProgressDB:
         return len(tags) > 0
 
     def update_missing_fields(self, file_path: Path, result: ImageResult) -> None:
-        """Update only NULL columns from result; never overwrite existing non-null values."""
+        """Update only NULL columns from result.
+
+        ``has_text`` additionally treats 0 as unset (it can be upgraded
+        0 -> 1 but never downgraded). Other existing non-null values are
+        never overwritten.
+        """
         self._conn.execute(
             """
             UPDATE processed_images SET

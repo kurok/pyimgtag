@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+from pathlib import Path
 from unittest.mock import patch
 
 from PIL import Image
@@ -84,9 +85,13 @@ class TestFaceThumbnailB64:
 
         is_heic/convert_heic_to_jpeg are mocked at their module boundary so the
         HEIC branch runs even on platforms without sips (e.g. CI on Linux).
+        The mock mirrors the real contract: a Path to a JPEG inside a fresh
+        temp dir that the caller owns — and must clean up after reading.
         """
         # The actual pixels live in this JPEG; the .heic path is only a label.
-        real = self._make_image(tmp_path, width=200, height=200, color=(10, 200, 30))
+        owned_dir = tmp_path / "pyimgtag_heic_fake"
+        owned_dir.mkdir()
+        real = Path(self._make_image(owned_dir, width=200, height=200, color=(10, 200, 30)))
         heic_path = str(tmp_path / "photo.heic")
 
         with (
@@ -99,6 +104,8 @@ class TestFaceThumbnailB64:
         assert result is not None
         thumb = Image.open(io.BytesIO(base64.b64decode(result))).convert("RGB")
         assert thumb.format is None or thumb.size == (120, 120)
+        # Regression: the owned temp conversion dir used to be leaked.
+        assert not owned_dir.exists()
 
     def test_degenerate_crop_after_clamp_returns_none(self, tmp_path):
         """A bbox fully off the right/bottom edge collapses the crop → None.

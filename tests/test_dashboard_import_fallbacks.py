@@ -63,7 +63,7 @@ def test_maybe_start_dashboard_falls_back_on_import_error(capsys, tmp_path):
 
 
 def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_path, monkeypatch):
-    """When DashboardServer.start() returns False, the 'not yet ready' message should print."""
+    """A slow start (start() False, thread alive) prints the still-starting message."""
     from unittest.mock import MagicMock, patch
 
     from pyimgtag import run_registry
@@ -90,6 +90,10 @@ def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_pat
         def start(self, ready_timeout: float = 5.0) -> bool:
             return False
 
+        def is_alive(self) -> bool:
+            # Server thread still running: a slow start, not a dead bind.
+            return True
+
         def stop(self, timeout: float = 3.0) -> None:
             pass
 
@@ -103,7 +107,7 @@ def test_maybe_start_dashboard_prints_not_ready_when_start_fails(capsys, tmp_pat
         assert session is not None
         assert dashboard is not None
         out = capsys.readouterr().out
-        assert "not yet ready" in out
+        assert "not ready yet; still starting in background" in out
     finally:
         run_registry.set_current(None)
 

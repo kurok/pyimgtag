@@ -164,6 +164,39 @@ class TestApplyMatches:
             assert auto not in persons  # cluster folded in and removed
             assert len(persons[existing].face_ids) == 2  # Alice now owns the faces
 
+    def test_second_match_with_same_name_merges_into_first(self, tmp_path: Path):
+        """Regression: two clusters matched to the same name (DBSCAN split one
+        real person) must end up as ONE trusted person — the second match
+        merges into the cluster the first match renamed."""
+        with _db(tmp_path) as db:
+            first = _cluster(db, "Person 1", [_vec((0, 1.0))])
+            second = _cluster(db, "Person 2", [_vec((0, 0.99))])
+
+            result = apply_matches(
+                db,
+                [
+                    NameMatch(
+                        person_id=first,
+                        current_label="Person 1",
+                        name="Alice",
+                        distance=0.10,
+                        face_count=1,
+                    ),
+                    NameMatch(
+                        person_id=second,
+                        current_label="Person 2",
+                        name="Alice",
+                        distance=0.12,
+                        face_count=1,
+                    ),
+                ],
+            )
+
+            assert result == {"renamed": 1, "merged": 1}
+            alices = [p for p in db.get_persons() if p.label == "Alice"]
+            assert len(alices) == 1  # no duplicate trusted persons
+            assert len(alices[0].face_ids) == 2
+
     def test_end_to_end_match_then_apply(self, tmp_path: Path):
         with _db(tmp_path) as db:
             existing = db.create_person(label="Alice", trusted=True, confirmed=True)

@@ -207,8 +207,10 @@ def _run_drift_prune_job(db: ProgressDB, job: _Job) -> None:
 
     Reuses the same ``_Job`` shape as the delete-from-Photos worker so
     the existing status poller renders this run with no extra glue —
-    ``total`` is set to the dead-row count, ``done`` increments per
-    deleted batch, and ``recent`` records each batch as a single event.
+    ``total`` is set to the ``disk_missing`` row count (the only category
+    the web action prunes), ``done`` is set once after the single prune
+    batch completes, and ``recent`` records up to ``_RECENT_LIMIT``
+    pruned paths.
 
     Errors from the AppleScript probe are surfaced as a job-level
     ``last_error`` (categorised by :func:`_categorise_applescript_error`
@@ -262,7 +264,7 @@ def _run_drift_prune_job(db: ProgressDB, job: _Job) -> None:
         job.done = len(prune_paths)
         # Keep the deleted-row sample short so the events panel stays
         # readable on a 22 k-photo library.
-        for path in report.dead_paths[:_RECENT_LIMIT]:
+        for path in prune_paths[:_RECENT_LIMIT]:
             job.recent.append({"file_name": path, "status": "ok"})
         job.state = "done"
         job.finished_at = time.time()
@@ -383,9 +385,11 @@ __NAV__
 
     <div class="danger-note">
        <strong>DB-only delete.</strong> This action only removes rows
-       from <code>processed_images</code>; the photos themselves are
-       already gone (or no longer indexed by Photos.app). A re-scan
-       will re-process anything still present.
+       from <code>processed_images</code> whose backing file is missing
+       on disk. Rows merely "not in Photos.app" are excluded as
+       false-positive-prone — prune those with the explicit
+       <code>--prune-photos-missing</code> CLI flag. A re-scan will
+       re-process anything still present.
     </div>
 
     <div class="confirm-row">
@@ -412,7 +416,8 @@ __NAV__
 </div>
 <script>
 let _markedCount = 0;
-let _driftCount = 0;
+let _driftCount = 0;   // display-only: disk_missing + photos_missing
+let _pruneCount = 0;   // what the prune action actually deletes: disk_missing only
 let _polling = false;
 let _pollHandle = null;
 
@@ -454,11 +459,12 @@ async function loadDrift() {
     const r = await fetch('__API_BASE__/api/drift');
     const d = await r.json();
     _driftCount = d.disk_missing + d.photos_missing;
+    _pruneCount = d.disk_missing;
     document.getElementById('driftDeadCount').textContent = _driftCount;
     document.getElementById('driftDiskMissing').textContent = d.disk_missing;
     document.getElementById('driftPhotosMissing').textContent = d.photos_missing;
     document.getElementById('driftTotal').textContent = d.total;
-    document.getElementById('pruneBtnCount').textContent = _driftCount;
+    document.getElementById('pruneBtnCount').textContent = _pruneCount;
     const numEl = document.getElementById('driftDeadCount');
     if (_driftCount === 0) numEl.classList.add('zero');
     else numEl.classList.remove('zero');
@@ -482,7 +488,7 @@ async function loadDrift() {
 function updatePruneButton() {
   const btn = document.getElementById('pruneBtn');
   const chk = document.getElementById('driftConfirmChk');
-  btn.disabled = !(chk.checked && _driftCount > 0 && !_polling);
+  btn.disabled = !(chk.checked && _pruneCount > 0 && !_polling);
 }
 
 async function pruneDrift() {
@@ -552,6 +558,12 @@ async function pollStatus() {
     const r = await fetch('__API_BASE__/api/status');
     d = await r.json();
   } catch (e) { return; }
+  // Resume the 1 s polling loop when landing on a page with a job mid-run
+  // (the initial pollStatus() call below otherwise renders one frozen snapshot).
+  if (d.state === 'running' && !_pollHandle) {
+    _polling = true;
+    _pollHandle = setInterval(pollStatus, 1000);
+  }
   const pill = document.getElementById('statePill');
   pill.textContent = d.state;
   pill.className = 'state-pill ' + (d.state || '');

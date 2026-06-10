@@ -431,6 +431,24 @@ class TestAssignFacesMultiFace:
             assert skipped == 0
             assert self._owner(db, fid) == named  # reclaimed from the auto cluster
 
+    def test_remaining_stranger_in_group_photo_not_direct_assigned(self, tmp_path):
+        """Regression: a group photo whose only *candidate* face is a stranger
+        (the person's own face is already assigned, e.g. on re-import) must go
+        through the Phase 2 embedding check, not Phase 1 direct assignment —
+        "single-face" means total faces in the photo, not remaining candidates."""
+        with self._db(tmp_path) as db:
+            pid = db.create_person(label="Alice", confirmed=True, source="photos", trusted=True)
+            # Group shot: Alice's face was assigned by a prior import…
+            alice = self._face(db, "/p/group.jpg", embedding=self._vec((0, 1.0)))
+            db.set_person_id(alice, pid)
+            # …leaving one unassigned stranger with an orthogonal embedding.
+            stranger = self._face(db, "/p/group.jpg", embedding=self._vec((40, 1.0)))
+
+            skipped = _assign_faces_to_person(db, pid, ["group"])
+
+            assert skipped == 1  # left for manual review, not mis-assigned
+            assert self._owner(db, stranger) is None
+
     def test_does_not_reclaim_from_trusted_person(self, tmp_path):
         """A face already owned by another trusted/confirmed person is never
         stolen, even on a UUID match."""
@@ -626,6 +644,29 @@ class TestBulkAppleScriptPath:
             # Single-face photo gets auto-assigned.
             assert len(alice.face_ids) == 1
 
+    def test_strips_photos_id_suffix_from_uuid(self, tmp_path):
+        """Regression: Photos 5+ AppleScript media-item ids are
+        ``<UUID>/L0/001``; the suffix must be stripped or the
+        ``get_faces_by_uuid`` LIKE patterns can never match and every person
+        imports with 0 faces."""
+        with self._make_db(tmp_path) as db:
+            det = FaceDetection(
+                image_path="/photos/abc123.jpg",
+                bbox_x=0,
+                bbox_y=0,
+                bbox_w=50,
+                bbox_h=50,
+                confidence=0.9,
+            )
+            db.insert_face("/photos/abc123.jpg", det)
+            stdout = "abc123/L0/001\tAlice|\n"
+            with _bulk_applescript_returns(stdout):
+                imported, _ = import_photos_persons(db)
+
+            assert imported == 1
+            alice = next(p for p in db.get_persons() if p.label == "Alice")
+            assert len(alice.face_ids) == 1  # uuid matched despite the suffix
+
     def test_skips_malformed_lines(self, tmp_path):
         """Blank lines, lines with no tab, and embedded pipes don't crash."""
         with self._make_db(tmp_path) as db:
@@ -740,6 +781,38 @@ class TestProgressOutput:
             assert any("import complete" in m for m in messages), (
                 f"missing final summary; got {messages!r}"
             )
+
+    def test_heartbeat_not_reemitted_for_duplicate_uuid_rows(self):
+        """Regression: while ``processed`` sits at a multiple of the cadence,
+        duplicate-uuid rows (one row per photo×person from the app-level
+        walker) must not re-emit the identical heartbeat line."""
+        import time
+
+        from pyimgtag.photos_faces_importer import _PROGRESS_EVERY, _parse_bulk_output
+
+        lines = [f"uuid_{i:04d}\tAlice|\n" for i in range(_PROGRESS_EVERY)]
+        # processed now sits exactly at the cadence; these rows repeat a uuid.
+        lines += [f"uuid_0000\tPerson_{i}|\n" for i in range(5)]
+        messages: list[str] = []
+
+        _parse_bulk_output("".join(lines), time.monotonic(), messages.append)
+
+        periodic = [m for m in messages if m.startswith("\r[faces] processed")]
+        # Exactly one cadence line (at _PROGRESS_EVERY) plus the final summary.
+        assert len(periodic) == 2, f"heartbeat re-emitted: {periodic!r}"
+
+    def test_default_progress_overwrites_cr_lines(self, capsys):
+        """``\\r``-prefixed heartbeats must not get a trailing newline, so the
+        next counter overwrites them instead of spamming scrollback."""
+        from pyimgtag.photos_faces_importer import _default_progress
+
+        _default_progress("\r[faces] processed 200")
+        _default_progress("\r[faces] processed 400")
+        _default_progress("")  # callers' final newline
+        _default_progress("done")
+
+        err = capsys.readouterr().err
+        assert err == "\r[faces] processed 200\r[faces] processed 400\ndone\n"
 
 
 class TestKeyboardInterruptHandling:

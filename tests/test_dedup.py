@@ -37,27 +37,29 @@ class TestHammingDistance:
         assert h is not None
         assert hamming_distance(h, h) == 0
 
-    def test_different_hashes_nonzero_distance(self):
-        # Create two visually different images
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f1:
-            img1 = Image.new("RGB", (64, 64), color="white")
-            img1.save(f1, format="PNG")
-            f1.flush()
-            h1 = compute_phash(f1.name)
+    def test_different_hashes_nonzero_distance(self, tmp_path):
+        # Structured images with different low-frequency content (horizontal
+        # gradient vs coarse checkerboard) provably produce different phashes,
+        # unlike solid colors which can collide.
+        gradient = Image.new("L", (64, 64))
+        gradient.putdata([x * 4 for _ in range(64) for x in range(64)])
+        gradient_path = tmp_path / "gradient.png"
+        gradient.save(gradient_path, format="PNG")
+        h1 = compute_phash(gradient_path)
 
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f2:
-            img2 = Image.new("RGB", (64, 64), color="black")
-            img2.save(f2, format="PNG")
-            f2.flush()
-            h2 = compute_phash(f2.name)
+        checker = Image.new("L", (64, 64))
+        checker.putdata(
+            [255 if (x // 32 + y // 32) % 2 else 0 for y in range(64) for x in range(64)]
+        )
+        checker_path = tmp_path / "checker.png"
+        checker.save(checker_path, format="PNG")
+        h2 = compute_phash(checker_path)
 
         assert h1 is not None
         assert h2 is not None
-        # Solid white vs solid black should produce different hashes
-        # (distance may be 0 for some solid colors, so just check it's an int >= 0)
         dist = hamming_distance(h1, h2)
         assert isinstance(dist, int)
-        assert dist >= 0
+        assert dist > 0
 
 
 class TestFindDuplicateGroups:
@@ -114,3 +116,11 @@ class TestHammingDistanceEdgeCases:
 
         with pytest.raises(ValueError, match="Invalid perceptual hash"):
             hamming_distance("", "d4c4d4e4f4a4b4c4")
+
+    def test_mismatched_hash_lengths_raise_value_error(self):
+        # Two individually valid hex hashes of different sizes must raise the
+        # documented ValueError, not leak imagehash's raw TypeError.
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid perceptual hash"):
+            hamming_distance("ffff", "ffffffffffffffff")

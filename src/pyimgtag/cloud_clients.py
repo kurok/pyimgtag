@@ -1,12 +1,15 @@
 """Cloud vision-model clients for pyimgtag.
 
-Provides Anthropic, OpenAI, and Gemini client classes with the same public
-shape as :class:`pyimgtag.ollama_client.OllamaClient`:
+Provides Anthropic, OpenAI, and Gemini client classes that share the same
+method surface as :class:`pyimgtag.ollama_client.OllamaClient`:
 
-- ``__init__(model, max_dim, timeout, api_key=None, base_url=None)``
 - ``tag_image(file_path, context=None) -> TagResult``
 - ``judge_image(file_path) -> JudgeScores | None``
 - ``close()``
+
+Constructors differ: cloud clients take ``api_key`` (default: the provider's
+environment variable) and ``base_url`` (default: the provider's endpoint),
+while ``OllamaClient`` takes ``base_url`` and no ``api_key``.
 
 Each client routes the same JPEG bytes through the provider's vision API,
 asks for a strict JSON response, and feeds the returned text into the
@@ -67,8 +70,7 @@ DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
 
 _ANTHROPIC_API_VERSION = "2023-06-01"
 
-# Token budget for the JSON response. Slightly larger than Ollama's default
-# because cloud models pad JSON with whitespace.
+# Token budget for the JSON response; matches Ollama's _MODEL_MAX_TOKENS.
 _CLOUD_MAX_TOKENS = 1024
 
 
@@ -345,7 +347,9 @@ class GeminiClient:
         self.base_url = base_url.rstrip("/")
         self._api_key = _resolve_gemini_key(api_key)
         self._session = requests.Session()
-        self._session.headers.update({"Content-Type": "application/json"})
+        self._session.headers.update(
+            {"Content-Type": "application/json", "x-goog-api-key": self._api_key}
+        )
 
     def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
         """Tag an image via the provider vision API.
@@ -424,7 +428,7 @@ class GeminiClient:
                 "maxOutputTokens": _CLOUD_MAX_TOKENS,
             },
         }
-        url = f"{self.base_url}/v1beta/models/{self.model}:generateContent?key={self._api_key}"
+        url = f"{self.base_url}/v1beta/models/{self.model}:generateContent"
         try:
             resp = self._session.post(url, json=payload, timeout=self.timeout)
             resp.raise_for_status()

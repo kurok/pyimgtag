@@ -92,6 +92,11 @@ class ReverseGeocoder:
             # resolve()'s documented "always returns a GeoResult" contract.
             return GeoResult(error=f"Geocoding returned unexpected payload for {lat},{lon}")
 
+        if "error" in data:
+            # Nominatim reports lookup failures with HTTP 200 and an "error"
+            # body; surface it as an error so resolve() never caches it.
+            return GeoResult(error=f"Geocoding failed for {lat},{lon}: {data['error']}")
+
         addr = data.get("address", {})
         return GeoResult(
             nearest_place=addr.get("village") or addr.get("town") or addr.get("suburb"),

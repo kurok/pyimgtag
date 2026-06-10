@@ -96,21 +96,23 @@ def _render_html() -> str:
       stateEl.className = 'pill-state ' + (d.state || 'running');
       cmdEl.textContent = d.command || '';
       currentEl.innerHTML = '';
-      if (d.current_file) {
+      if (d.current_item) {
         // Click-through into the review page filtered to this single image
         // so the user can inspect the model's output for the file currently
         // being processed.
         const a = document.createElement('a');
-        a.href = '/review?file=' + encodeURIComponent(d.current_file);
-        a.textContent = d.current_file;
+        a.href = '/review?file=' + encodeURIComponent(d.current_item);
+        a.textContent = d.current_item;
         a.title = 'View result for this image';
         currentEl.appendChild(a);
       } else {
         currentEl.textContent = '(no active item)';
       }
-      errorEl.textContent = d.error || '';
+      errorEl.textContent = d.last_error || '';
       pauseBtn.disabled = d.state !== 'running';
-      unpauseBtn.disabled = d.state !== 'paused';
+      // Resuming is also allowed while a pause is still pending — the server
+      // cancels a PAUSING state the same way it resumes a PAUSED one.
+      unpauseBtn.disabled = d.state !== 'paused' && d.state !== 'pausing';
       stopBtn.disabled = d.state === 'completed' || d.state === 'interrupted' || d.state === 'failed';
       countersEl.innerHTML = '';
       for (const [k, v] of Object.entries(d.counters || {})) {

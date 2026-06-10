@@ -257,14 +257,23 @@ class TestWriteExifDescriptionFormats:
                 assert "-IPTC:Keywords=kw" not in cmd
 
     def test_merge_skips_keyword_clear(self):
+        """merge=True must preserve existing keywords: idempotent '-=' then '+='
+        pairs per keyword, no clearing args, no list-replacing '=' assignments,
+        and no XPKeywords (a flat string that cannot be merged)."""
         with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
             with self._patch_run(self._date_read_result(), _make_completed_process(0)) as mock_run:
                 write_exif_description("/p/photo.jpg", keywords=["kw"], merge=True)
                 cmd = mock_run.call_args_list[1][0][0]
-                assert "-IPTC:Keywords=kw" in cmd
+                # Remove-then-add pairs, in that order.
+                assert cmd.index("-IPTC:Keywords-=kw") < cmd.index("-IPTC:Keywords+=kw")
+                assert cmd.index("-XMP:Subject-=kw") < cmd.index("-XMP:Subject+=kw")
+                # No clear args and no plain '=' (which would replace the list).
                 assert "-IPTC:Keywords=" not in cmd
+                assert "-IPTC:Keywords=kw" not in cmd
                 assert "-XMP:Subject=" not in cmd
-                assert "-XPKeywords=" not in cmd
+                assert "-XMP:Subject=kw" not in cmd
+                # XPKeywords skipped entirely in merge mode.
+                assert not any(a.startswith("-XPKeywords") for a in cmd)
 
     def test_no_merge_clears_keywords(self):
         with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):

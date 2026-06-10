@@ -45,6 +45,17 @@ class TestWriteJson:
             with pytest.raises(OSError, match="Failed to write JSON"):
                 write_json([_sample()], out)
 
+    def test_writes_non_ascii_as_utf8(self, tmp_path):
+        """Output must be UTF-8 regardless of locale (cp1252 on Windows would
+        otherwise raise UnicodeEncodeError on non-ASCII place names)."""
+        out = tmp_path / "out.json"
+        result = _sample()
+        result.nearest_city = "Óbidos"
+        write_json([result], out)
+        data = json.loads(out.read_text(encoding="utf-8"))
+        assert data[0]["nearest_city"] == "Óbidos"
+        assert "Óbidos".encode() in out.read_bytes()
+
 
 class TestWriteCsv:
     def test_writes_csv_with_header(self, tmp_path):
@@ -62,6 +73,18 @@ class TestWriteCsv:
         with patch("builtins.open", side_effect=OSError("permission denied")):
             with pytest.raises(OSError, match="Failed to write CSV"):
                 write_csv([_sample()], out)
+
+    def test_writes_non_ascii_as_utf8(self, tmp_path):
+        """Output must be UTF-8 regardless of locale (cp1252 on Windows would
+        otherwise raise UnicodeEncodeError on non-ASCII place names)."""
+        out = tmp_path / "out.csv"
+        result = _sample()
+        result.nearest_city = "Óbidos"
+        write_csv([result], out)
+        with open(out, encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+        assert rows[0]["nearest_city"] == "Óbidos"
+        assert "Óbidos".encode() in out.read_bytes()
 
 
 class TestJsonl:

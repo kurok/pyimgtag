@@ -44,10 +44,10 @@ pyimgtag/
     ollama_client.py  Ollama vision API client
     cloud_clients.py  Anthropic / OpenAI / Gemini vision-API adapters
     geocoder.py       Nominatim reverse geocoder with disk cache
-    filters.py        Date/GPS filter logic
+    filters.py        Date filter logic
     output_writer.py  JSON/CSV/JSONL output
     progress_db.py    SQLite progress DB with versioned migrations
-    judge_scorer.py   Weighted 13-criterion rubric scoring
+    judge_scorer.py   Score aggregation (legacy 13-criterion weighting)
     cache.py          Simple JSON disk cache
     commands/         Per-subcommand handlers (run, judge, faces, query, ...)
     webapp/           FastAPI dashboard + review/faces/tags/query/judge UIs
@@ -227,7 +227,7 @@ Every push and PR triggers these parallel CI jobs (`.github/workflows/python-pac
 | **lint** | `ruff format --check` + `ruff check` |
 | **typecheck** | mypy type checking |
 | **pre-commit** | Trailing whitespace, EOF, YAML, JSON, merge conflicts, ruff |
-| **test** | Pytest matrix: Ubuntu / macOS / Windows on Python 3.14; coverage uploaded from Ubuntu (85% threshold) |
+| **test** | Pytest matrix: Ubuntu / macOS / Windows on Python 3.14; coverage uploaded from Ubuntu to Codecov (informational, non-blocking) |
 | **security** | bandit + pip-audit (dependency vulnerabilities) |
 | **docker** | Build the Docker image and run smoke tests |
 
@@ -270,7 +270,7 @@ A separate `pr-tests` workflow runs a Playwright Chromium smoke against the dash
 
 ### Dependencies
 
-- Keep runtime dependencies minimal (currently: `requests`, `Pillow`, `imagehash`)
+- Keep runtime dependencies minimal (currently: `requests`, `Pillow`, `imagehash`, `exifread`)
 - Optional dependencies go in `[project.optional-dependencies]`
 - Guard optional imports with `try/except ImportError`
 - New dependencies need justification in the PR description
@@ -299,7 +299,7 @@ If a PR or issue hasn't received a response after 7 days, feel free to leave a p
 
 ## Code of Conduct
 
-This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior via GitHub Issues or by contacting the maintainers directly.
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior privately via GitHub's private reporting form (see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)) — do **not** open a public issue.
 
 ## Questions?
 

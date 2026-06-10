@@ -350,7 +350,7 @@ def capture_people_screenshot(out_path: str | Path) -> Path:
             capture_output=True,
             timeout=30,
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
         raise OcrUnavailableError(
             f"Could not capture the Photos window: {exc}. If this persists, grant "
             "Screen Recording permission to your terminal under System Settings → "
