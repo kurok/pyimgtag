@@ -8,7 +8,6 @@ import sys
 from typing import Any
 
 from pyimgtag import __version__
-from pyimgtag.webapp.config import add_web_flags
 
 _DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
 
@@ -198,6 +197,42 @@ def _sub(subparsers: Any, name: str) -> argparse.ArgumentParser:
         description=description,
         epilog=epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
+def add_web_flags(parser: argparse.ArgumentParser) -> None:
+    """Register the five standard dashboard flags on ``parser``.
+
+    Flags: ``--web``, ``--no-web``, ``--web-host``, ``--web-port``,
+    ``--no-browser``. Defaults match the dashboard's ``web_enabled``
+    resolution semantics — dashboard on by default unless ``--no-web`` or
+    ``PYIMGTAG_NO_WEB=1``.
+    """
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Force-enable the live dashboard (overrides PYIMGTAG_NO_WEB)",
+    )
+    parser.add_argument(
+        "--no-web",
+        action="store_true",
+        help="Disable the live dashboard (terminal-only mode)",
+    )
+    parser.add_argument(
+        "--web-host",
+        default="127.0.0.1",
+        help="Dashboard bind host (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--web-port",
+        type=int,
+        default=8770,
+        help="Dashboard bind port (default: 8770)",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open the dashboard in a browser",
     )
 
 
@@ -823,14 +858,14 @@ def _check_for_update() -> None:
     if os.environ.get("PYIMGTAG_NO_UPDATE_CHECK"):
         return
     try:
-        from pyimgtag.webapp.routes_about import _is_newer, _latest_version
+        from pyimgtag.update_check import is_newer, latest_pypi_version
     except ImportError:
-        return  # webapp extras not installed → silent no-op
+        return  # update-check helpers unavailable → silent no-op
     try:
-        latest = _latest_version()
+        latest = latest_pypi_version()
     except Exception:  # noqa: BLE001 — never let the check block a run
         return
-    if latest and _is_newer(latest, __version__):
+    if latest and is_newer(latest, __version__):
         print(
             f"pyimgtag {latest} is available (you're on {__version__}). "
             "Run: pip install --upgrade pyimgtag",

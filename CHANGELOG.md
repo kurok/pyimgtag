@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Cloud clients deduplicated** (#293): `AnthropicClient`, `OpenAIClient`, and `GeminiClient` now share the tag/judge request flow via a common `BaseCloudClient`; each client only supplies its provider-specific auth, payload shape, and response parsing. No behavior change.
+- **Update-check logic moved to `pyimgtag.update_check`** (#293): the PyPI latest-version lookup and version compare moved out of the webapp About page module so the CLI no longer imports webapp code for its startup update banner.
+
 ## [0.27.1] - 2026-06-03
 
 ### Fixed

@@ -15,16 +15,16 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi import FastAPI  # noqa: E402
 from starlette.testclient import TestClient  # noqa: E402
 
-from pyimgtag.webapp import routes_about  # noqa: E402
-from pyimgtag.webapp.routes_about import (  # noqa: E402
+from pyimgtag import update_check  # noqa: E402
+from pyimgtag.update_check import (  # noqa: E402
     _CACHE,
     _fetch_latest_pypi,
-    _is_newer,
-    _latest_version,
     _parse_version,
-    build_about_router,
-    render_about_html,
+    is_newer,
+    latest_pypi_version,
 )
+from pyimgtag.webapp import routes_about  # noqa: E402
+from pyimgtag.webapp.routes_about import build_about_router, render_about_html  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -50,17 +50,17 @@ class TestParseVersion:
         assert _parse_version("1.2.rc1") == (1, 2, 0)
 
     def test_is_newer_true_and_false(self):
-        assert _is_newer("0.18.3", "0.18.2") is True
-        assert _is_newer("0.18.2", "0.18.2") is False
-        assert _is_newer("0.18.1", "0.18.2") is False
+        assert is_newer("0.18.3", "0.18.2") is True
+        assert is_newer("0.18.2", "0.18.2") is False
+        assert is_newer("0.18.1", "0.18.2") is False
 
     def test_is_newer_pads_mixed_length_tuples(self):
         """Same release with a different segment count is not an update (regression)."""
-        assert _is_newer("0.18.0", "0.18") is False
-        assert _is_newer("0.18", "0.18.0") is False
-        assert _is_newer("0.18.1", "0.18") is True
-        assert _is_newer("0.18", "0.18.1") is False
-        assert _is_newer("1.2.3.4", "1.2.3") is True
+        assert is_newer("0.18.0", "0.18") is False
+        assert is_newer("0.18", "0.18.0") is False
+        assert is_newer("0.18.1", "0.18") is True
+        assert is_newer("0.18", "0.18.1") is False
+        assert is_newer("1.2.3.4", "1.2.3") is True
 
 
 class TestFetchLatestPypi:
@@ -111,27 +111,27 @@ class TestLatestVersion:
     def test_uses_cache_within_ttl(self):
         _CACHE["value"] = "1.0.0"
         _CACHE["at"] = 100.0
-        with patch.object(routes_about, "_fetch_latest_pypi") as fetch:
+        with patch.object(update_check, "_fetch_latest_pypi") as fetch:
             # now is only 1 second later, well within the hour TTL.
-            assert _latest_version(now=101.0) == "1.0.0"
+            assert latest_pypi_version(now=101.0) == "1.0.0"
             fetch.assert_not_called()
 
     def test_fetches_and_populates_cache_when_stale(self):
-        with patch.object(routes_about, "_fetch_latest_pypi", return_value="2.0.0") as fetch:
-            assert _latest_version(now=5000.0) == "2.0.0"
+        with patch.object(update_check, "_fetch_latest_pypi", return_value="2.0.0") as fetch:
+            assert latest_pypi_version(now=5000.0) == "2.0.0"
             fetch.assert_called_once()
         assert _CACHE["value"] == "2.0.0"
         assert _CACHE["at"] == 5000.0
 
     def test_does_not_cache_when_fetch_fails(self):
-        with patch.object(routes_about, "_fetch_latest_pypi", return_value=None):
-            assert _latest_version(now=5000.0) is None
+        with patch.object(update_check, "_fetch_latest_pypi", return_value=None):
+            assert latest_pypi_version(now=5000.0) is None
         assert _CACHE["value"] is None
 
     def test_defaults_now_to_monotonic(self):
-        with patch.object(routes_about, "_fetch_latest_pypi", return_value="3.0.0"):
+        with patch.object(update_check, "_fetch_latest_pypi", return_value="3.0.0"):
             # now=None branch calls time.monotonic().
-            assert _latest_version() == "3.0.0"
+            assert latest_pypi_version() == "3.0.0"
 
 
 def _client():
@@ -163,7 +163,7 @@ class TestBuildAboutRouterImportGuard:
 
 class TestVersionEndpoint:
     def test_update_available(self):
-        with patch.object(routes_about, "_latest_version", return_value="999.0.0"):
+        with patch.object(routes_about, "latest_pypi_version", return_value="999.0.0"):
             r = _client().get("/about/api/version")
         assert r.status_code == 200
         body = r.json()
@@ -171,14 +171,14 @@ class TestVersionEndpoint:
         assert body["update"] is True
 
     def test_up_to_date(self):
-        with patch.object(routes_about, "_latest_version", return_value="0.0.0"):
+        with patch.object(routes_about, "latest_pypi_version", return_value="0.0.0"):
             r = _client().get("/about/api/version")
         body = r.json()
         assert body["latest"] == "0.0.0"
         assert body["update"] is False
 
     def test_lookup_failed_returns_none_latest(self):
-        with patch.object(routes_about, "_latest_version", return_value=None):
+        with patch.object(routes_about, "latest_pypi_version", return_value=None):
             r = _client().get("/about/api/version")
         body = r.json()
         assert body["latest"] is None
@@ -187,11 +187,11 @@ class TestVersionEndpoint:
     def test_stale_cache_forces_refetch_when_installed_newer(self):
         from pyimgtag import __version__
 
-        # First _latest_version call returns an ancient version older than the
-        # installed one (stale cache); the endpoint must clear the cache and
+        # First latest_pypi_version call returns an ancient version older than
+        # the installed one (stale cache); the endpoint must clear the cache and
         # re-fetch. Second call returns the corrected (current) version.
         with patch.object(
-            routes_about, "_latest_version", side_effect=["0.0.1", __version__]
+            routes_about, "latest_pypi_version", side_effect=["0.0.1", __version__]
         ) as lv:
             r = _client().get("/about/api/version")
         body = r.json()

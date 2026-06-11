@@ -593,13 +593,13 @@ class TestAboutPage:
 
     def test_about_version_api_offline_friendly(self, client: TestClient) -> None:
         # Force a clean cache so the endpoint actually attempts a lookup.
-        from pyimgtag.webapp import routes_about
+        from pyimgtag import update_check
 
-        routes_about._CACHE.update({"at": 0.0, "value": None})
+        update_check.reset_cache()
         # Patch the requests call to simulate "no network".
         from unittest.mock import patch
 
-        with patch.object(routes_about, "_fetch_latest_pypi", return_value=None):
+        with patch.object(update_check, "_fetch_latest_pypi", return_value=None):
             d = client.get("/about/api/version").json()
         from pyimgtag import __version__
 
@@ -608,16 +608,16 @@ class TestAboutPage:
         assert d["update"] is False
 
     def test_about_version_api_flags_update(self, client: TestClient) -> None:
-        from pyimgtag.webapp import routes_about
+        from pyimgtag import update_check
 
-        routes_about._CACHE.update({"at": 0.0, "value": None})
+        update_check.reset_cache()
         from unittest.mock import patch
 
         # Simulate a fresh PyPI release strictly newer than what we ship.
         from pyimgtag import __version__
 
         bumped_major = str(int(__version__.split(".")[0]) + 9) + ".0.0"
-        with patch.object(routes_about, "_fetch_latest_pypi", return_value=bumped_major):
+        with patch.object(update_check, "_fetch_latest_pypi", return_value=bumped_major):
             d = client.get("/about/api/version").json()
         assert d["latest"] == bumped_major
         assert d["update"] is True
@@ -717,23 +717,23 @@ class TestDashboardSharesCliDb:
 
 class TestVersionParse:
     def test_parse_basic_versions(self) -> None:
-        from pyimgtag.webapp.routes_about import _is_newer, _parse_version
+        from pyimgtag.update_check import _parse_version, is_newer
 
         assert _parse_version("0.10.0") == (0, 10, 0)
         assert _parse_version("0.9.0") == (0, 9, 0)
         # 0.10.0 is newer than 0.9.0 — the classic mistake when comparing
         # versions as plain strings.
-        assert _is_newer("0.10.0", "0.9.0") is True
-        assert _is_newer("0.9.0", "0.10.0") is False
-        assert _is_newer("1.0.0", "0.99.99") is True
+        assert is_newer("0.10.0", "0.9.0") is True
+        assert is_newer("0.9.0", "0.10.0") is False
+        assert is_newer("1.0.0", "0.99.99") is True
 
     def test_parse_tolerates_suffixes(self) -> None:
-        from pyimgtag.webapp.routes_about import _is_newer, _parse_version
+        from pyimgtag.update_check import _parse_version, is_newer
 
         # Pre-release / dev suffixes get parsed conservatively rather
         # than crashing the compare.
         assert _parse_version("1.2.3rc1") == (1, 2, 3)
-        assert _is_newer("1.2.3rc1", "1.2.3") is False
+        assert is_newer("1.2.3rc1", "1.2.3") is False
 
 
 # ---------------------------------------------------------------------------
