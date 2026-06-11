@@ -53,7 +53,10 @@ src/pyimgtag/
   geocoder.py          Nominatim reverse geocoder with JSON disk cache
   filters.py           Date range filters
   output_writer.py     JSON/CSV/JSONL output
-  progress_db.py       SQLite progress DB with versioned migrations (PRAGMA user_version)
+  progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
+  db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
+                       versioned migrations via PRAGMA user_version), image_db (ImageDB),
+                       face_db (FaceDB), judge_db (JudgeDB)
   applescript_writer.py  Apple Photos keyword/description write-back via osascript
   dedup.py             Perceptual hash duplicate detection
   heic_converter.py    HEIC to JPEG conversion (macOS sips)

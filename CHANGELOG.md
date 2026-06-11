@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Progress DB decomposed into a `pyimgtag.db` package** (#282): `ProgressDB` is now a thin facade in `pyimgtag.db.progress_db` (connection, schema, and all versioned migrations) that delegates to new per-domain helpers — `ImageDB` (image progress/tags/review queries), `FaceDB` (faces, embeddings, person clusters), and `JudgeDB` (judge scores). Behavior, method signatures, SQL, and migrations are unchanged.
+- The `pyimgtag.progress_db` import path is unchanged (#282): it remains as a compatibility re-export, so `from pyimgtag.progress_db import ProgressDB` keeps working for all callers.
 - **Face pipeline moved into a `pyimgtag.face` subpackage** (#294): `face_detection` → `face.detection`, `face_embedding` → `face.embedding`, `face_clustering` → `face.clustering`, `face_naming` → `face.naming`, `face_ocr` → `face.ocr`, `face_thumb` → `face.thumb`, and `photos_faces_importer` → `face.photos_importer`. `pyimgtag.face` re-exports the public API; old flat import paths no longer work (no compatibility shims). `pyimgtag._face_dep_check` stays top-level.
 - **Cloud clients deduplicated** (#293): `AnthropicClient`, `OpenAIClient`, and `GeminiClient` now share the tag/judge request flow via a common `BaseCloudClient`; each client only supplies its provider-specific auth, payload shape, and response parsing. No behavior change.
 - **Update-check logic moved to `pyimgtag.update_check`** (#293): the PyPI latest-version lookup and version compare moved out of the webapp About page module so the CLI no longer imports webapp code for its startup update banner.
