@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from pyimgtag.face_embedding import compute_embeddings, scan_and_store
+from pyimgtag.face.embedding import compute_embeddings, scan_and_store
 from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
 
@@ -114,8 +114,8 @@ class TestScanAndStore:
     def _mock_detect_and_embed(self, faces, embeddings):
         """Return a context manager that patches detect_faces and compute_embeddings."""
         return (
-            patch("pyimgtag.face_embedding.detect_faces", return_value=faces),
-            patch("pyimgtag.face_embedding.compute_embeddings", return_value=embeddings),
+            patch("pyimgtag.face.embedding.detect_faces", return_value=faces),
+            patch("pyimgtag.face.embedding.compute_embeddings", return_value=embeddings),
         )
 
     def test_stores_faces_in_db(self, tmp_path):
@@ -208,8 +208,8 @@ class TestScanAndStore:
         path = _make_image(tmp_path)
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             with (
-                patch("pyimgtag.face_embedding.detect_faces", return_value=[]) as mock_d,
-                patch("pyimgtag.face_embedding.compute_embeddings", return_value=[]),
+                patch("pyimgtag.face.embedding.detect_faces", return_value=[]) as mock_d,
+                patch("pyimgtag.face.embedding.compute_embeddings", return_value=[]),
             ):
                 scan_and_store(path, db, max_dim=800, model="cnn")
             mock_d.assert_called_once_with(
@@ -247,9 +247,9 @@ class TestEmbeddingQuality:
         faces = [FaceDetection(image_path=str(path), bbox_x=0, bbox_y=0, bbox_w=20, bbox_h=20)]
         with ProgressDB(db_path=tmp_path / "test.db") as db:
             with (
-                patch("pyimgtag.face_embedding.detect_faces", return_value=faces) as mock_detect,
+                patch("pyimgtag.face.embedding.detect_faces", return_value=faces) as mock_detect,
                 patch(
-                    "pyimgtag.face_embedding.compute_embeddings", return_value=[np.zeros(128)]
+                    "pyimgtag.face.embedding.compute_embeddings", return_value=[np.zeros(128)]
                 ) as mock_embed,
             ):
                 scan_and_store(

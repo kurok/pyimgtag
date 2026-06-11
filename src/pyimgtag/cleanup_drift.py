@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # How often the scanner emits a heartbeat line. Mirrors the
-# ``photos_faces_importer`` cadence so the user sees a familiar pulse.
+# ``face.photos_importer`` cadence so the user sees a familiar pulse.
 _PROGRESS_EVERY = 200
 
 # Sample size returned by the web API panel — small enough to render

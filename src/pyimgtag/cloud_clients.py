@@ -20,11 +20,16 @@ backends, so judge scores and tag schemas remain comparable.
 API key resolution: each client either takes ``api_key=...`` explicitly or
 reads its provider-conventional environment variable (e.g.
 ``ANTHROPIC_API_KEY``, ``OPENAI_API_KEY``, ``GOOGLE_API_KEY``).
+
+The shared request/parse flow lives in :class:`BaseCloudClient`; each
+concrete client only supplies the provider-specific pieces (auth, endpoint
+URL, request payload shape, and response-text extraction).
 """
 
 from __future__ import annotations
 
 import os
+from abc import ABC, abstractmethod
 from typing import Any, Protocol
 
 import requests
@@ -88,30 +93,57 @@ def _require_api_key(explicit: str | None, env_var: str, backend: str) -> str:
     return key
 
 
-class AnthropicClient:
-    """Vision client for Anthropic's Claude API (``/v1/messages``)."""
+class BaseCloudClient(ABC):
+    """Shared tag/judge flow for the cloud vision clients.
+
+    Concrete subclasses provide only the provider-specific hooks: API-key
+    resolution, session headers, the endpoint URL, the request payload
+    shape, and how to pull the model's text out of the JSON response.
+    """
+
+    #: Backend name used in error messages (e.g. ``"anthropic"``).
+    _backend: str
 
     def __init__(
         self,
-        model: str = DEFAULT_ANTHROPIC_MODEL,
-        max_dim: int = 1280,
-        timeout: int = 120,
-        api_key: str | None = None,
-        base_url: str = DEFAULT_ANTHROPIC_BASE_URL,
+        model: str,
+        max_dim: int,
+        timeout: int,
+        api_key: str | None,
+        base_url: str,
     ) -> None:
         self.model = model
         self.max_dim = max_dim
         self.timeout = timeout
         self.base_url = base_url.rstrip("/")
-        self._api_key = _require_api_key(api_key, "ANTHROPIC_API_KEY", "anthropic")
+        self._api_key = self._resolve_api_key(api_key)
         self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "x-api-key": self._api_key,
-                "anthropic-version": _ANTHROPIC_API_VERSION,
-                "content-type": "application/json",
-            }
-        )
+        self._session.headers.update(self._session_headers())
+
+    @abstractmethod
+    def _resolve_api_key(self, explicit: str | None) -> str:
+        """Return the API key, from *explicit* or the provider's env var(s)."""
+
+    @abstractmethod
+    def _session_headers(self) -> dict[str, str]:
+        """Return the auth/content-type headers for every request."""
+
+    @abstractmethod
+    def _request_url(self) -> str:
+        """Return the full endpoint URL to POST to."""
+
+    @abstractmethod
+    def _build_payload(self, prompt: str, img_b64: str) -> dict[str, Any]:
+        """Return the provider-shaped JSON request body for *prompt* + image."""
+
+    @abstractmethod
+    def _extract_text(self, data: Any) -> str | None:
+        """Pull the model's text out of the decoded JSON response *data*.
+
+        Raises ``KeyError``/``IndexError``/``TypeError`` when the response
+        shape is unexpected; may return ``None`` when the provider sent a
+        literal null text.
+        """
 
     def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
         """Tag an image via the provider vision API.
@@ -132,7 +164,7 @@ class AnthropicClient:
         except (OSError, ValueError, RuntimeError) as e:
             return TagResult(error=f"Image load failed: {e}")
         prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
-        text = self._call(prompt, img_b64, on_error_msg="anthropic request failed")
+        text = self._call(prompt, img_b64, on_error_msg=f"{self._backend} request failed")
         if isinstance(text, TagResult):
             return text
         if text is None:
@@ -171,7 +203,60 @@ class AnthropicClient:
         - ``None``: on the same failures when ``on_error_msg`` is ``None`` (the
           ``judge_image`` path, which swallows failures into a ``None`` score).
         """
-        payload: dict[str, Any] = {
+        payload = self._build_payload(prompt, img_b64)
+        try:
+            resp = self._session.post(
+                self._request_url(),
+                json=payload,
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.RequestException as e:
+            return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
+        try:
+            return self._extract_text(data)
+        except (KeyError, IndexError, TypeError):
+            detail = f"{self._backend} response shape unexpected: {str(data)[:160]!r}"
+            return TagResult(error=detail) if on_error_msg else None
+
+    def close(self) -> None:
+        """Release the underlying HTTP session."""
+        self._session.close()
+
+
+class AnthropicClient(BaseCloudClient):
+    """Vision client for Anthropic's Claude API (``/v1/messages``)."""
+
+    _backend = "anthropic"
+
+    def __init__(
+        self,
+        model: str = DEFAULT_ANTHROPIC_MODEL,
+        max_dim: int = 1280,
+        timeout: int = 120,
+        api_key: str | None = None,
+        base_url: str = DEFAULT_ANTHROPIC_BASE_URL,
+    ) -> None:
+        super().__init__(
+            model=model, max_dim=max_dim, timeout=timeout, api_key=api_key, base_url=base_url
+        )
+
+    def _resolve_api_key(self, explicit: str | None) -> str:
+        return _require_api_key(explicit, "ANTHROPIC_API_KEY", "anthropic")
+
+    def _session_headers(self) -> dict[str, str]:
+        return {
+            "x-api-key": self._api_key,
+            "anthropic-version": _ANTHROPIC_API_VERSION,
+            "content-type": "application/json",
+        }
+
+    def _request_url(self) -> str:
+        return f"{self.base_url}/v1/messages"
+
+    def _build_payload(self, prompt: str, img_b64: str) -> dict[str, Any]:
+        return {
             "model": self.model,
             "max_tokens": _CLOUD_MAX_TOKENS,
             "messages": [
@@ -191,28 +276,15 @@ class AnthropicClient:
                 }
             ],
         }
-        try:
-            resp = self._session.post(
-                f"{self.base_url}/v1/messages",
-                json=payload,
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as e:
-            return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
-        try:
-            return data["content"][0]["text"]
-        except (KeyError, IndexError, TypeError):
-            detail = f"anthropic response shape unexpected: {str(data)[:160]!r}"
-            return TagResult(error=detail) if on_error_msg else None
 
-    def close(self) -> None:
-        self._session.close()
+    def _extract_text(self, data: Any) -> str | None:
+        return data["content"][0]["text"]
 
 
-class OpenAIClient:
+class OpenAIClient(BaseCloudClient):
     """Vision client for OpenAI's chat completions API."""
+
+    _backend = "openai"
 
     def __init__(
         self,
@@ -222,78 +294,24 @@ class OpenAIClient:
         api_key: str | None = None,
         base_url: str = DEFAULT_OPENAI_BASE_URL,
     ) -> None:
-        self.model = model
-        self.max_dim = max_dim
-        self.timeout = timeout
-        self.base_url = base_url.rstrip("/")
-        self._api_key = _require_api_key(api_key, "OPENAI_API_KEY", "openai")
-        self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            }
+        super().__init__(
+            model=model, max_dim=max_dim, timeout=timeout, api_key=api_key, base_url=base_url
         )
 
-    def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
-        """Tag an image via the provider vision API.
+    def _resolve_api_key(self, explicit: str | None) -> str:
+        return _require_api_key(explicit, "OPENAI_API_KEY", "openai")
 
-        Args:
-            file_path: Path to the image file.
-            context: Optional EXIF/geocoding hints (``date``, ``city``,
-                ``region``, ``country``, ``lat``, ``lon``) used to enrich the
-                prompt.
+    def _session_headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
 
-        Returns:
-            A :class:`TagResult`. Failures (image load, request, empty or
-            malformed response) are reported in ``TagResult.error`` rather than
-            raised.
-        """
-        try:
-            img_b64 = prepare_image_b64(file_path, self.max_dim)
-        except (OSError, ValueError, RuntimeError) as e:
-            return TagResult(error=f"Image load failed: {e}")
-        prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
-        text = self._call(prompt, img_b64, on_error_msg="openai request failed")
-        if isinstance(text, TagResult):
-            return text
-        if text is None:
-            return TagResult(error="empty response")
-        return _parse_response(text)
+    def _request_url(self) -> str:
+        return f"{self.base_url}/v1/chat/completions"
 
-    def judge_image(self, file_path: str) -> JudgeScores | None:
-        """Score an image with the photo-judge rubric.
-
-        Returns None on any failure (image load, request, or parse) — unlike
-        :meth:`tag_image`, which reports failures via ``TagResult.error``.
-        """
-        try:
-            img_b64 = prepare_image_b64(file_path, self.max_dim)
-        except (OSError, ValueError, RuntimeError):
-            return None
-        text = self._call(_JUDGE_PROMPT, img_b64, on_error_msg=None)
-        if not isinstance(text, str):
-            return None
-        return _parse_judge_response(text)
-
-    def _call(
-        self,
-        prompt: str,
-        img_b64: str,
-        *,
-        on_error_msg: str | None,
-    ) -> str | TagResult | None:
-        """POST the prompt and image, and return the model's text response.
-
-        Tri-modal return contract used by :meth:`tag_image` / :meth:`judge_image`:
-
-        - ``str``: the model text, on success.
-        - :class:`TagResult` with ``error`` set: on HTTP or response-shape
-          failure when ``on_error_msg`` is provided (the ``tag_image`` path).
-        - ``None``: on the same failures when ``on_error_msg`` is ``None`` (the
-          ``judge_image`` path, which swallows failures into a ``None`` score).
-        """
-        payload: dict[str, Any] = {
+    def _build_payload(self, prompt: str, img_b64: str) -> dict[str, Any]:
+        return {
             "model": self.model,
             "max_tokens": _CLOUD_MAX_TOKENS,
             "response_format": {"type": "json_object"},
@@ -310,28 +328,15 @@ class OpenAIClient:
                 }
             ],
         }
-        try:
-            resp = self._session.post(
-                f"{self.base_url}/v1/chat/completions",
-                json=payload,
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as e:
-            return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
-        try:
-            return data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError):
-            detail = f"openai response shape unexpected: {str(data)[:160]!r}"
-            return TagResult(error=detail) if on_error_msg else None
 
-    def close(self) -> None:
-        self._session.close()
+    def _extract_text(self, data: Any) -> str | None:
+        return data["choices"][0]["message"]["content"]
 
 
-class GeminiClient:
+class GeminiClient(BaseCloudClient):
     """Vision client for Google's Gemini API (``generateContent``)."""
+
+    _backend = "gemini"
 
     def __init__(
         self,
@@ -341,75 +346,21 @@ class GeminiClient:
         api_key: str | None = None,
         base_url: str = DEFAULT_GEMINI_BASE_URL,
     ) -> None:
-        self.model = model
-        self.max_dim = max_dim
-        self.timeout = timeout
-        self.base_url = base_url.rstrip("/")
-        self._api_key = _resolve_gemini_key(api_key)
-        self._session = requests.Session()
-        self._session.headers.update(
-            {"Content-Type": "application/json", "x-goog-api-key": self._api_key}
+        super().__init__(
+            model=model, max_dim=max_dim, timeout=timeout, api_key=api_key, base_url=base_url
         )
 
-    def tag_image(self, file_path: str, context: dict | None = None) -> TagResult:
-        """Tag an image via the provider vision API.
+    def _resolve_api_key(self, explicit: str | None) -> str:
+        return _resolve_gemini_key(explicit)
 
-        Args:
-            file_path: Path to the image file.
-            context: Optional EXIF/geocoding hints (``date``, ``city``,
-                ``region``, ``country``, ``lat``, ``lon``) used to enrich the
-                prompt.
+    def _session_headers(self) -> dict[str, str]:
+        return {"Content-Type": "application/json", "x-goog-api-key": self._api_key}
 
-        Returns:
-            A :class:`TagResult`. Failures (image load, request, empty or
-            malformed response) are reported in ``TagResult.error`` rather than
-            raised.
-        """
-        try:
-            img_b64 = prepare_image_b64(file_path, self.max_dim)
-        except (OSError, ValueError, RuntimeError) as e:
-            return TagResult(error=f"Image load failed: {e}")
-        prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
-        text = self._call(prompt, img_b64, on_error_msg="gemini request failed")
-        if isinstance(text, TagResult):
-            return text
-        if text is None:
-            return TagResult(error="empty response")
-        return _parse_response(text)
+    def _request_url(self) -> str:
+        return f"{self.base_url}/v1beta/models/{self.model}:generateContent"
 
-    def judge_image(self, file_path: str) -> JudgeScores | None:
-        """Score an image with the photo-judge rubric.
-
-        Returns None on any failure (image load, request, or parse) — unlike
-        :meth:`tag_image`, which reports failures via ``TagResult.error``.
-        """
-        try:
-            img_b64 = prepare_image_b64(file_path, self.max_dim)
-        except (OSError, ValueError, RuntimeError):
-            return None
-        text = self._call(_JUDGE_PROMPT, img_b64, on_error_msg=None)
-        if not isinstance(text, str):
-            return None
-        return _parse_judge_response(text)
-
-    def _call(
-        self,
-        prompt: str,
-        img_b64: str,
-        *,
-        on_error_msg: str | None,
-    ) -> str | TagResult | None:
-        """POST the prompt and image, and return the model's text response.
-
-        Tri-modal return contract used by :meth:`tag_image` / :meth:`judge_image`:
-
-        - ``str``: the model text, on success.
-        - :class:`TagResult` with ``error`` set: on HTTP or response-shape
-          failure when ``on_error_msg`` is provided (the ``tag_image`` path).
-        - ``None``: on the same failures when ``on_error_msg`` is ``None`` (the
-          ``judge_image`` path, which swallows failures into a ``None`` score).
-        """
-        payload: dict[str, Any] = {
+    def _build_payload(self, prompt: str, img_b64: str) -> dict[str, Any]:
+        return {
             "contents": [
                 {
                     "parts": [
@@ -428,21 +379,9 @@ class GeminiClient:
                 "maxOutputTokens": _CLOUD_MAX_TOKENS,
             },
         }
-        url = f"{self.base_url}/v1beta/models/{self.model}:generateContent"
-        try:
-            resp = self._session.post(url, json=payload, timeout=self.timeout)
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as e:
-            return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
-        try:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        except (KeyError, IndexError, TypeError):
-            detail = f"gemini response shape unexpected: {str(data)[:160]!r}"
-            return TagResult(error=detail) if on_error_msg else None
 
-    def close(self) -> None:
-        self._session.close()
+    def _extract_text(self, data: Any) -> str | None:
+        return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
 def _resolve_gemini_key(explicit: str | None) -> str:

@@ -8,7 +8,7 @@ import socket
 import pytest
 
 from pyimgtag import run_registry
-from pyimgtag.webapp.config import add_web_flags
+from pyimgtag.main import add_web_flags
 
 
 @pytest.fixture(autouse=True)

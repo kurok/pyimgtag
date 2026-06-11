@@ -510,7 +510,7 @@ def _build_membership_applescript() -> str:
 
 # Cap the bulk membership scan generously — Apple Photos can take many
 # minutes to enumerate a 20k+ library. Aligns with the ceiling used by
-# the faces import flow (see photos_faces_importer).
+# the faces import flow (see face.photos_importer).
 _MEMBERSHIP_TIMEOUT_SECONDS = 1800
 
 

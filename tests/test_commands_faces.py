@@ -92,7 +92,7 @@ class TestHandleFacesScan:
         img.write_bytes(b"\xff\xd8\xff")
 
         args = _make_args(input_dir=str(tmp_path), db=str(tmp_path / "test.db"))
-        with patch("pyimgtag.face_detection._check_face_recognition") as mock_check:
+        with patch("pyimgtag.face.detection._check_face_recognition") as mock_check:
             mock_check.side_effect = ImportError(
                 "face_recognition is not installed. "
                 "Install the [face] extra: pip install pyimgtag[face]"
@@ -118,7 +118,7 @@ class TestHandleFacesScan:
         )
         with (
             patch("pyimgtag.commands.faces.scan_and_store", MagicMock()),
-            patch("pyimgtag.face_detection._check_face_recognition"),
+            patch("pyimgtag.face.detection._check_face_recognition"),
             patch("pyimgtag.commands.faces.scan_directory", side_effect=fake_scan),
         ):
             rc = _handle_faces_scan(args)
@@ -134,7 +134,7 @@ class TestHandleFacesScan:
         assert rc == 1
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_no_files_returns_0(self, mock_scan, mock_check, mock_dash, tmp_path):
         mock_scan.return_value = []
@@ -143,7 +143,7 @@ class TestHandleFacesScan:
         assert rc == 0
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_scan_processes_files_with_db(
@@ -160,7 +160,7 @@ class TestHandleFacesScan:
         mock_store.assert_called_once()
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_already_scanned_images_skipped_and_reported(
@@ -189,7 +189,7 @@ class TestHandleFacesScan:
         assert "Scanned 0 new image(s)" in err
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_not_downloaded_images_skipped_and_reported(
@@ -210,7 +210,7 @@ class TestHandleFacesScan:
         assert "error(s) skipped" not in err  # not counted as an error
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_scan_with_limit(self, mock_scan_dir, mock_store, mock_check, mock_dash, tmp_path):
@@ -237,7 +237,7 @@ class TestHandleFacesScan:
         return [(det, np.zeros(128, dtype=np.float64))]
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_parallel_scan_detects_and_writes(
         self, mock_scan_dir, mock_check, mock_dash, tmp_path, capsys
@@ -255,7 +255,7 @@ class TestHandleFacesScan:
 
         with (
             patch("pyimgtag.commands.faces.ProcessPoolExecutor", ThreadPoolExecutor),
-            patch("pyimgtag.face_embedding.detect_and_encode", side_effect=self._one_face),
+            patch("pyimgtag.face.embedding.detect_and_encode", side_effect=self._one_face),
         ):
             rc = _handle_faces_scan(args)
 
@@ -266,7 +266,7 @@ class TestHandleFacesScan:
         assert "[parallel: 3 workers]" in capsys.readouterr().err
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_parallel_scan_skips_existing_and_missing(
         self, mock_scan_dir, mock_check, mock_dash, tmp_path, capsys
@@ -289,7 +289,7 @@ class TestHandleFacesScan:
         with (
             patch("pyimgtag.commands.faces.ProcessPoolExecutor", ThreadPoolExecutor),
             patch(
-                "pyimgtag.face_embedding.detect_and_encode", side_effect=self._one_face
+                "pyimgtag.face.embedding.detect_and_encode", side_effect=self._one_face
             ) as worker,
         ):
             rc = _handle_faces_scan(args)
@@ -302,7 +302,7 @@ class TestHandleFacesScan:
         assert "1 image(s) already scanned" in err
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_parallel_scan_worker_error_is_counted_not_fatal(
         self, mock_scan_dir, mock_check, mock_dash, tmp_path, capsys
@@ -322,7 +322,7 @@ class TestHandleFacesScan:
         args = _make_args(input_dir=str(tmp_path), db=str(tmp_path / "progress.db"), jobs=2)
         with (
             patch("pyimgtag.commands.faces.ProcessPoolExecutor", ThreadPoolExecutor),
-            patch("pyimgtag.face_embedding.detect_and_encode", side_effect=flaky),
+            patch("pyimgtag.face.embedding.detect_and_encode", side_effect=flaky),
         ):
             rc = _handle_faces_scan(args)
 
@@ -335,11 +335,11 @@ class TestHandleFacesScan:
 class TestHandleFacesCluster:
     def test_import_error_returns_1(self, tmp_path):
         args = _make_args(db=str(tmp_path / "test.db"))
-        with patch.dict(sys.modules, {"pyimgtag.face_clustering": None}):
+        with patch.dict(sys.modules, {"pyimgtag.face.clustering": None}):
             rc = _handle_faces_cluster(args)
         assert rc == 1
 
-    @patch("pyimgtag.face_clustering.cluster_faces")
+    @patch("pyimgtag.face.clustering.cluster_faces")
     def test_no_clusters_prints_message(self, mock_cluster, tmp_path):
         mock_cluster.return_value = {}
         args = _make_args(db=str(tmp_path / "test.db"))
@@ -347,7 +347,7 @@ class TestHandleFacesCluster:
         assert rc == 0
         mock_cluster.assert_called_once()
 
-    @patch("pyimgtag.face_clustering.cluster_faces")
+    @patch("pyimgtag.face.clustering.cluster_faces")
     def test_with_clusters_reports_counts(self, mock_cluster, tmp_path):
         mock_cluster.return_value = {1: [10, 11], 2: [12]}
         args = _make_args(db=str(tmp_path / "test.db"))
@@ -494,7 +494,7 @@ class TestCmdFacesDispatch:
 
 class TestHandleFacesScanPhotosLibrary:
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_photos_library")
     def test_scan_photos_library_branch(
@@ -512,7 +512,7 @@ class TestHandleFacesScanPhotosLibrary:
         mock_scan_lib.assert_called_once()
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_photos_library")
     def test_scan_photos_library_not_found(
         self, mock_scan_lib, mock_check, mock_dash, tmp_path, capsys
@@ -526,7 +526,7 @@ class TestHandleFacesScanPhotosLibrary:
 
 class TestHandleFacesScanErrors:
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_enospc_aborts_scan(
@@ -544,7 +544,7 @@ class TestHandleFacesScanErrors:
         assert "disk full" in capsys.readouterr().err
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_generic_oserror_skips_file(
@@ -565,7 +565,7 @@ class TestHandleFacesScanErrors:
         assert "1 error(s) skipped" in err
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_generic_exception_skips_file(
@@ -583,7 +583,7 @@ class TestHandleFacesScanErrors:
         assert "1 error(s) skipped" in err
 
     @patch("pyimgtag.commands.faces.start_dashboard_for")
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_keyboard_interrupt_marks_session_and_stops_dashboard(
@@ -604,7 +604,7 @@ class TestHandleFacesScanErrors:
         assert "Interrupted." in capsys.readouterr().err
 
     @patch("pyimgtag.commands.faces.start_dashboard_for")
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_session_records_and_completes_with_dashboard(
@@ -633,7 +633,7 @@ class TestStartClusterThread:
         db.path = str(tmp_path / "p.db")
         args = _make_args()
         stop_event = threading.Event()
-        with patch.dict(sys.modules, {"pyimgtag.face_clustering": None}):
+        with patch.dict(sys.modules, {"pyimgtag.face.clustering": None}):
             t = _start_cluster_thread(db, args, stop_event)
         assert isinstance(t, threading.Thread)
         t.join(timeout=2.0)
@@ -652,7 +652,7 @@ class TestStartClusterThread:
         recluster = MagicMock()
         # First wait() returns False (run loop body once), then True (exit loop)
         with patch("pyimgtag.commands.faces._CLUSTER_INTERVAL_S", 0.01):
-            with patch("pyimgtag.face_clustering.recluster_auto", recluster):
+            with patch("pyimgtag.face.clustering.recluster_auto", recluster):
                 t = _start_cluster_thread(db, args, stop_event)
                 # let the loop run at least one iteration
                 import time as _t
@@ -679,7 +679,7 @@ class TestStartClusterThread:
 
         recluster = MagicMock(side_effect=RuntimeError("boom"))
         with patch("pyimgtag.commands.faces._CLUSTER_INTERVAL_S", 0.01):
-            with patch("pyimgtag.face_clustering.recluster_auto", recluster):
+            with patch("pyimgtag.face.clustering.recluster_auto", recluster):
                 t = _start_cluster_thread(db, args, stop_event)
                 import time as _t
 
@@ -784,7 +784,7 @@ class TestHandleFacesApplyMore:
 class TestHandleFacesImportPhotos:
     def test_import_error_returns_1(self, tmp_path, capsys):
         args = _make_args(db=str(tmp_path / "p.db"))
-        with patch.dict(sys.modules, {"pyimgtag.photos_faces_importer": None}):
+        with patch.dict(sys.modules, {"pyimgtag.face.photos_importer": None}):
             rc = _handle_faces_import_photos(args)
         assert rc == 1
 
@@ -794,7 +794,7 @@ class TestHandleFacesImportPhotos:
             pass
         args = _make_args(db=str(db_path))
         with patch(
-            "pyimgtag.photos_faces_importer.import_photos_persons", return_value=(5, 2)
+            "pyimgtag.face.photos_importer.import_photos_persons", return_value=(5, 2)
         ) as mock_imp:
             rc = _handle_faces_import_photos(args)
         assert rc == 0
@@ -808,7 +808,7 @@ class TestHandleFacesImportPhotos:
         with ProgressDB(db_path=db_path):
             pass
         args = _make_args(db=str(db_path))
-        with patch("pyimgtag.photos_faces_importer.import_photos_persons", return_value=(3, 0)):
+        with patch("pyimgtag.face.photos_importer.import_photos_persons", return_value=(3, 0)):
             rc = _handle_faces_import_photos(args)
         assert rc == 0
         err = capsys.readouterr().err
@@ -821,7 +821,7 @@ class TestHandleFacesImportPhotos:
             pass
         args = _make_args(db=str(db_path))
         with patch(
-            "pyimgtag.photos_faces_importer.import_photos_persons",
+            "pyimgtag.face.photos_importer.import_photos_persons",
             side_effect=RuntimeError("photos not available"),
         ):
             rc = _handle_faces_import_photos(args)
@@ -834,7 +834,7 @@ class TestHandleFacesImportPhotos:
             pass
         args = _make_args(db=str(db_path))
         with patch(
-            "pyimgtag.photos_faces_importer.import_photos_persons",
+            "pyimgtag.face.photos_importer.import_photos_persons",
             side_effect=KeyboardInterrupt(),
         ):
             rc = _handle_faces_import_photos(args)
@@ -844,7 +844,7 @@ class TestHandleFacesImportPhotos:
 
 class TestModuleImportFallback:
     def test_scan_and_store_none_when_face_embedding_missing(self):
-        """Reload commands.faces with face_embedding import forced to fail.
+        """Reload commands.faces with face.embedding import forced to fail.
 
         Covers the module-level ``except ImportError: scan_and_store = None``
         fallback that fires in CI when the [face] extra is not installed.
@@ -860,8 +860,8 @@ class TestModuleImportFallback:
         real_import = builtins.__import__
 
         def fake_import(name, *a, **kw):
-            if name == "pyimgtag.face_embedding" or name.startswith("pyimgtag.face_embedding"):
-                raise ImportError("no face_embedding without [face] extra")
+            if name == "pyimgtag.face.embedding" or name.startswith("pyimgtag.face.embedding"):
+                raise ImportError("no face.embedding without [face] extra")
             return real_import(name, *a, **kw)
 
         try:
@@ -993,7 +993,7 @@ class TestFacesReset:
         with ProgressDB(db_path=db_path):
             pass
         _seed_faces_db(db_path)
-        with patch("pyimgtag.face_clustering.recluster_auto", return_value={99: [1, 2]}) as rc_mock:
+        with patch("pyimgtag.face.clustering.recluster_auto", return_value={99: [1, 2]}) as rc_mock:
             rc = _handle_faces_recluster(
                 _make_args(db=str(db_path), faces_action="recluster", yes=True)
             )
@@ -1005,7 +1005,7 @@ class TestFacesReset:
         db_path = tmp_path / "p.db"
         with ProgressDB(db_path=db_path):
             pass
-        with patch.dict("sys.modules", {"pyimgtag.face_clustering": None}):
+        with patch.dict("sys.modules", {"pyimgtag.face.clustering": None}):
             rc = _handle_faces_recluster(
                 _make_args(db=str(db_path), faces_action="recluster", yes=True)
             )
@@ -1086,7 +1086,7 @@ class TestResolveFaceQuality:
 
 class TestScanResolvesQuality:
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_scan_passes_resolved_quality_to_store(
@@ -1114,7 +1114,7 @@ class TestScanResolvesQuality:
         assert kwargs["min_face_size"] == 25
 
     @patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(None, None))
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     @patch("pyimgtag.commands.faces.scan_and_store")
     @patch("pyimgtag.commands.faces.scan_directory")
     def test_scan_rejects_invalid_quality_values(
@@ -1138,9 +1138,9 @@ class TestScanResolvesQuality:
 class TestHandleFacesMatchReferences:
     """`faces match-references` — reference-folder cluster naming."""
 
-    @patch("pyimgtag.face_detection._check_face_recognition")
-    @patch("pyimgtag.face_naming.match_clusters_to_references", return_value=[])
-    @patch("pyimgtag.face_naming.load_reference_embeddings", return_value={"Alice": [np.ones(128)]})
+    @patch("pyimgtag.face.detection._check_face_recognition")
+    @patch("pyimgtag.face.naming.match_clusters_to_references", return_value=[])
+    @patch("pyimgtag.face.naming.load_reference_embeddings", return_value={"Alice": [np.ones(128)]})
     def test_explicit_zero_threshold_is_honored(
         self, _mock_load, mock_match, _mock_check, tmp_path
     ):
@@ -1178,14 +1178,14 @@ class TestHandleFacesCaptureNames:
         assert _handle_faces_capture_names(self._args(tmp_path)) == 1
         assert "--screenshot" in capsys.readouterr().err
 
-    @patch("pyimgtag.face_detection._check_face_recognition")
+    @patch("pyimgtag.face.detection._check_face_recognition")
     def test_missing_screenshot_file_returns_1(self, _mock_check, tmp_path, capsys):
         args = self._args(tmp_path, screenshot=str(tmp_path / "nope.png"))
         assert _handle_faces_capture_names(args) == 1
         assert "screenshot not found" in capsys.readouterr().err
 
-    @patch("pyimgtag.face_detection._check_face_recognition")
-    @patch("pyimgtag.face_ocr.build_references_from_screenshot", return_value={})
+    @patch("pyimgtag.face.detection._check_face_recognition")
+    @patch("pyimgtag.face.ocr.build_references_from_screenshot", return_value={})
     def test_no_named_faces_returns_1(self, _mock_build, _mock_check, tmp_path, capsys):
         shot = tmp_path / "shot.png"
         Image.new("RGB", (10, 10)).save(shot)
@@ -1193,14 +1193,14 @@ class TestHandleFacesCaptureNames:
         assert _handle_faces_capture_names(args) == 1
         assert "No named faces" in capsys.readouterr().err
 
-    @patch("pyimgtag.face_detection._check_face_recognition")
-    @patch("pyimgtag.face_naming.apply_matches")
-    @patch("pyimgtag.face_naming.match_clusters_to_references")
-    @patch("pyimgtag.face_ocr.build_references_from_screenshot")
+    @patch("pyimgtag.face.detection._check_face_recognition")
+    @patch("pyimgtag.face.naming.apply_matches")
+    @patch("pyimgtag.face.naming.match_clusters_to_references")
+    @patch("pyimgtag.face.ocr.build_references_from_screenshot")
     def test_dry_run_previews_without_writing(
         self, mock_build, mock_match, mock_apply, _mock_check, tmp_path, capsys
     ):
-        from pyimgtag.face_naming import NameMatch
+        from pyimgtag.face.naming import NameMatch
 
         shot = tmp_path / "shot.png"
         Image.new("RGB", (10, 10)).save(shot)
@@ -1217,14 +1217,14 @@ class TestHandleFacesCaptureNames:
         assert "would be named" in err
         mock_apply.assert_not_called()  # dry-run never writes
 
-    @patch("pyimgtag.face_detection._check_face_recognition")
-    @patch("pyimgtag.face_naming.apply_matches", return_value={"renamed": 1, "merged": 0})
-    @patch("pyimgtag.face_naming.match_clusters_to_references")
-    @patch("pyimgtag.face_ocr.build_references_from_screenshot")
+    @patch("pyimgtag.face.detection._check_face_recognition")
+    @patch("pyimgtag.face.naming.apply_matches", return_value={"renamed": 1, "merged": 0})
+    @patch("pyimgtag.face.naming.match_clusters_to_references")
+    @patch("pyimgtag.face.ocr.build_references_from_screenshot")
     def test_apply_writes_names(
         self, mock_build, mock_match, mock_apply, _mock_check, tmp_path, capsys
     ):
-        from pyimgtag.face_naming import NameMatch
+        from pyimgtag.face.naming import NameMatch
 
         shot = tmp_path / "shot.png"
         Image.new("RGB", (10, 10)).save(shot)
@@ -1239,10 +1239,10 @@ class TestHandleFacesCaptureNames:
         assert "Named 1 cluster" in capsys.readouterr().err
         mock_apply.assert_called_once()
 
-    @patch("pyimgtag.face_detection._check_face_recognition")
-    @patch("pyimgtag.face_naming.match_clusters_to_references", return_value=[])
+    @patch("pyimgtag.face.detection._check_face_recognition")
+    @patch("pyimgtag.face.naming.match_clusters_to_references", return_value=[])
     @patch(
-        "pyimgtag.face_ocr.build_references_from_screenshot", return_value={"Alice": [np.ones(128)]}
+        "pyimgtag.face.ocr.build_references_from_screenshot", return_value={"Alice": [np.ones(128)]}
     )
     def test_no_matches_returns_0(self, _mock_build, _mock_match, _mock_check, tmp_path, capsys):
         shot = tmp_path / "shot.png"
@@ -1251,10 +1251,10 @@ class TestHandleFacesCaptureNames:
         assert _handle_faces_capture_names(args) == 0
         assert "No clusters matched" in capsys.readouterr().err
 
-    @patch("pyimgtag.face_detection._check_face_recognition")
-    @patch("pyimgtag.face_naming.match_clusters_to_references", return_value=[])
+    @patch("pyimgtag.face.detection._check_face_recognition")
+    @patch("pyimgtag.face.naming.match_clusters_to_references", return_value=[])
     @patch(
-        "pyimgtag.face_ocr.build_references_from_screenshot", return_value={"Alice": [np.ones(128)]}
+        "pyimgtag.face.ocr.build_references_from_screenshot", return_value={"Alice": [np.ones(128)]}
     )
     def test_explicit_zero_threshold_is_honored(
         self, _mock_build, mock_match, _mock_check, tmp_path
@@ -1266,10 +1266,10 @@ class TestHandleFacesCaptureNames:
         assert _handle_faces_capture_names(args) == 0
         assert mock_match.call_args.kwargs["threshold"] == 0.0
 
-    @patch("pyimgtag.face_detection._check_face_recognition")
-    @patch("pyimgtag.face_ocr.capture_people_screenshot")
+    @patch("pyimgtag.face.detection._check_face_recognition")
+    @patch("pyimgtag.face.ocr.capture_people_screenshot")
     def test_live_capture_failure_returns_1(self, mock_capture, _mock_check, tmp_path, capsys):
-        from pyimgtag.face_ocr import OcrUnavailableError
+        from pyimgtag.face.ocr import OcrUnavailableError
 
         mock_capture.side_effect = OcrUnavailableError("Live capture needs macOS")
         args = self._args(tmp_path, live=True)

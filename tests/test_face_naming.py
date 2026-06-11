@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from pyimgtag.face_naming import (
+from pyimgtag.face.naming import (
     NameMatch,
     _iter_reference_images,
     apply_matches,
@@ -225,8 +225,8 @@ class TestLoadReferenceEmbeddings:
         (bob / "01.jpg").write_bytes(b"x")
         (bob / "02.jpg").write_bytes(b"x")
         with (
-            patch("pyimgtag.face_detection.detect_faces", return_value=[self._face(10, 10)]),
-            patch("pyimgtag.face_embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
+            patch("pyimgtag.face.detection.detect_faces", return_value=[self._face(10, 10)]),
+            patch("pyimgtag.face.embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
         ):
             refs = load_reference_embeddings(tmp_path)
         assert set(refs) == {"Alice", "Bob"}
@@ -236,16 +236,16 @@ class TestLoadReferenceEmbeddings:
     def test_skips_image_with_no_detected_face(self, tmp_path: Path):
         (tmp_path / "Alice.jpg").write_bytes(b"x")
         with (
-            patch("pyimgtag.face_detection.detect_faces", return_value=[]),
-            patch("pyimgtag.face_embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
+            patch("pyimgtag.face.detection.detect_faces", return_value=[]),
+            patch("pyimgtag.face.embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
         ):
             assert load_reference_embeddings(tmp_path) == {}
 
     def test_skips_unreadable_reference(self, tmp_path: Path):
         (tmp_path / "Alice.jpg").write_bytes(b"x")
         with (
-            patch("pyimgtag.face_detection.detect_faces", side_effect=OSError("bad image")),
-            patch("pyimgtag.face_embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
+            patch("pyimgtag.face.detection.detect_faces", side_effect=OSError("bad image")),
+            patch("pyimgtag.face.embedding.compute_embeddings", return_value=[_vec((0, 1.0))]),
         ):
             assert load_reference_embeddings(tmp_path) == {}
 
@@ -259,8 +259,8 @@ class TestLoadReferenceEmbeddings:
             return [_vec((0, 1.0))]
 
         with (
-            patch("pyimgtag.face_detection.detect_faces", return_value=[small, big]),
-            patch("pyimgtag.face_embedding.compute_embeddings", side_effect=_fake_embed),
+            patch("pyimgtag.face.detection.detect_faces", return_value=[small, big]),
+            patch("pyimgtag.face.embedding.compute_embeddings", side_effect=_fake_embed),
         ):
             load_reference_embeddings(tmp_path)
         assert captured["faces"] == [big]  # bystanders ignored
@@ -268,7 +268,7 @@ class TestLoadReferenceEmbeddings:
     def test_skips_when_encoding_fails(self, tmp_path: Path):
         (tmp_path / "Alice.jpg").write_bytes(b"x")
         with (
-            patch("pyimgtag.face_detection.detect_faces", return_value=[self._face(10, 10)]),
-            patch("pyimgtag.face_embedding.compute_embeddings", return_value=[]),
+            patch("pyimgtag.face.detection.detect_faces", return_value=[self._face(10, 10)]),
+            patch("pyimgtag.face.embedding.compute_embeddings", return_value=[]),
         ):
             assert load_reference_embeddings(tmp_path) == {}

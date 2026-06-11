@@ -8,8 +8,8 @@ its own stderr message *before* raising, so the user sees no Python
 traceback. This module catches that case earlier and surfaces a clear,
 actionable error.
 
-It is imported lazily by :mod:`pyimgtag.face_detection` and
-:mod:`pyimgtag.face_embedding` to keep ``face_recognition`` itself out of
+It is imported lazily by :mod:`pyimgtag.face.detection` and
+:mod:`pyimgtag.face.embedding` to keep ``face_recognition`` itself out of
 the import graph until a face operation is actually requested.
 """
 

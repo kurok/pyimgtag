@@ -265,8 +265,8 @@ class TestCheckForUpdate:
         from pyimgtag import main as main_mod
 
         monkeypatch.delenv("PYIMGTAG_NO_UPDATE_CHECK", raising=False)
-        # Force the lazy import of routes_about to fail (webapp extras absent).
-        with patch.dict("sys.modules", {"pyimgtag.webapp.routes_about": None}):
+        # Force the lazy import of update_check to fail.
+        with patch.dict("sys.modules", {"pyimgtag.update_check": None}):
             main_mod._check_for_update()
         assert capsys.readouterr().err == ""
 
@@ -275,8 +275,8 @@ class TestCheckForUpdate:
 
         monkeypatch.delenv("PYIMGTAG_NO_UPDATE_CHECK", raising=False)
         with (
-            patch("pyimgtag.webapp.routes_about._latest_version", side_effect=RuntimeError("net")),
-            patch("pyimgtag.webapp.routes_about._is_newer", return_value=True),
+            patch("pyimgtag.update_check.latest_pypi_version", side_effect=RuntimeError("net")),
+            patch("pyimgtag.update_check.is_newer", return_value=True),
         ):
             main_mod._check_for_update()
         assert capsys.readouterr().err == ""
@@ -286,8 +286,8 @@ class TestCheckForUpdate:
 
         monkeypatch.delenv("PYIMGTAG_NO_UPDATE_CHECK", raising=False)
         with (
-            patch("pyimgtag.webapp.routes_about._latest_version", return_value="99.0.0"),
-            patch("pyimgtag.webapp.routes_about._is_newer", return_value=True),
+            patch("pyimgtag.update_check.latest_pypi_version", return_value="99.0.0"),
+            patch("pyimgtag.update_check.is_newer", return_value=True),
         ):
             main_mod._check_for_update()
         err = capsys.readouterr().err
@@ -299,8 +299,8 @@ class TestCheckForUpdate:
 
         monkeypatch.delenv("PYIMGTAG_NO_UPDATE_CHECK", raising=False)
         with (
-            patch("pyimgtag.webapp.routes_about._latest_version", return_value="0.0.1"),
-            patch("pyimgtag.webapp.routes_about._is_newer", return_value=False),
+            patch("pyimgtag.update_check.latest_pypi_version", return_value="0.0.1"),
+            patch("pyimgtag.update_check.is_newer", return_value=False),
         ):
             main_mod._check_for_update()
         assert capsys.readouterr().err == ""

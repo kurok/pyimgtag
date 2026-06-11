@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Webapp inline HTML/CSS/JS extracted to Jinja2 templates** (#283): the page markup that lived as Python string literals in `webapp/routes_faces.py`, `routes_review.py`, `routes_edit.py`, `routes_judge.py`, and `dashboard_server.py` now lives in `pyimgtag/webapp/templates/*.html`, rendered via a shared Jinja2 environment (`webapp/templating.py`) with autoescaping on — the intentionally-raw nav/CSS/modal fragments are explicitly `Markup`-marked at the call sites. Rendered pages are byte-identical; the per-file ruff `E501` ignores for those modules are gone.
+- **`jinja2>=3.1` added to the `[review]` and `[all]` extras** (#283): required by the webapp page templates (it is not a transitive dependency of fastapi/starlette).
+- **Progress DB decomposed into a `pyimgtag.db` package** (#282): `ProgressDB` is now a thin facade in `pyimgtag.db.progress_db` (connection, schema, and all versioned migrations) that delegates to new per-domain helpers — `ImageDB` (image progress/tags/review queries), `FaceDB` (faces, embeddings, person clusters), and `JudgeDB` (judge scores). Behavior, method signatures, SQL, and migrations are unchanged.
+- The `pyimgtag.progress_db` import path is unchanged (#282): it remains as a compatibility re-export, so `from pyimgtag.progress_db import ProgressDB` keeps working for all callers.
+- **Face pipeline moved into a `pyimgtag.face` subpackage** (#294): `face_detection` → `face.detection`, `face_embedding` → `face.embedding`, `face_clustering` → `face.clustering`, `face_naming` → `face.naming`, `face_ocr` → `face.ocr`, `face_thumb` → `face.thumb`, and `photos_faces_importer` → `face.photos_importer`. `pyimgtag.face` re-exports the public API; old flat import paths no longer work (no compatibility shims). `pyimgtag._face_dep_check` stays top-level.
+- **Cloud clients deduplicated** (#293): `AnthropicClient`, `OpenAIClient`, and `GeminiClient` now share the tag/judge request flow via a common `BaseCloudClient`; each client only supplies its provider-specific auth, payload shape, and response parsing. No behavior change.
+- **Update-check logic moved to `pyimgtag.update_check`** (#293): the PyPI latest-version lookup and version compare moved out of the webapp About page module so the CLI no longer imports webapp code for its startup update banner.
+
 ## [0.27.1] - 2026-06-03
 
 ### Fixed

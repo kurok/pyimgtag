@@ -180,3 +180,13 @@ def test_dashboard_router_can_be_mounted_on_a_composite_app():
     r = client.get("/api/run/current")
     assert r.status_code == 200
     assert r.json() == {"active": False}
+
+
+def test_dashboard_page_template_markers():
+    """Rendered page carries title, design CSS, and no unresolved placeholders."""
+    import re
+
+    body = TestClient(create_app()).get("/").text
+    assert "<title>pyimgtag dashboard</title>" in body
+    assert ":root{--bg:" in body  # design_css injected
+    assert not re.findall(r"__[A-Z][A-Z0-9_]+__", body)

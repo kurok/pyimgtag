@@ -1,4 +1,4 @@
-"""Tests for face_thumb module."""
+"""Tests for face.thumb module."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from pyimgtag.face_thumb import face_thumbnail_b64
+from pyimgtag.face.thumb import face_thumbnail_b64
 
 
 class TestFaceThumbnailB64:

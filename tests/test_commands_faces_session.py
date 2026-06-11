@@ -33,7 +33,7 @@ def test_faces_scan_no_web_does_not_register_session(tmp_path):
 
     with (
         patch("pyimgtag.commands.faces.scan_and_store", return_value=0),
-        patch("pyimgtag.face_detection._check_face_recognition"),
+        patch("pyimgtag.face.detection._check_face_recognition"),
     ):
         rc = cmd_faces(args)
 
@@ -87,7 +87,7 @@ def test_faces_scan_pause_gate_blocks_between_files(tmp_path):
 
     with (
         patch("pyimgtag.commands.faces.scan_and_store", side_effect=fake_scan),
-        patch("pyimgtag.face_detection._check_face_recognition"),
+        patch("pyimgtag.face.detection._check_face_recognition"),
         patch("pyimgtag.commands.faces.start_dashboard_for", return_value=(session, None)),
     ):
         worker = threading.Thread(target=run_cmd, daemon=True)

@@ -1,4 +1,4 @@
-"""Tests for the screen-OCR face-naming path (``pyimgtag.face_ocr``).
+"""Tests for the screen-OCR face-naming path (``pyimgtag.face.ocr``).
 
 The geometry (:func:`pair_faces_with_names`, :func:`_resized_dims`) is pure and
 tested directly. The Vision-framework and screencapture calls are macOS-only, so
@@ -15,8 +15,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from pyimgtag import face_ocr
-from pyimgtag.face_ocr import (
+from pyimgtag.face import ocr as face_ocr
+from pyimgtag.face.ocr import (
     OcrText,
     OcrUnavailableError,
     _photos_window_id,
@@ -206,8 +206,8 @@ class TestBuildReferencesFromScreenshot:
         ]
         # face0 → bottom 0.375, cx 0.2 ; face1 → bottom 0.375, cx 0.7
         ocr = [_text("Alice", cx=0.2, cy=0.42), _text("Bob", cx=0.7, cy=0.42)]
-        monkeypatch.setattr("pyimgtag.face_embedding.detect_and_encode", lambda *a, **k: detections)
-        monkeypatch.setattr("pyimgtag.face_ocr.recognize_text", lambda *a, **k: ocr)
+        monkeypatch.setattr("pyimgtag.face.embedding.detect_and_encode", lambda *a, **k: detections)
+        monkeypatch.setattr("pyimgtag.face.ocr.recognize_text", lambda *a, **k: ocr)
 
         refs = build_references_from_screenshot(shot)
         assert set(refs) == {"Alice", "Bob"}
@@ -216,10 +216,10 @@ class TestBuildReferencesFromScreenshot:
 
     def test_no_detections_returns_empty(self, tmp_path, monkeypatch):
         shot = self._png(tmp_path)
-        monkeypatch.setattr("pyimgtag.face_embedding.detect_and_encode", lambda *a, **k: [])
+        monkeypatch.setattr("pyimgtag.face.embedding.detect_and_encode", lambda *a, **k: [])
         # recognize_text must not even be called when there are no faces.
         monkeypatch.setattr(
-            "pyimgtag.face_ocr.recognize_text",
+            "pyimgtag.face.ocr.recognize_text",
             lambda *a, **k: (_ for _ in ()).throw(AssertionError("called")),
         )
         assert build_references_from_screenshot(shot) == {}
@@ -240,8 +240,8 @@ class TestBuildReferencesFromScreenshot:
             ),
         ]
         ocr = [_text("Alice", cx=0.2, cy=0.42)]
-        monkeypatch.setattr("pyimgtag.face_embedding.detect_and_encode", lambda *a, **k: detections)
-        monkeypatch.setattr("pyimgtag.face_ocr.recognize_text", lambda *a, **k: ocr)
+        monkeypatch.setattr("pyimgtag.face.embedding.detect_and_encode", lambda *a, **k: detections)
+        monkeypatch.setattr("pyimgtag.face.ocr.recognize_text", lambda *a, **k: ocr)
         assert build_references_from_screenshot(shot) == {}
 
 

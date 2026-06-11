@@ -15,7 +15,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from pyimgtag.face_clustering import cluster_faces, recluster_auto
+from pyimgtag.face.clustering import cluster_faces, recluster_auto
 from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
 

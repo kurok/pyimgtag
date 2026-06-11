@@ -1,4 +1,4 @@
-"""Tests for photos_faces_importer (photoscript & osascript mocked).
+"""Tests for photos_importer (photoscript & osascript mocked).
 
 The real photoscript ``PhotosLibrary`` does not expose a ``persons()``
 method; persons are surfaced only at the photo level via
@@ -20,12 +20,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from pyimgtag.models import FaceDetection
-from pyimgtag.photos_faces_importer import (
+from pyimgtag.face.photos_importer import (
     _assign_faces_to_person,
     _OsxphotosUnavailable,
     import_photos_persons,
 )
+from pyimgtag.models import FaceDetection
 
 
 def _mock_photo(uuid: str, persons: list[str]) -> MagicMock:
@@ -84,8 +84,8 @@ def _photoscript_only(library: MagicMock):
     mock_ps = MagicMock()
     mock_ps.PhotosLibrary.return_value = library
     with (
-        patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
-        patch("pyimgtag.photos_faces_importer.is_applescript_available", new=lambda: False),
+        patch("pyimgtag.face.photos_importer._has_photoscript", new=lambda: True),
+        patch("pyimgtag.face.photos_importer.is_applescript_available", new=lambda: False),
         patch.dict("sys.modules", {"photoscript": mock_ps}),
     ):
         yield
@@ -99,9 +99,9 @@ def _bulk_applescript_returns(stdout: str, *, returncode: int = 0):
     proc.stderr = ""
     proc.returncode = returncode
     with (
-        patch("pyimgtag.photos_faces_importer.is_applescript_available", new=lambda: True),
+        patch("pyimgtag.face.photos_importer.is_applescript_available", new=lambda: True),
         patch(
-            "pyimgtag.photos_faces_importer.subprocess.run",
+            "pyimgtag.face.photos_importer.subprocess.run",
             return_value=proc,
         ) as run_mock,
     ):
@@ -317,10 +317,10 @@ class TestImportPhotosPersons:
         with self._make_db(tmp_path) as db:
             with (
                 patch(
-                    "pyimgtag.photos_faces_importer.is_applescript_available",
+                    "pyimgtag.face.photos_importer.is_applescript_available",
                     new=lambda: False,
                 ),
-                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: False),
+                patch("pyimgtag.face.photos_importer._has_photoscript", new=lambda: False),
             ):
                 with pytest.raises(RuntimeError, match="Could not read the Photos library"):
                     import_photos_persons(db)
@@ -480,7 +480,7 @@ class TestBulkAppleScriptPath:
         majority of macOS Photos.app builds. The older ``persons of p``
         form silently returned zero persons across whole libraries.
         """
-        from pyimgtag.photos_faces_importer import _bulk_applescript_every_person
+        from pyimgtag.face.photos_importer import _bulk_applescript_every_person
 
         script = _bulk_applescript_every_person()
         assert "name of every person of p" in script
@@ -499,7 +499,7 @@ class TestBulkAppleScriptPath:
         ``item i of _persons``; ``name of <ref>`` works on any object,
         so the class identifier is never required.
         """
-        from pyimgtag.photos_faces_importer import _bulk_applescript_persons_property
+        from pyimgtag.face.photos_importer import _bulk_applescript_persons_property
 
         script = _bulk_applescript_persons_property()
         assert "persons of p" in script
@@ -513,7 +513,7 @@ class TestBulkAppleScriptPath:
         importer must invoke a SECOND osascript call with the
         property-based script — the user's ``person``-class-less
         Photos.app keeps producing 0 persons otherwise."""
-        from pyimgtag import photos_faces_importer
+        from pyimgtag.face import photos_importer
 
         with self._make_db(tmp_path) as db:
             calls: list[str] = []
@@ -538,8 +538,8 @@ class TestBulkAppleScriptPath:
                 return proc
 
             with (
-                patch.object(photos_faces_importer, "is_applescript_available", new=lambda: True),
-                patch.object(photos_faces_importer.subprocess, "run", side_effect=_fake_run),
+                patch.object(photos_importer, "is_applescript_available", new=lambda: True),
+                patch.object(photos_importer.subprocess, "run", side_effect=_fake_run),
             ):
                 imported, _ = import_photos_persons(db)
 
@@ -558,7 +558,7 @@ class TestBulkAppleScriptPath:
         photo×person. Some macOS Photos.app builds expose persons only
         at the app level (the user's "People" sidebar shows named
         items) even though no per-media-item accessor returns them."""
-        from pyimgtag.photos_faces_importer import _bulk_applescript_app_people
+        from pyimgtag.face.photos_importer import _bulk_applescript_app_people
 
         script = _bulk_applescript_app_people()
         # Walks photos via the persons collection, not the other way.
@@ -579,7 +579,7 @@ class TestBulkAppleScriptPath:
         the app-level walker before giving up. Otherwise users with
         Photos.app builds that surface persons only via the application
         collection silently get 0 imports."""
-        from pyimgtag import photos_faces_importer
+        from pyimgtag.face import photos_importer
 
         with self._make_db(tmp_path) as db:
             calls: list[str] = []
@@ -604,8 +604,8 @@ class TestBulkAppleScriptPath:
                 return proc
 
             with (
-                patch.object(photos_faces_importer, "is_applescript_available", new=lambda: True),
-                patch.object(photos_faces_importer.subprocess, "run", side_effect=_fake_run),
+                patch.object(photos_importer, "is_applescript_available", new=lambda: True),
+                patch.object(photos_importer.subprocess, "run", side_effect=_fake_run),
             ):
                 imported, _ = import_photos_persons(db)
 
@@ -700,14 +700,14 @@ class TestBulkAppleScriptPath:
 
             with (
                 patch(
-                    "pyimgtag.photos_faces_importer.is_applescript_available",
+                    "pyimgtag.face.photos_importer.is_applescript_available",
                     new=lambda: True,
                 ),
                 patch(
-                    "pyimgtag.photos_faces_importer.subprocess.run",
+                    "pyimgtag.face.photos_importer.subprocess.run",
                     return_value=failed,
                 ),
-                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
+                patch("pyimgtag.face.photos_importer._has_photoscript", new=lambda: True),
                 patch.dict("sys.modules", {"photoscript": mock_ps}),
             ):
                 imported, _ = import_photos_persons(db)
@@ -729,11 +729,11 @@ class TestBulkAppleScriptPath:
 
             with (
                 patch(
-                    "pyimgtag.photos_faces_importer.is_applescript_available",
+                    "pyimgtag.face.photos_importer.is_applescript_available",
                     new=lambda: True,
                 ),
-                patch("pyimgtag.photos_faces_importer.subprocess.run", side_effect=boom),
-                patch("pyimgtag.photos_faces_importer._has_photoscript", new=lambda: True),
+                patch("pyimgtag.face.photos_importer.subprocess.run", side_effect=boom),
+                patch("pyimgtag.face.photos_importer._has_photoscript", new=lambda: True),
                 patch.dict("sys.modules", {"photoscript": mock_ps}),
             ):
                 imported, _ = import_photos_persons(db)
@@ -754,7 +754,7 @@ class TestProgressOutput:
 
         Generates 250 fake photos so the 200-photo cadence fires once.
         """
-        from pyimgtag.photos_faces_importer import _PROGRESS_EVERY
+        from pyimgtag.face.photos_importer import _PROGRESS_EVERY
 
         with self._make_db(tmp_path) as db:
             # 250 photos, alternating with one named person each.
@@ -788,7 +788,7 @@ class TestProgressOutput:
         walker) must not re-emit the identical heartbeat line."""
         import time
 
-        from pyimgtag.photos_faces_importer import _PROGRESS_EVERY, _parse_bulk_output
+        from pyimgtag.face.photos_importer import _PROGRESS_EVERY, _parse_bulk_output
 
         lines = [f"uuid_{i:04d}\tAlice|\n" for i in range(_PROGRESS_EVERY)]
         # processed now sits exactly at the cadence; these rows repeat a uuid.
@@ -804,7 +804,7 @@ class TestProgressOutput:
     def test_default_progress_overwrites_cr_lines(self, capsys):
         """``\\r``-prefixed heartbeats must not get a trailing newline, so the
         next counter overwrites them instead of spamming scrollback."""
-        from pyimgtag.photos_faces_importer import _default_progress
+        from pyimgtag.face.photos_importer import _default_progress
 
         _default_progress("\r[faces] processed 200")
         _default_progress("\r[faces] processed 400")
@@ -829,7 +829,7 @@ class TestKeyboardInterruptHandling:
         args.db = str(db_path)
 
         with patch(
-            "pyimgtag.photos_faces_importer.import_photos_persons",
+            "pyimgtag.face.photos_importer.import_photos_persons",
             side_effect=KeyboardInterrupt(),
         ):
             rc = _handle_faces_import_photos(args)
@@ -850,25 +850,25 @@ class TestLazyPhotoscriptImport:
         # attribute in ``finally``.
         pyimgtag = importlib.import_module("pyimgtag")
 
-        mod_name = "pyimgtag.photos_faces_importer"
+        mod_name = "pyimgtag.face.photos_importer"
         saved = sys.modules.pop(mod_name, None)
         ps_saved = sys.modules.pop("photoscript", None)
         try:
             importlib.import_module(mod_name)
             assert "photoscript" not in sys.modules, (
-                "photoscript was imported at module level in photos_faces_importer"
+                "photoscript was imported at module level in photos_importer"
             )
         finally:
             # Restore BOTH sys.modules AND the parent-package attribute. The
-            # re-import above rebinds ``pyimgtag.photos_faces_importer`` (the
+            # re-import above rebinds ``pyimgtag.face.photos_importer`` (the
             # attribute) to a throwaway module object; if we only restore
-            # sys.modules, later ``from pyimgtag import photos_faces_importer``
-            # resolves the throwaway while ``patch("pyimgtag.photos_faces_importer.X")``
+            # sys.modules, later ``from pyimgtag.face import photos_importer``
+            # resolves the throwaway while ``patch("pyimgtag.face.photos_importer.X")``
             # targets the sys.modules one — the two diverge and every
             # module-level patch in subsequent tests silently misses.
             if saved is not None:
                 sys.modules[mod_name] = saved
-                pyimgtag.photos_faces_importer = saved
+                pyimgtag.face.photos_importer = saved
             if ps_saved is not None:
                 sys.modules["photoscript"] = ps_saved
 
@@ -877,29 +877,29 @@ class TestHasPhotoscript:
     """Cover the real _has_photoscript body (find_spec, lru_cache)."""
 
     def test_returns_true_when_spec_found(self):
-        from pyimgtag import photos_faces_importer
+        from pyimgtag.face import photos_importer
 
-        photos_faces_importer._has_photoscript.cache_clear()
+        photos_importer._has_photoscript.cache_clear()
         try:
             with patch("importlib.util.find_spec", return_value=MagicMock()):
-                assert photos_faces_importer._has_photoscript() is True
+                assert photos_importer._has_photoscript() is True
         finally:
-            photos_faces_importer._has_photoscript.cache_clear()
+            photos_importer._has_photoscript.cache_clear()
 
     def test_returns_false_when_spec_missing(self):
-        from pyimgtag import photos_faces_importer
+        from pyimgtag.face import photos_importer
 
-        photos_faces_importer._has_photoscript.cache_clear()
+        photos_importer._has_photoscript.cache_clear()
         try:
             with patch("importlib.util.find_spec", return_value=None):
-                assert photos_faces_importer._has_photoscript() is False
+                assert photos_importer._has_photoscript() is False
         finally:
-            photos_faces_importer._has_photoscript.cache_clear()
+            photos_importer._has_photoscript.cache_clear()
 
 
 class TestBulkAppScriptAlias:
     def test_bulk_applescript_alias_returns_every_person_form(self):
-        from pyimgtag.photos_faces_importer import (
+        from pyimgtag.face.photos_importer import (
             _bulk_applescript,
             _bulk_applescript_every_person,
         )
@@ -911,26 +911,26 @@ class TestRunBulkOsascript:
     """Cover _run_bulk_osascript error branches (timeout, OSError)."""
 
     def test_timeout_raises_unavailable(self):
-        from pyimgtag.photos_faces_importer import (
+        from pyimgtag.face.photos_importer import (
             _BulkAppleScriptUnavailable,
             _run_bulk_osascript,
         )
 
         with patch(
-            "pyimgtag.photos_faces_importer.subprocess.run",
+            "pyimgtag.face.photos_importer.subprocess.run",
             side_effect=subprocess.TimeoutExpired(cmd="osascript", timeout=1800),
         ):
             with pytest.raises(_BulkAppleScriptUnavailable, match="timed out"):
                 _run_bulk_osascript('tell application "Photos"\nreturn ""\nend tell')
 
     def test_oserror_raises_unavailable(self):
-        from pyimgtag.photos_faces_importer import (
+        from pyimgtag.face.photos_importer import (
             _BulkAppleScriptUnavailable,
             _run_bulk_osascript,
         )
 
         with patch(
-            "pyimgtag.photos_faces_importer.subprocess.run",
+            "pyimgtag.face.photos_importer.subprocess.run",
             side_effect=OSError("no such binary"),
         ):
             with pytest.raises(_BulkAppleScriptUnavailable, match="failed to launch osascript"):
@@ -952,7 +952,7 @@ class TestAppLevelWalkFailure:
         app-level retry. That retry returns a non-zero exit, so the warning
         branch (line 386-389) runs and the result stays empty.
         """
-        from pyimgtag import photos_faces_importer
+        from pyimgtag.face import photos_importer
 
         with self._make_db(tmp_path) as db:
             # Mock at the _run_bulk_osascript seam rather than subprocess.run so
@@ -977,15 +977,15 @@ class TestAppLevelWalkFailure:
 
             with (
                 patch(
-                    "pyimgtag.photos_faces_importer.is_applescript_available",
+                    "pyimgtag.face.photos_importer.is_applescript_available",
                     new=lambda: True,
                 ),
                 patch(
-                    "pyimgtag.photos_faces_importer._run_bulk_osascript",
+                    "pyimgtag.face.photos_importer._run_bulk_osascript",
                     side_effect=_fake_osascript,
                 ),
             ):
-                imported, skipped = photos_faces_importer.import_photos_persons(db)
+                imported, skipped = photos_importer.import_photos_persons(db)
 
             assert imported == 0
             assert skipped == 0
@@ -1021,7 +1021,7 @@ class TestPhotoscriptFallbackEdgeCases:
 
     def test_photoscript_periodic_progress_line(self, tmp_path):
         """The photoscript fallback emits a periodic counter every 200 photos (479-480)."""
-        from pyimgtag.photos_faces_importer import _PROGRESS_EVERY
+        from pyimgtag.face.photos_importer import _PROGRESS_EVERY
 
         with self._make_db(tmp_path) as db:
             photos = [_mock_photo(f"uuid_{i:04d}", [f"P{i}"]) for i in range(_PROGRESS_EVERY + 10)]
@@ -1041,7 +1041,7 @@ class TestListPhotosFailure:
     """Cover _list_photos exception handling (lines 557-559)."""
 
     def test_enumeration_failure_returns_empty_list(self):
-        from pyimgtag.photos_faces_importer import _list_photos
+        from pyimgtag.face.photos_importer import _list_photos
 
         library = MagicMock()
         library.photos.side_effect = RuntimeError("AppleScript bridge died")
@@ -1053,14 +1053,14 @@ class TestPhotoPersonNames:
 
     def test_single_name_string_wrapped_in_list(self):
         """A bridge that returns a bare string must be wrapped (line 580)."""
-        from pyimgtag.photos_faces_importer import _photo_person_names
+        from pyimgtag.face.photos_importer import _photo_person_names
 
         photo = MagicMock()
         type(photo).persons = property(lambda self: "Alice")
         assert _photo_person_names(photo) == ["Alice"]
 
     def test_persons_getter_raises_returns_empty(self):
-        from pyimgtag.photos_faces_importer import _photo_person_names
+        from pyimgtag.face.photos_importer import _photo_person_names
 
         photo = MagicMock()
         type(photo).persons = property(
@@ -1069,14 +1069,14 @@ class TestPhotoPersonNames:
         assert _photo_person_names(photo) == []
 
     def test_empty_persons_returns_empty(self):
-        from pyimgtag.photos_faces_importer import _photo_person_names
+        from pyimgtag.face.photos_importer import _photo_person_names
 
         photo = MagicMock()
         type(photo).persons = property(lambda self: [])
         assert _photo_person_names(photo) == []
 
     def test_list_of_names_coerced_to_str(self):
-        from pyimgtag.photos_faces_importer import _photo_person_names
+        from pyimgtag.face.photos_importer import _photo_person_names
 
         photo = MagicMock()
         type(photo).persons = property(lambda self: ["Alice", "Bob"])
@@ -1087,7 +1087,7 @@ class TestCollectViaOsxphotos:
     """The preferred enumeration path: read names + UUIDs from the Photos DB."""
 
     def test_builds_name_to_uuids_skipping_unknown_and_empty(self):
-        from pyimgtag.photos_faces_importer import _collect_via_osxphotos
+        from pyimgtag.face.photos_importer import _collect_via_osxphotos
 
         fake = _fake_osxphotos(
             [("Kate Резниченко", ["U1", "U2"]), ("_UNKNOWN_", ["U3"]), ("", ["U4"])]
@@ -1098,7 +1098,7 @@ class TestCollectViaOsxphotos:
 
     def test_missing_osxphotos_raises_unavailable(self):
         # The autouse fixture already maps osxphotos -> None (import fails).
-        from pyimgtag.photos_faces_importer import _collect_via_osxphotos
+        from pyimgtag.face.photos_importer import _collect_via_osxphotos
 
         with pytest.raises(_OsxphotosUnavailable):
             _collect_via_osxphotos(lambda _m: None)
@@ -1106,7 +1106,7 @@ class TestCollectViaOsxphotos:
     def test_open_failure_raises_unavailable(self):
         import types
 
-        from pyimgtag.photos_faces_importer import _collect_via_osxphotos
+        from pyimgtag.face.photos_importer import _collect_via_osxphotos
 
         module = types.ModuleType("osxphotos")
 
