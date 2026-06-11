@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from PIL import Image
 
-from pyimgtag.face_detection import _load_and_resize, detect_faces
+from pyimgtag.face.detection import _load_and_resize, detect_faces
 
 
 def _patch_face_modules(face_recognition_module):
@@ -30,7 +30,7 @@ class TestCheckFaceRecognition:
             {"face_recognition_models": MagicMock(), "face_recognition": None},
         ):
             with pytest.raises(ImportError, match="face_recognition is not installed"):
-                from pyimgtag.face_detection import _check_face_recognition
+                from pyimgtag.face.detection import _check_face_recognition
 
                 _check_face_recognition()
 
@@ -42,7 +42,7 @@ class TestCheckFaceRecognition:
             {"face_recognition_models": None, "face_recognition": MagicMock()},
         ):
             from pyimgtag._face_dep_check import MissingFaceModelsError
-            from pyimgtag.face_detection import _check_face_recognition
+            from pyimgtag.face.detection import _check_face_recognition
 
             with pytest.raises(MissingFaceModelsError) as excinfo:
                 _check_face_recognition()
@@ -146,8 +146,8 @@ class TestLoadAndResize:
         heic_path.write_bytes(b"fake")
 
         with (
-            patch("pyimgtag.face_detection.is_heic", return_value=True),
-            patch("pyimgtag.face_detection.convert_heic_to_jpeg", return_value=jpeg_path),
+            patch("pyimgtag.face.detection.is_heic", return_value=True),
+            patch("pyimgtag.face.detection.convert_heic_to_jpeg", return_value=jpeg_path),
         ):
             result = _load_and_resize(heic_path, max_dim=1280)
             assert result.size == (100, 100)
@@ -165,8 +165,8 @@ class TestLoadAndResize:
         heic_path.write_bytes(b"fake")
 
         with (
-            patch("pyimgtag.face_detection.is_heic", return_value=True),
-            patch("pyimgtag.face_detection.convert_heic_to_jpeg", return_value=jpeg_path),
+            patch("pyimgtag.face.detection.is_heic", return_value=True),
+            patch("pyimgtag.face.detection.convert_heic_to_jpeg", return_value=jpeg_path),
         ):
             result = _load_and_resize(heic_path, max_dim=1280)
 

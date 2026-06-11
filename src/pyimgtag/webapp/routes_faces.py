@@ -1242,7 +1242,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     class _LabelBody(BaseModel):
         label: str
 
-    from pyimgtag.face_thumb import face_thumbnail_b64
+    from pyimgtag.face.thumb import face_thumbnail_b64
 
     async def _thumbs(faces: list[dict]) -> list[dict]:
         """Attach a base64 ``thumb`` to each face, cropping off the event loop.
@@ -1553,7 +1553,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                     converted.parent.rmdir()  # removes the owned mkdtemp dir only when empty
 
         # Scale bbox from detection space (max_dim=1280) to full-image coords.
-        # face_detection resizes images to 1280px on the long side before detecting,
+        # face.detection resizes images to 1280px on the long side before detecting,
         # so all stored bbox values are in that coordinate space.
         detect_max = 1280
         iw, ih = img.size

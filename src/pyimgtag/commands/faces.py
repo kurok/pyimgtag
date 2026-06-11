@@ -17,7 +17,7 @@ from pyimgtag.scanner import scan_directory, scan_photos_library
 from pyimgtag.webapp.bootstrap import start_dashboard_for
 
 try:
-    from pyimgtag.face_embedding import scan_and_store
+    from pyimgtag.face.embedding import scan_and_store
 except ImportError:
     scan_and_store = None  # type: ignore[assignment]
 
@@ -28,7 +28,7 @@ _CLUSTER_INTERVAL_S = 30
 # Detection-quality presets bundling the dlib knobs. The granular --max-dim /
 # --detection-model / --upsample / --num-jitters flags override any field.
 # max_dim is held at 1280 across presets on purpose: stored bboxes live in the
-# resized-image space and the faces UI (face_thumb / the preview endpoint)
+# resized-image space and the faces UI (face.thumb / the preview endpoint)
 # assumes a 1280 detection space when scaling crops back. The quality gain comes
 # from upsampling (finds smaller faces), jitter (better encodings), and the cnn
 # model — not from a larger max_dim, which would misalign every thumbnail.
@@ -136,7 +136,7 @@ def _handle_faces_reset_untrusted(args: argparse.Namespace) -> int:
 def _handle_faces_recluster(args: argparse.Namespace) -> int:
     """Clear auto-clusters and re-cluster from scratch (keeps trusted people)."""
     try:
-        from pyimgtag.face_clustering import recluster_auto
+        from pyimgtag.face.clustering import recluster_auto
     except ImportError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -244,7 +244,7 @@ def _scan_parallel(db, files, quality, *, jobs, limit, session, stats: dict) -> 
     """
     import errno as _errno
 
-    from pyimgtag.face_embedding import detect_and_encode
+    from pyimgtag.face.embedding import detect_and_encode
 
     qkw = {k: quality[k] for k in ("max_dim", "model", "upsample", "num_jitters", "min_face_size")}
     file_enum = enumerate(files)
@@ -331,7 +331,7 @@ def _handle_faces_scan(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        from pyimgtag.face_detection import _check_face_recognition
+        from pyimgtag.face.detection import _check_face_recognition
 
         _check_face_recognition()
     except ImportError as exc:
@@ -440,13 +440,13 @@ def _start_cluster_thread(
 
     Opens its own ProgressDB connection so SQLite writes from the scan
     loop and the cluster loop never share a connection object across threads.
-    Runs :func:`~pyimgtag.face_clustering.recluster_auto` every
+    Runs :func:`~pyimgtag.face.clustering.recluster_auto` every
     ``_CLUSTER_INTERVAL_S`` seconds so the faces UI stays current during
     a long scan.  The thread stops as soon as *stop_event* is set and
     performs one final cluster pass before exiting.
     """
     try:
-        from pyimgtag.face_clustering import recluster_auto
+        from pyimgtag.face.clustering import recluster_auto
     except ImportError:
         # scikit-learn not installed — skip background clustering silently
         t = threading.Thread(target=lambda: None, daemon=True)
@@ -478,7 +478,7 @@ def _start_cluster_thread(
 def _handle_faces_cluster(args: argparse.Namespace) -> int:
     """Cluster detected faces into person groups."""
     try:
-        from pyimgtag.face_clustering import cluster_faces
+        from pyimgtag.face.clustering import cluster_faces
     except ImportError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -607,7 +607,7 @@ def _handle_faces_import_photos(args: argparse.Namespace) -> int:
       photoscript / AppleScript traceback.
     """
     try:
-        from pyimgtag.photos_faces_importer import import_photos_persons
+        from pyimgtag.face.photos_importer import import_photos_persons
     except ImportError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -643,7 +643,7 @@ def _handle_faces_match_references(args: argparse.Namespace) -> int:
     """
     from pathlib import Path
 
-    from pyimgtag.face_naming import (
+    from pyimgtag.face.naming import (
         apply_matches,
         load_reference_embeddings,
         match_clusters_to_references,
@@ -655,7 +655,7 @@ def _handle_faces_match_references(args: argparse.Namespace) -> int:
         return 1
 
     try:
-        from pyimgtag.face_detection import _check_face_recognition
+        from pyimgtag.face.detection import _check_face_recognition
 
         _check_face_recognition()
     except ImportError as exc:
@@ -716,8 +716,8 @@ def _handle_faces_capture_names(args: argparse.Namespace) -> int:
     """
     import tempfile
 
-    from pyimgtag.face_naming import apply_matches, match_clusters_to_references
-    from pyimgtag.face_ocr import (
+    from pyimgtag.face.naming import apply_matches, match_clusters_to_references
+    from pyimgtag.face.ocr import (
         OcrUnavailableError,
         build_references_from_screenshot,
         capture_people_screenshot,
@@ -731,7 +731,7 @@ def _handle_faces_capture_names(args: argparse.Namespace) -> int:
 
     # Face detection/encoding must be available before we capture or read.
     try:
-        from pyimgtag.face_detection import _check_face_recognition
+        from pyimgtag.face.detection import _check_face_recognition
 
         _check_face_recognition()
     except ImportError as exc:

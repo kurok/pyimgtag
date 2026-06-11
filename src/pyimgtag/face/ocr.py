@@ -7,7 +7,7 @@ face thumbnails each captioned with a name — and turns it into the same
 ``{name: [embedding]}`` reference map those paths produce. The face under each
 tile is detected and embedded; the caption beneath it is read with macOS'
 Vision OCR; the two are paired by position. The resulting references are fed to
-the existing :func:`pyimgtag.face_naming.match_clusters_to_references` matcher.
+the existing :func:`pyimgtag.face.naming.match_clusters_to_references` matcher.
 
 Layering / testability:
   - :func:`pair_faces_with_names` is **pure** (geometry only) and unit-tested
@@ -154,7 +154,7 @@ def recognize_text(image_path: str | Path, *, languages: list[str] | None = None
 
 
 def _resized_dims(width: int, height: int, max_dim: int) -> tuple[float, float]:
-    """Mirror :func:`pyimgtag.face_detection._load_and_resize` scaling.
+    """Mirror :func:`pyimgtag.face.detection._load_and_resize` scaling.
 
     Face bboxes are stored in the *resized* image's pixel space, so to normalize
     them we need the same dimensions the detector saw.
@@ -236,14 +236,14 @@ def build_references_from_screenshot(
     """Detect + embed faces in a People-view screenshot and label them by OCR.
 
     Returns ``{person_name: [embedding, ...]}`` ready for
-    :func:`pyimgtag.face_naming.match_clusters_to_references`. Needs both the
+    :func:`pyimgtag.face.naming.match_clusters_to_references`. Needs both the
     ``[face]`` and ``[ocr]`` extras at runtime.
     """
     from collections import defaultdict
 
     from PIL import Image
 
-    from pyimgtag.face_embedding import detect_and_encode
+    from pyimgtag.face.embedding import detect_and_encode
 
     path = Path(image_path)
     detections = detect_and_encode(path, max_dim=max_dim, model=model, num_jitters=num_jitters)

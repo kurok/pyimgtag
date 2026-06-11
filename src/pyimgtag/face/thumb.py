@@ -12,7 +12,7 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# face_detection resizes images to this max dimension before detecting faces,
+# face.detection resizes images to this max dimension before detecting faces,
 # so all stored bbox coords are in that coordinate space.
 _DETECT_MAX_DIM = 1280
 

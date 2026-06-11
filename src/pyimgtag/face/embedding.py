@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pyimgtag._face_dep_check import _ensure_face_dep
-from pyimgtag.face_detection import _load_and_resize, detect_faces
+from pyimgtag.face.detection import _load_and_resize, detect_faces
 from pyimgtag.models import FaceDetection
 
 if TYPE_CHECKING:

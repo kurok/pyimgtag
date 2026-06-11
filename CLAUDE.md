@@ -64,9 +64,9 @@ src/pyimgtag/
   run_session.py / run_registry.py  Run lifecycle/session tracking
   cleanup_drift.py     Drift detection for DB rows whose backing file is gone
   _face_dep_check.py   Friendly preflight for face_recognition_models
-  face_detection.py / face_embedding.py / face_clustering.py / face_naming.py /
-  face_ocr.py / face_thumb.py        Face pipeline (detect, embed, cluster, name, OCR, thumbs)
-  photos_faces_importer.py  Apple Photos face/people import
+  face/                Face pipeline subpackage: detection, embedding, clustering, naming,
+                       ocr, thumb (detect, embed, cluster, name, OCR, thumbs) and
+                       photos_importer (Apple Photos face/people import)
   review_server.py / faces_review_server.py  FastAPI review and face-management UI servers
   commands/            Per-subcommand handlers (run, judge, db, query, tags, faces, ...)
   webapp/              FastAPI dashboard + review/faces/tags/query/judge UIs

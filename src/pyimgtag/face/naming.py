@@ -78,8 +78,8 @@ def load_reference_embeddings(
     Returns ``{person_name: [embedding, ...]}``. Images with no detectable
     face are skipped (logged). Requires the ``[face]`` extra at runtime.
     """
-    from pyimgtag.face_detection import detect_faces
-    from pyimgtag.face_embedding import compute_embeddings
+    from pyimgtag.face.detection import detect_faces
+    from pyimgtag.face.embedding import compute_embeddings
 
     refs: dict[str, list[np.ndarray]] = defaultdict(list)
     for img_path, name in _iter_reference_images(ref_dir):
