@@ -550,3 +550,17 @@ class TestJudgedButUntaggedPreviews:
 
         r = client.get("/thumbnail", params={"path": "/not/in/db.png"})
         assert r.status_code == 404
+
+
+def test_review_page_template_markers(tmp_path):
+    """Rendered page carries title, design CSS, and no unresolved placeholders."""
+    import re
+
+    from pyimgtag.webapp.routes_review import render_review_html
+
+    html = render_review_html("/review")
+    assert "<title>pyimgtag Review</title>" in html
+    assert ":root{--bg:" in html  # nav_styles (design CSS) injected
+    assert '<nav class="nav">' in html  # nav shell injected
+    assert "/review/api/stats" in html  # api_base injected
+    assert not re.findall(r"__[A-Z][A-Z0-9_]+__", html)

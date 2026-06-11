@@ -456,3 +456,14 @@ class TestEditRouterImportGuard:
         with patch.dict("sys.modules", {"fastapi": None}):
             with pytest.raises(ImportError, match="fastapi and uvicorn are required"):
                 build_edit_router(db)
+
+
+def test_edit_page_template_markers():
+    """Rendered page carries title, design CSS, and no unresolved placeholders."""
+    import re
+
+    html = render_edit_html("/edit")
+    assert "<title>pyimgtag Edit</title>" in html
+    assert ":root{--bg:" in html  # nav_styles (design CSS) injected
+    assert '<nav class="nav">' in html  # nav shell injected
+    assert not re.findall(r"__[A-Z][A-Z0-9_]+__", html)

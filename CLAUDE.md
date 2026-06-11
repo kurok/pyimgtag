@@ -72,7 +72,8 @@ src/pyimgtag/
                        photos_importer (Apple Photos face/people import)
   review_server.py / faces_review_server.py  FastAPI review and face-management UI servers
   commands/            Per-subcommand handlers (run, judge, db, query, tags, faces, ...)
-  webapp/              FastAPI dashboard + review/faces/tags/query/judge UIs
+  webapp/              FastAPI dashboard + review/faces/tags/query/judge UIs; page HTML/CSS/JS
+                       lives in webapp/templates/*.html, rendered via Jinja2 (webapp/templating.py)
 tests/                 Unit tests (no network, no Ollama required)
 ```
 

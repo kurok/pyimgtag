@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pyimgtag — Person</title>
+  <style>
+    {{ nav_styles }}
+    .detail-hdr{display:flex;align-items:center;gap:12px;padding:20px 32px 4px;flex-wrap:wrap}
+    .detail-hdr h1{font-size:20px;font-weight:700;color:var(--text);margin:0}
+    .detail-hdr .back{font-size:13px;color:var(--muted);text-decoration:none;
+                      padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm)}
+    .detail-hdr .back:hover{border-color:var(--accent);color:var(--accent)}
+    .detail-meta{padding:0 32px 12px;font-size:13px;color:var(--muted);
+                 display:flex;align-items:center;gap:8px}
+    .badge-trusted{background:rgba(52,199,89,.1);color:#1a7f50;font-size:10px;
+                   font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+    .badge-auto{background:rgba(0,0,0,.05);color:var(--muted);font-size:10px;
+                font-weight:700;padding:2px 7px;border-radius:5px;text-transform:uppercase}
+    .detail-actions{display:flex;gap:8px;padding:0 32px 16px;flex-wrap:wrap}
+    .detail-actions button{padding:6px 16px;border-radius:var(--radius-sm);font-size:13px;
+                           font-weight:500;border:1px solid var(--border);
+                           background:var(--surface);color:var(--text);cursor:pointer;
+                           transition:all .15s}
+    .detail-actions button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+    .confirm-btn{color:#1a7f50!important;border-color:rgba(52,199,89,.4)!important}
+    .confirm-btn:hover:not(:disabled){background:rgba(52,199,89,.08)!important}
+    .confirm-btn:disabled{opacity:.5;cursor:default}
+    .del-btn{color:var(--danger)!important;border-color:rgba(255,59,48,.3)!important}
+    .del-btn:hover{background:rgba(255,59,48,.05)!important}
+    #faces-grid{display:flex;flex-wrap:wrap;gap:8px;padding:0 32px 32px;align-items:flex-start}
+    .face-thumb{width:80px;height:80px;object-fit:cover;border-radius:var(--radius-sm);
+                border:1px solid var(--border);cursor:pointer;transition:opacity .15s}
+    .face-thumb:hover{opacity:.7}
+    .face-thumb.hero{width:120px;height:120px;border-width:2px;
+                     border-color:var(--accent);box-shadow:0 2px 8px rgba(0,0,0,.18)}
+    #loading{padding:32px;color:var(--muted);font-size:14px}
+    .pager{display:flex;align-items:center;gap:10px;padding:8px 32px 24px;
+           font-size:13px;color:var(--muted)}
+    .pager button{padding:4px 12px;border-radius:var(--radius-sm);font-size:12px;
+                  border:1px solid var(--border);background:var(--surface);
+                  color:var(--text);cursor:pointer;transition:all .15s}
+    .pager button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+    .pager button:disabled{opacity:.35;cursor:default}
+    .cand-section{border-top:1px solid var(--border);margin-top:8px;padding:18px 32px 8px}
+    .cand-section h2{font-size:15px;font-weight:600;color:var(--text);margin:0 0 2px}
+    .cand-section .hint{font-size:12px;color:var(--muted);margin:0 0 12px}
+    .cand-toggle{display:inline-flex;gap:0;border:1px solid var(--border);
+                 border-radius:var(--radius-sm);overflow:hidden;margin-bottom:14px}
+    .cand-toggle button{padding:5px 14px;font-size:12px;border:none;background:var(--surface);
+                        color:var(--text);cursor:pointer;transition:all .15s}
+    .cand-toggle button:not(:last-child){border-right:1px solid var(--border)}
+    .cand-toggle button.active{background:var(--accent);color:#fff}
+    #cand-grid{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start}
+    #cand-grid .cand-thumb{width:80px;height:80px;object-fit:cover;border-radius:var(--radius-sm);
+                           border:1px solid var(--border);cursor:pointer;transition:all .15s}
+    #cand-grid .cand-thumb:hover{border-color:var(--accent);transform:scale(1.06)}
+    #cand-empty{font-size:13px;color:var(--muted)}
+  </style>
+</head>
+<body>
+{{ nav }}
+{{ modal_html }}
+{{ modal_js }}
+<div class="detail-hdr">
+  <a class="back" href="{{ api_base }}/" onclick="if(window.history.length>1){history.back();return false;}">← All Faces</a>
+  <h1 id="person-name">Loading…</h1>
+</div>
+<div class="detail-meta">
+  <span id="person-badge"></span>
+  <span id="person-count"></span>
+</div>
+<div class="detail-actions" id="actions" style="display:none">
+  <button id="rename-btn">Rename</button>
+  <button id="confirm-btn" class="confirm-btn">Confirm cluster</button>
+  <button id="delete-btn" class="del-btn">Delete person</button>
+</div>
+<div id="loading">Loading faces…</div>
+<div id="faces-grid"></div>
+<div class="pager" id="face-pager" style="display:none">
+  <button id="fp-prev" onclick="goFacePage(-1)">← Previous</button>
+  <span id="fp-info"></span>
+  <button id="fp-next" onclick="goFacePage(1)">Next →</button>
+</div>
+<div class="cand-section" id="cand-section" style="display:none">
+  <h2>Add faces to this person</h2>
+  <p class="hint" id="cand-hint">Click a face to assign it to this person.</p>
+  <div class="cand-toggle">
+    <button id="cand-src-unassigned" class="active" onclick="setCandSource('unassigned')">Unassigned</button>
+    <button id="cand-src-biggest" onclick="setCandSource('biggest')">Biggest cluster</button>
+  </div>
+  <div id="cand-grid"></div>
+  <div id="cand-empty" style="display:none">No candidate faces here.</div>
+  <div class="pager" id="cand-pager" style="display:none;padding-left:0">
+    <button id="cp-prev" onclick="goCandPage(-1)">← Previous</button>
+    <span id="cp-info"></span>
+    <button id="cp-next" onclick="goCandPage(1)">Next →</button>
+  </div>
+</div>
+<script>
+const _personId = {{ person_id }};
+const _apiBase  = '{{ api_base }}';
+
+// Hover preview overlay
+const _preview = document.createElement('div');
+_preview.id = 'face-hover-preview';
+_preview.style.cssText = 'display:none;position:fixed;z-index:9999;pointer-events:none;'
+  + 'border-radius:8px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.45);';
+document.body.appendChild(_preview);
+const _previewImg = document.createElement('img');
+_previewImg.style.cssText = 'display:block;max-width:320px;max-height:320px;';
+_previewImg.addEventListener('error', () => { _preview.style.display = 'none'; });
+_preview.appendChild(_previewImg);
+
+function showPreview(faceId, rect) {
+  _previewImg.src = _apiBase + '/api/faces/' + faceId + '/preview';
+  const left = Math.min(rect.right + 10, window.innerWidth - 340);
+  const top  = Math.min(Math.max(rect.top, 8), window.innerHeight - 340);
+  _preview.style.left = left + 'px';
+  _preview.style.top  = top  + 'px';
+  _preview.style.display = 'block';
+}
+
+let _person = null;
+const FACE_PAGE_SIZE = 60;
+let _faceOffset = 0;
+let _faceTotal = 0;
+
+async function load() {
+  const [personRes, facesRes] = await Promise.all([
+    fetch(_apiBase + '/api/persons/' + _personId),
+    fetch(_apiBase + '/api/persons/' + _personId + '/faces?offset=' + _faceOffset
+      + '&limit=' + FACE_PAGE_SIZE),
+  ]);
+  // Person no longer exists (deleted or merged into another) — go back to list.
+  if (!personRes.ok) {
+    window.location.href = _apiBase + '/';
+    return;
+  }
+  const [person, facesData] = await Promise.all([personRes.json(), facesRes.json()]);
+  _person = person;
+  _faceTotal = facesData.total;
+  const items = facesData.items;
+
+  // The last face on the last page was unassigned — step back a page.
+  if (items.length === 0 && _faceOffset > 0) {
+    _faceOffset = Math.max(0, _faceOffset - FACE_PAGE_SIZE);
+    load();
+    return;
+  }
+
+  document.getElementById('person-name').textContent =
+    person.label || ('(unlabelled #' + person.id + ')');
+  const badge = document.getElementById('person-badge');
+  badge.className = person.trusted ? 'badge-trusted' : 'badge-auto';
+  badge.textContent = person.trusted ? 'trusted' : 'auto';
+  document.getElementById('person-count').textContent =
+    _faceTotal + ' face' + (_faceTotal !== 1 ? 's' : '');
+
+  const cfmBtn = document.getElementById('confirm-btn');
+  cfmBtn.disabled = person.trusted;
+  cfmBtn.textContent = person.trusted ? 'Confirmed ✓' : 'Confirm cluster';
+
+  document.getElementById('actions').style.display = 'flex';
+  document.getElementById('loading').style.display = 'none';
+
+  renderFaces(items);
+  updateFacePager();
+}
+
+function goFacePage(delta) {
+  _faceOffset = Math.max(0, Math.min(_faceOffset + delta * FACE_PAGE_SIZE,
+    Math.max(0, _faceTotal - 1)));
+  load();
+}
+
+function updateFacePager() {
+  const pager = document.getElementById('face-pager');
+  if (_faceTotal > FACE_PAGE_SIZE) {
+    pager.style.display = 'flex';
+    const end = Math.min(_faceOffset + FACE_PAGE_SIZE, _faceTotal);
+    document.getElementById('fp-info').textContent =
+      (_faceOffset + 1) + '–' + end + ' of ' + _faceTotal;
+    document.getElementById('fp-prev').disabled = _faceOffset === 0;
+    document.getElementById('fp-next').disabled = end >= _faceTotal;
+  } else {
+    pager.style.display = 'none';
+  }
+}
+
+function renderFaces(faces) {
+  const grid = document.getElementById('faces-grid');
+  grid.innerHTML = '';
+  const sorted = faces.slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+  sorted.forEach((f, i) => {
+    if (!f.thumb) return;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block';
+
+    const isHero = _faceOffset === 0 && i === 0;
+    const img = document.createElement('img');
+    img.className = isHero ? 'face-thumb hero' : 'face-thumb';
+    img.src = 'data:image/jpeg;base64,' + f.thumb;
+    img.title = isHero
+      ? 'Best match (conf ' + (f.confidence ? f.confidence.toFixed(2) : '?') + ') — click to unassign'
+      : 'Click to unassign';
+    img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
+    img.addEventListener('mouseleave', () => { _preview.style.display = 'none'; });
+    img.addEventListener('click', async () => {
+      _preview.style.display = 'none';
+      img.style.opacity = '0.3';
+      await fetch(_apiBase + '/api/faces/' + f.id + '/unassign', {method: 'POST'});
+      load();
+    });
+    wrap.appendChild(img);
+    grid.appendChild(wrap);
+  });
+}
+
+document.getElementById('rename-btn').addEventListener('click', async () => {
+  const allPersons = await fetch(_apiBase + '/api/persons').then(r => r.json());
+  const targets = allPersons.filter(p => p.trusted && p.label && p.id !== _personId)
+    .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+
+  const body = '<input class="inp" id="m-inp" placeholder="Type a new name…"'
+    + ' style="margin-bottom:8px;display:block;width:100%" />'
+    + '<label style="font-size:12px;color:var(--muted);display:block;margin:6px 0 4px">'
+    + 'Or merge into existing trusted person:</label>'
+    + '<select class="inp" id="m-merge-sel" style="display:block;width:100%">'
+    + '<option value="">— assign a new name only —</option></select>';
+
+  openModal(
+    'Rename / merge person',
+    'Type a new name or pick an existing trusted person to merge this cluster into.',
+    body,
+    'Apply', 'btn-primary',
+    async () => {
+      const sel = document.getElementById('m-merge-sel');
+      const _raw = sel && sel.value ? Number(sel.value) : null;
+      const targetId = (_raw && !isNaN(_raw)) ? _raw : null;
+      if (targetId) {
+        await fetch(_apiBase + '/api/persons/' + _personId + '/merge/' + targetId,
+          {method: 'POST'});
+        closeModal();
+        window.location.href = _apiBase + '/persons/' + targetId;
+      } else {
+        const val = document.getElementById('m-inp').value.trim();
+        if (!val) return;
+        await fetch(_apiBase + '/api/persons/' + _personId + '/label', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({label: val}),
+        });
+        closeModal();
+        load();
+      }
+    }
+  );
+
+  setTimeout(() => {
+    const inp = document.getElementById('m-inp');
+    const sel = document.getElementById('m-merge-sel');
+    if (inp) { inp.value = (_person && _person.label) || ''; inp.focus(); }
+    if (sel && targets.length) {
+      targets.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.label + ' (' + p.face_count + ' face'
+          + (p.face_count !== 1 ? 's' : '') + ')';
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => {
+        const t = targets.find(tp => tp.id === Number(sel.value));
+        if (t && inp) inp.value = t.label;
+      });
+    }
+  }, 50);
+});
+
+document.getElementById('confirm-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Confirming…';
+  await fetch(_apiBase + '/api/persons/' + _personId + '/confirm', {method: 'POST'});
+  load();
+});
+
+document.getElementById('delete-btn').addEventListener('click', () => {
+  openModal(
+    'Delete person',
+    'Delete this person record? Face crops are kept but unassigned.',
+    '',
+    'Delete', 'btn-danger-text',
+    async () => {
+      await fetch(_apiBase + '/api/persons/' + _personId, {method: 'DELETE'});
+      closeModal();
+      window.location.href = _apiBase + '/';
+    }
+  );
+});
+
+// ---- Candidate faces: add more faces to this person ----
+let _candSource = 'unassigned';
+let _candOffset = 0;
+let _candTotal = 0;
+const CAND_PAGE_SIZE = 40;
+
+function setCandSource(src) {
+  if (src === _candSource) return;
+  _candSource = src;
+  _candOffset = 0;
+  document.getElementById('cand-src-unassigned').classList.toggle('active', src === 'unassigned');
+  document.getElementById('cand-src-biggest').classList.toggle('active', src === 'biggest');
+  loadCandidates();
+}
+
+function goCandPage(delta) {
+  _candOffset = Math.max(0, Math.min(_candOffset + delta * CAND_PAGE_SIZE,
+    Math.max(0, _candTotal - 1)));
+  loadCandidates();
+}
+
+function updateCandPager() {
+  const pager = document.getElementById('cand-pager');
+  if (_candTotal > CAND_PAGE_SIZE) {
+    pager.style.display = 'flex';
+    const end = Math.min(_candOffset + CAND_PAGE_SIZE, _candTotal);
+    document.getElementById('cp-info').textContent =
+      (_candOffset + 1) + '–' + end + ' of ' + _candTotal;
+    document.getElementById('cp-prev').disabled = _candOffset === 0;
+    document.getElementById('cp-next').disabled = end >= _candTotal;
+  } else {
+    pager.style.display = 'none';
+  }
+}
+
+async function loadCandidates() {
+  const section = document.getElementById('cand-section');
+  section.style.display = '';
+  const res = await fetch(_apiBase + '/api/persons/' + _personId + '/candidates?source='
+    + _candSource + '&offset=' + _candOffset + '&limit=' + CAND_PAGE_SIZE);
+  if (!res.ok) { section.style.display = 'none'; return; }
+  const data = await res.json();
+  _candTotal = data.total;
+  const items = data.items;
+
+  // Assigning the last face on a page can empty it — step back.
+  if (items.length === 0 && _candOffset > 0) {
+    _candOffset = Math.max(0, _candOffset - CAND_PAGE_SIZE);
+    loadCandidates();
+    return;
+  }
+
+  const hint = document.getElementById('cand-hint');
+  if (_candSource === 'biggest') {
+    hint.textContent = data.source_label
+      ? 'From "' + data.source_label + '" — click a face to move it to this person.'
+      : 'No other cluster to pull from.';
+  } else {
+    hint.textContent = 'Unassigned faces — click one to add it to this person.';
+  }
+
+  renderCandidates(items);
+  updateCandPager();
+}
+
+function renderCandidates(faces) {
+  const grid = document.getElementById('cand-grid');
+  grid.innerHTML = '';
+  document.getElementById('cand-empty').style.display = faces.length ? 'none' : '';
+  faces.forEach(f => {
+    if (!f.thumb) return;
+    const img = document.createElement('img');
+    img.className = 'cand-thumb';
+    img.src = 'data:image/jpeg;base64,' + f.thumb;
+    img.title = 'Click to add to this person';
+    img.addEventListener('mouseenter', () => showPreview(f.id, img.getBoundingClientRect()));
+    img.addEventListener('mouseleave', () => { _preview.style.display = 'none'; });
+    img.addEventListener('click', () => assignCandidate(f.id, img));
+    grid.appendChild(img);
+  });
+}
+
+async function assignCandidate(faceId, imgEl) {
+  _preview.style.display = 'none';
+  imgEl.style.opacity = '0.3';
+  imgEl.style.pointerEvents = 'none';
+  await fetch(_apiBase + '/api/faces/assign-batch', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({face_ids: [faceId], person_id: _personId}),
+  });
+  // Refresh this person's faces + count and the candidate list.
+  load();
+  loadCandidates();
+}
+
+load();
+loadCandidates();
+</script>
+</body>
+</html>

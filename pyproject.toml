@@ -61,7 +61,7 @@ face = [
     "setuptools>=68.0,<81",
     "scikit-learn>=1.8",
 ]
-review = ["fastapi>=0.136", "uvicorn>=0.48", "pydantic>=2.13"]
+review = ["fastapi>=0.136", "uvicorn>=0.48", "pydantic>=2.13", "jinja2>=3.1"]
 raw = ["rawpy>=0.27"]
 # Screen OCR for `faces capture-names`: read names off a screenshot of the
 # Apple Photos People view with Apple's Vision framework. macOS only — pyobjc
@@ -85,6 +85,7 @@ all = [
     "fastapi>=0.136",
     "uvicorn>=0.48",
     "pydantic>=2.13",
+    "jinja2>=3.1",
     "rawpy>=0.27",
     # Screen OCR (macOS only; markers make these no-ops elsewhere). Floor at 9.0
     # to stay compatible with osxphotos' pyobjc-framework-quartz<10.0 pin.
@@ -116,6 +117,11 @@ pyimgtag = "pyimgtag.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Jinja2 page templates contain no Python, so packages.find alone would
+# leave them out of the wheel.
+"pyimgtag.webapp" = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -150,9 +156,6 @@ select = ["E", "F", "W", "I"]
 [tool.ruff.lint.per-file-ignores]
 "src/pyimgtag/review_server.py" = ["E501"]  # HTML/CSS template has long lines
 "src/pyimgtag/faces_review_server.py" = ["E501"]
-"src/pyimgtag/webapp/routes_review.py" = ["E501"]  # HTML/CSS template has long lines
-"src/pyimgtag/webapp/routes_faces.py" = ["E501"]  # HTML/CSS template has long lines
-"src/pyimgtag/webapp/dashboard_server.py" = ["E501"]  # HTML/CSS/JS template has long lines
 # Tests that guard optional dependencies with pytest.importorskip() must
 # place the dependent imports after the skip call (E402).
 "tests/test_dashboard_server.py" = ["E402"]

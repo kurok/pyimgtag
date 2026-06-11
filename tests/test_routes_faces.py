@@ -935,3 +935,23 @@ def test_delete_and_face_actions_on_unknown_ids_are_noops(tmp_path):
             client.post("/api/faces/999999/unassign").status_code,
         ]
     assert statuses == [200, 200, 200, 200]
+
+
+def test_faces_pages_template_markers():
+    """Both faces pages carry titles, modal markup, and no unresolved placeholders."""
+    import re
+
+    from pyimgtag.webapp.routes_faces import render_faces_html, render_person_detail_html
+
+    grid = render_faces_html("/faces")
+    assert "<title>pyimgtag Faces</title>" in grid
+    assert ":root{--bg:" in grid  # nav_styles (design CSS) injected
+    assert 'id="modal-overlay"' in grid  # modal_html injected
+    assert "function openModal" in grid  # modal_js injected
+    assert "/faces/api/persons" in grid  # api_base injected
+
+    detail = render_person_detail_html(7, "/faces")
+    assert "<title>pyimgtag — Person</title>" in detail
+    assert "const _personId = 7;" in detail  # int-coerced person_id injected
+    assert "_apiBase  = '/faces';" in detail
+    assert not re.findall(r"__[A-Z][A-Z0-9_]+__", grid + detail)

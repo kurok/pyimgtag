@@ -743,6 +743,18 @@ wheels = [
 ]
 
 [[package]]
+name = "jinja2"
+version = "3.1.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markupsafe" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/df/bf/f7da0350254c0ed7c72f3e33cef02e048281fec7ecec5f032d4aac52226b/jinja2-3.1.6.tar.gz", hash = "sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d", size = 245115, upload-time = "2025-03-05T20:05:02.478Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl", hash = "sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67", size = 134899, upload-time = "2025-03-05T20:05:00.369Z" },
+]
+
+[[package]]
 name = "jinxed"
 version = "2.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1836,6 +1848,7 @@ dependencies = [
 all = [
     { name = "face-recognition" },
     { name = "fastapi" },
+    { name = "jinja2" },
     { name = "osxphotos" },
     { name = "photoscript" },
     { name = "pillow-heif" },
@@ -1885,6 +1898,7 @@ raw = [
 ]
 review = [
     { name = "fastapi" },
+    { name = "jinja2" },
     { name = "pydantic" },
     { name = "uvicorn" },
 ]
@@ -1907,6 +1921,8 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'review'", specifier = ">=0.136" },
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.2" },
     { name = "imagehash", specifier = ">=4.3.2" },
+    { name = "jinja2", marker = "extra == 'all'", specifier = ">=3.1" },
+    { name = "jinja2", marker = "extra == 'review'", specifier = ">=3.1" },
     { name = "mypy", marker = "extra == 'lint'", specifier = ">=2.1" },
     { name = "osxphotos", marker = "extra == 'all'", specifier = ">=0.69" },
     { name = "osxphotos", marker = "extra == 'photos-db'", specifier = ">=0.69" },

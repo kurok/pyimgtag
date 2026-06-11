@@ -190,3 +190,17 @@ def test_list_scores_unknown_sort_falls_back(tmp_path):
     assert r.status_code == 200
     items = r.json()["items"]
     assert items[0]["file_name"] == "high.jpg"
+
+
+def test_judge_page_template_markers(tmp_path):
+    """Rendered page carries title, design CSS, and no unresolved placeholders."""
+    import re
+
+    from pyimgtag.webapp.routes_judge import render_judge_html
+
+    html = render_judge_html("/judge")
+    assert "<title>pyimgtag Judge</title>" in html
+    assert ":root{--bg:" in html  # nav_styles (design CSS) injected
+    assert '<nav class="nav">' in html  # nav shell injected
+    assert "/judge/api/scores" in html  # api_base injected
+    assert not re.findall(r"__[A-Z][A-Z0-9_]+__", html)
