@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-06-11
+
 ### Changed
 - **Webapp inline HTML/CSS/JS extracted to Jinja2 templates** (#283): the page markup that lived as Python string literals in `webapp/routes_faces.py`, `routes_review.py`, `routes_edit.py`, `routes_judge.py`, and `dashboard_server.py` now lives in `pyimgtag/webapp/templates/*.html`, rendered via a shared Jinja2 environment (`webapp/templating.py`) with autoescaping on — the intentionally-raw nav/CSS/modal fragments are explicitly `Markup`-marked at the call sites. Rendered pages are byte-identical; the per-file ruff `E501` ignores for those modules are gone.
 - **`jinja2>=3.1` added to the `[review]` and `[all]` extras** (#283): required by the webapp page templates (it is not a transitive dependency of fastapi/starlette).
