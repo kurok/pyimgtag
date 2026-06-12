@@ -7,6 +7,7 @@ cache keys so that nearby images share a single lookup.
 from __future__ import annotations
 
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import requests
@@ -21,15 +22,26 @@ _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 _USER_AGENT = f"pyimgtag/{__version__} (https://github.com/kurok/pyimgtag)"
 _CACHE_PRECISION = 2
 _MIN_INTERVAL = 1.1  # seconds — Nominatim usage policy
+_DEFAULT_CACHE_MAX_SIZE = 10_000  # entries
+_DEFAULT_CACHE_TTL_DAYS = 365  # days before a cached result is re-fetched
 
 
 class ReverseGeocoder:
     """Reverse geocoder backed by Nominatim with a JSON disk cache."""
 
-    def __init__(self, cache_dir: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        cache_dir: str | Path | None = None,
+        max_size: int = _DEFAULT_CACHE_MAX_SIZE,
+        ttl_days: int = _DEFAULT_CACHE_TTL_DAYS,
+    ) -> None:
         if cache_dir is None:
             cache_dir = Path.home() / ".cache" / "pyimgtag"
-        self._cache = DiskCache(Path(cache_dir) / "geocode_cache.json")
+        self._cache = DiskCache(
+            Path(cache_dir) / "geocode_cache.json",
+            max_size=max_size,
+            ttl=timedelta(days=ttl_days),
+        )
         self._session = requests.Session()
         self._session.headers["User-Agent"] = _USER_AGENT
         self._last_ts: float = 0
