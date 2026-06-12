@@ -185,16 +185,17 @@ class TestVersionEndpoint:
         assert body["update"] is False
 
     def test_stale_cache_forces_refetch_when_installed_newer(self):
-        from pyimgtag import __version__
-
-        # First latest_pypi_version call returns an ancient version older than
-        # the installed one (stale cache); the endpoint must clear the cache and
-        # re-fetch. Second call returns the corrected (current) version.
-        with patch.object(
-            routes_about, "latest_pypi_version", side_effect=["0.0.1", __version__]
-        ) as lv:
-            r = _client().get("/about/api/version")
+        # Pin __version__ to a known value so this test is independent of the
+        # build-derived version (which may be "0.0.0+unknown" in shallow-clone CI).
+        installed_ver = "1.0.0"
+        with patch("pyimgtag.__version__", installed_ver):
+            with patch.object(
+                routes_about,
+                "latest_pypi_version",
+                side_effect=["0.0.1", installed_ver],
+            ) as lv:
+                r = _client().get("/about/api/version")
         body = r.json()
         assert lv.call_count == 2
-        assert body["latest"] == __version__
+        assert body["latest"] == installed_ver
         assert body["update"] is False
