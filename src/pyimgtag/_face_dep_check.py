@@ -29,20 +29,16 @@ class MissingFaceModelsError(ImportError):
     """
 
 
-_MODELS_INSTALL_HINT = (
-    "face_recognition_models is not installed. It's a runtime dependency\n"
-    "of face_recognition that PyPI doesn't host, so it must come from\n"
-    "the upstream git repo. Install it into THIS Python environment:\n"
+_DOWNLOAD_FAILED_HINT = (
+    "Could not download face recognition models automatically.\n"
+    "Check your internet connection, or install the models manually:\n"
     "\n"
     "    {python} -m pip install \\\n"
     '        "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"\n'
     "\n"
-    "If you've already run that command and still see this error, the\n"
-    "models likely landed in a different venv. Run:\n"
-    "\n"
-    "    {python} -m pip show face_recognition_models\n"
-    "\n"
-    "to confirm the install path matches your pyimgtag environment."
+    "If you prefer to download the model files yourself, set\n"
+    "PYIMGTAG_FACE_MODEL_DIR to the directory containing the .dat files\n"
+    "and re-run the command."
 )
 
 
@@ -88,21 +84,29 @@ def _inject_pkg_resources_shim() -> None:
 def _ensure_face_dep() -> ModuleType:
     """Import and return the ``face_recognition`` module after pre-flight checks.
 
-    The check order matters: we probe ``face_recognition_models`` *first*
-    so we can raise our own clear error before ``face_recognition``'s own
-    import-time stderr message fires.
+    On the first call, model files are downloaded automatically to
+    ``~/.cache/pyimgtag/face_models/`` if ``face_recognition_models`` is not
+    already installed.  Subsequent calls return instantly (models are cached
+    on disk; ``face_recognition`` itself is already in ``sys.modules``).
 
     Returns:
         The imported ``face_recognition`` module.
 
     Raises:
-        MissingFaceModelsError: If ``face_recognition_models`` is not
-            importable. The error message includes the active Python
-            interpreter path so the user can install the missing package
-            into the correct environment.
+        MissingFaceModelsError: If ``face_recognition_models`` is unavailable
+            and the automatic download failed (e.g. no internet access).
         ImportError: If ``face_recognition`` itself is not installed.
     """
     _inject_pkg_resources_shim()
+
+    # Auto-download the model .dat files and inject a shim so that
+    # face_recognition finds them without a manual install step.
+    try:
+        from pyimgtag._face_model_cache import inject_shim
+
+        inject_shim()
+    except Exception as exc:
+        raise MissingFaceModelsError(_DOWNLOAD_FAILED_HINT.format(python=sys.executable)) from exc
 
     try:
         with warnings.catch_warnings():
@@ -111,9 +115,9 @@ def _ensure_face_dep() -> ModuleType:
             )
             import face_recognition_models  # noqa: F401
     except ModuleNotFoundError:
-        raise MissingFaceModelsError(_MODELS_INSTALL_HINT.format(python=sys.executable)) from None
+        raise MissingFaceModelsError(_DOWNLOAD_FAILED_HINT.format(python=sys.executable)) from None
     except ImportError:
-        raise MissingFaceModelsError(_MODELS_INSTALL_HINT.format(python=sys.executable)) from None
+        raise MissingFaceModelsError(_DOWNLOAD_FAILED_HINT.format(python=sys.executable)) from None
 
     try:
         import face_recognition

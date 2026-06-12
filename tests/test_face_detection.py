@@ -72,11 +72,15 @@ class TestCheckFaceRecognition:
             return real_import(name, globals, locals, fromlist, level)
 
         with patch.object(builtins, "__import__", side_effect=fake_import):
-            with pytest.raises(MissingFaceModelsError) as excinfo:
-                _ensure_face_dep()
+            with patch(
+                "pyimgtag._face_model_cache.inject_shim",
+                side_effect=OSError("no network in test"),
+            ):
+                with pytest.raises(MissingFaceModelsError) as excinfo:
+                    _ensure_face_dep()
 
         msg = str(excinfo.value)
-        assert "face_recognition_models is not installed" in msg
+        assert "Could not download face recognition models automatically" in msg
         assert "git+https://github.com/ageitgey/face_recognition_models" in msg
 
 
