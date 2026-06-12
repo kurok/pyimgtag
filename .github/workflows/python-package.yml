@@ -48,7 +48,7 @@ jobs:
     - name: Install dependencies
       run: uv pip install -e ".[dev,lint]"
     - name: Run mypy
-      run: uv run python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+      run: uv run python -m mypy src/pyimgtag/
 
   # -------------------------------------------------------------------
   # Pre-commit hooks (with env cache)
