@@ -3,6 +3,10 @@
 # Usage:
 #   IMAGES_DIR=/path/to/photos docker compose run --rm pyimgtag run --input-dir /images
 #
+# Review UI:
+#   IMAGES_DIR=/path/to/photos docker compose up review
+#   Then open http://localhost:8080 in your browser.
+#
 # Optional overrides:
 #   OLLAMA_URL=http://192.168.1.10:11434   # if Ollama is on another machine
 #   CACHE_DIR=/custom/cache/path           # bind-mount the cache from the host
@@ -12,7 +16,9 @@
 
 services:
   pyimgtag:
-    build: .
+    build:
+      context: .
+      target: heic
     image: pyimgtag:latest
     volumes:
       # Mount your image directory read-only at /images
@@ -31,6 +37,23 @@ services:
     # Default command: tag all images in /images
     # Override at runtime: docker compose run --rm pyimgtag status
     command: ["run", "--input-dir", "/images"]
+
+  # WARNING: the review service has no authentication.
+  # Do not expose port 8080 beyond localhost or a trusted network.
+  review:
+    build:
+      context: .
+      target: review
+    image: pyimgtag-review:latest
+    ports:
+      - "${REVIEW_PORT:-8080}:8080"
+    volumes:
+      # Mount your image directory read-only at /images
+      - ${IMAGES_DIR:?Set IMAGES_DIR to your photos path}:/images:ro
+      # Share the cache with the CLI service (geocoder results + progress DB)
+      - ${CACHE_DIR:-pyimgtag-cache}:/home/pyimgtag/.cache/pyimgtag
+    environment:
+      PYIMGTAG_DB_PATH: /home/pyimgtag/.cache/pyimgtag/progress.db
 
 volumes:
   pyimgtag-cache:
