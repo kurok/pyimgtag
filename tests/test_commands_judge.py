@@ -32,22 +32,7 @@ def _make_args(tmp_path: Path, **overrides) -> MagicMock:
 def _make_scores(**overrides):
     from pyimgtag.models import JudgeScores
 
-    defaults = dict(
-        impact=8,
-        story_subject=8,
-        composition_center=8,
-        lighting=8,
-        creativity_style=8,
-        color_mood=8,
-        presentation_crop=8,
-        technical_excellence=8,
-        focus_sharpness=8,
-        exposure_tonal=8,
-        noise_cleanliness=8,
-        subject_separation=8,
-        edit_integrity=8,
-        verdict="Good overall.",
-    )
+    defaults = dict(score=8, verdict="Good overall.")
     defaults.update(overrides)
     return JudgeScores(**defaults)
 
@@ -73,12 +58,12 @@ class TestPrintVerbose:
         assert "Reason:" in out
         assert "Striking composition" in out
 
-    def test_verbose_legacy_verdict_branch(self, capsys) -> None:
-        """No reason but a verdict prints the legacy 13-criterion summary (lines 53-59)."""
+    def test_verbose_verdict_branch(self, capsys) -> None:
+        """No reason but a verdict prints the verdict line."""
         from pyimgtag.commands.judge import _print_verbose
         from pyimgtag.models import JudgeResult
 
-        scores = _make_scores(reason=None, verdict="A legacy verdict.")
+        scores = _make_scores(reason="", verdict="A verdict.")
         result = JudgeResult(
             file_path="/x/photo.jpg",
             file_name="photo.jpg",
@@ -90,8 +75,7 @@ class TestPrintVerbose:
         _print_verbose(result, 1, 1)
         out = capsys.readouterr().out
         assert "Verdict:" in out
-        assert "Best:" in out
-        assert "Weakest:" in out
+        assert "A verdict." in out
 
 
 class TestCmdJudgeCloudBackend:
@@ -486,7 +470,7 @@ class TestCmdJudgeBasic:
         assert isinstance(data, list)
         assert data[0]["file_name"] == "photo.jpg"
         assert "weighted_score" in data[0]
-        assert "scores" in data[0]
+        assert "score" in data[0]
 
     def test_limit_applied(self, tmp_path: Path) -> None:
         """Only first N files are scored when --limit is set."""
@@ -536,8 +520,8 @@ class TestCmdJudgeBasic:
         out = tmp_path / "out.json"
         args = _make_args(tmp_path, sort_by="score", output_json=str(out))
 
-        scores_high = _make_scores(impact=10, composition_center=10)
-        scores_low = _make_scores(impact=1, composition_center=1)
+        scores_high = _make_scores(score=10)
+        scores_low = _make_scores(score=1)
         call_count = 0
 
         def fake_judge(path):

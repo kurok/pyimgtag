@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from pyimgtag import run_registry
 from pyimgtag.applescript_writer import write_to_photos
 from pyimgtag.cloud_clients import CloudClientError, ImageClient, make_image_client
-from pyimgtag.judge_scorer import compute_scores, strongest, weakest
+from pyimgtag.judge_scorer import compute_scores
 from pyimgtag.models import JudgeResult, JudgeScores
 from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
 from pyimgtag.preflight import check_ollama
@@ -45,18 +45,10 @@ def _print_brief(result: JudgeResult, idx: int, total: int) -> None:
 def _print_verbose(result: JudgeResult, idx: int, total: int) -> None:
     print(f"[{idx}/{total}] {result.file_name}")
     print(f"  Score:   {result.weighted_score}/10")
-    # The reason is the natural-language justification the simple-prompt
-    # model returns. Verbose / debug is the only CLI surface that shows
-    # it; tags and EXIF never see this string.
     if result.scores.reason:
         print(f"  Reason:  {result.scores.reason}")
     elif result.scores.verdict:
-        # Legacy 13-criterion rows still in the DB from older runs.
         print(f"  Verdict: {result.scores.verdict}")
-        top = strongest(result.scores, 3)
-        bot = weakest(result.scores, 3)
-        print(f"  Best:    {', '.join(f'{k}={getattr(result.scores, k)}' for k in top)}")
-        print(f"  Weakest: {', '.join(f'{k}={getattr(result.scores, k)}' for k in bot)}")
 
 
 def _result_to_dict(result: JudgeResult) -> dict[str, Any]:
@@ -64,26 +56,12 @@ def _result_to_dict(result: JudgeResult) -> dict[str, Any]:
     return {
         "file_path": result.file_path,
         "file_name": result.file_name,
+        "score": scores.score,
         "weighted_score": result.weighted_score,
         "core_score": result.core_score,
         "visible_score": result.visible_score,
         "verdict": scores.verdict,
         "reason": scores.reason,
-        "scores": {
-            "impact": scores.impact,
-            "story_subject": scores.story_subject,
-            "composition_center": scores.composition_center,
-            "lighting": scores.lighting,
-            "creativity_style": scores.creativity_style,
-            "color_mood": scores.color_mood,
-            "presentation_crop": scores.presentation_crop,
-            "technical_excellence": scores.technical_excellence,
-            "focus_sharpness": scores.focus_sharpness,
-            "exposure_tonal": scores.exposure_tonal,
-            "noise_cleanliness": scores.noise_cleanliness,
-            "subject_separation": scores.subject_separation,
-            "edit_integrity": scores.edit_integrity,
-        },
     }
 
 

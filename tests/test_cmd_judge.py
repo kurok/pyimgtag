@@ -37,22 +37,7 @@ def _make_args(**kwargs) -> argparse.Namespace:
 
 
 def _make_scores() -> JudgeScores:
-    return JudgeScores(
-        impact=8,
-        story_subject=7,
-        composition_center=8,
-        lighting=7,
-        creativity_style=6,
-        color_mood=8,
-        presentation_crop=7,
-        technical_excellence=8,
-        focus_sharpness=9,
-        exposure_tonal=7,
-        noise_cleanliness=8,
-        subject_separation=6,
-        edit_integrity=7,
-        verdict="Good shot",
-    )
+    return JudgeScores(score=8, verdict="Good shot")
 
 
 class TestCmdJudgeDBStorage:
@@ -75,7 +60,7 @@ class TestCmdJudgeDBStorage:
         mock_db.save_judge_result.assert_called_once()
         saved = mock_db.save_judge_result.call_args[0][0]
         assert saved.file_name == "test.jpg"
-        assert saved.scores.impact == 8
+        assert saved.scores.score == 8
 
     def test_no_db_does_not_crash(self, tmp_path):
         img = tmp_path / "test.jpg"
