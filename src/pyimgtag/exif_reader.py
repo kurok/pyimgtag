@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-import subprocess
+import subprocess  # nosec B404
 from datetime import datetime
 from pathlib import Path
 
@@ -59,7 +59,7 @@ def read_exif(file_path: str | Path) -> ExifData:
 
 def _read_exiftool(path: Path) -> ExifData | None:
     try:
-        proc = subprocess.run(
+        proc = subprocess.run(  # nosec B603 B607
             [
                 "exiftool",
                 "-json",

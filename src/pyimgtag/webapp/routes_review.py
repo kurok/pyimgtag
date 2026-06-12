@@ -55,7 +55,7 @@ def render_review_html(api_base: str = "") -> str:
 
 def _thumb_via_sips(image_path: str, size: int) -> bytes | None:
     """Render a HEIC/HEIF thumbnail via macOS ``sips`` when PIL can't decode it."""
-    import subprocess
+    import subprocess  # nosec B404
     import tempfile
     from pathlib import Path as _P
 
@@ -69,7 +69,7 @@ def _thumb_via_sips(image_path: str, size: int) -> bytes | None:
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
             tmp_path = tmp.name
         try:
-            proc = subprocess.run(  # noqa: S603
+            proc = subprocess.run(  # noqa: S603  # nosec B603 B607
                 ["sips", "-s", "format", "jpeg", "-Z", str(size), image_path, "--out", tmp_path],
                 capture_output=True,
                 timeout=30,
