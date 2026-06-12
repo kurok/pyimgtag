@@ -10,7 +10,7 @@ temporary directory is created and is always cleaned up if conversion fails.
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 
@@ -64,7 +64,7 @@ def convert_heic_to_jpeg(
 
     try:
         try:
-            proc = subprocess.run(
+            proc = subprocess.run(  # nosec B603 B607
                 ["sips", "-s", "format", "jpeg", str(input_path), "--out", str(output_path)],
                 capture_output=True,
                 text=True,

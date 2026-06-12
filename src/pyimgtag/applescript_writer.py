@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
 from functools import lru_cache
@@ -257,7 +257,7 @@ def _write_via_osascript(
     script = _build_applescript(file_name, tags, summary, title=title)
 
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,
@@ -321,7 +321,7 @@ def _read_via_osascript(file_name: str) -> list[str] | None:
         return None
     script = _build_read_applescript(file_name)
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,
@@ -461,7 +461,7 @@ def reveal_in_photos(file_path: str) -> str | None:
     script = _build_reveal_applescript(file_name)
 
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,
@@ -579,7 +579,7 @@ def fetch_photos_membership(
     script = _build_membership_applescript()
 
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,
@@ -690,7 +690,7 @@ def delete_from_photos(file_path: str) -> str | None:
         # plus two System Events keystrokes; budget conservatively so
         # a slow Photos.app launch (cold start, big library) doesn't
         # trip a spurious timeout.
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,
