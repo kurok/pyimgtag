@@ -633,6 +633,43 @@ def _handle_faces_import_photos(args: argparse.Namespace) -> int:
     return 0
 
 
+def _apply_cluster_matches(
+    db: ProgressDB, matches: list, no_match_msg: str, args: argparse.Namespace
+) -> int:
+    """Preview cluster-to-name matches and optionally apply them.
+
+    Prints each match, then either returns 0 (dry-run) or calls apply_matches
+    and prints the result. Returns 0 on success.
+    """
+    from pyimgtag.face.naming import apply_matches
+
+    if not matches:
+        print(no_match_msg, file=sys.stderr)
+        return 0
+
+    for m in matches:
+        cur = m.current_label or f"Person {m.person_id}"
+        print(
+            f"  {cur} ({m.face_count} face(s)) → {m.name} (distance {m.distance:.3f})",
+            file=sys.stderr,
+        )
+
+    if not getattr(args, "apply", False):
+        print(
+            f"\n{len(matches)} cluster(s) would be named. Re-run with --apply to write them.",
+            file=sys.stderr,
+        )
+        return 0
+
+    result = apply_matches(db, matches)
+    print(
+        f"\nNamed {result['renamed'] + result['merged']} cluster(s) "
+        f"({result['renamed']} renamed, {result['merged']} merged into existing people).",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _handle_faces_match_references(args: argparse.Namespace) -> int:
     """Name auto-clustered people from a folder of labeled reference faces.
 
@@ -644,7 +681,6 @@ def _handle_faces_match_references(args: argparse.Namespace) -> int:
     from pathlib import Path
 
     from pyimgtag.face.naming import (
-        apply_matches,
         load_reference_embeddings,
         match_clusters_to_references,
     )
@@ -678,31 +714,9 @@ def _handle_faces_match_references(args: argparse.Namespace) -> int:
     threshold = 0.5 if raw_threshold is None else raw_threshold
     with ProgressDB(db_path=args.db) as db:
         matches = match_clusters_to_references(db, references, threshold=threshold)
-        if not matches:
-            print("No clusters matched a reference within the threshold.", file=sys.stderr)
-            return 0
-
-        for m in matches:
-            cur = m.current_label or f"Person {m.person_id}"
-            print(
-                f"  {cur} ({m.face_count} face(s)) → {m.name} (distance {m.distance:.3f})",
-                file=sys.stderr,
-            )
-
-        if not getattr(args, "apply", False):
-            print(
-                f"\n{len(matches)} cluster(s) would be named. Re-run with --apply to write them.",
-                file=sys.stderr,
-            )
-            return 0
-
-        result = apply_matches(db, matches)
-    print(
-        f"\nNamed {result['renamed'] + result['merged']} cluster(s) "
-        f"({result['renamed']} renamed, {result['merged']} merged into existing people).",
-        file=sys.stderr,
-    )
-    return 0
+        return _apply_cluster_matches(
+            db, matches, "No clusters matched a reference within the threshold.", args
+        )
 
 
 def _handle_faces_capture_names(args: argparse.Namespace) -> int:
@@ -716,7 +730,7 @@ def _handle_faces_capture_names(args: argparse.Namespace) -> int:
     """
     import tempfile
 
-    from pyimgtag.face.naming import apply_matches, match_clusters_to_references
+    from pyimgtag.face.naming import match_clusters_to_references
     from pyimgtag.face.ocr import (
         OcrUnavailableError,
         build_references_from_screenshot,
@@ -795,31 +809,9 @@ def _handle_faces_capture_names(args: argparse.Namespace) -> int:
     threshold = 0.5 if raw_threshold is None else raw_threshold
     with ProgressDB(db_path=args.db) as db:
         matches = match_clusters_to_references(db, references, threshold=threshold)
-        if not matches:
-            print("No clusters matched a recognized name within the threshold.", file=sys.stderr)
-            return 0
-
-        for m in matches:
-            cur = m.current_label or f"Person {m.person_id}"
-            print(
-                f"  {cur} ({m.face_count} face(s)) → {m.name} (distance {m.distance:.3f})",
-                file=sys.stderr,
-            )
-
-        if not getattr(args, "apply", False):
-            print(
-                f"\n{len(matches)} cluster(s) would be named. Re-run with --apply to write them.",
-                file=sys.stderr,
-            )
-            return 0
-
-        result = apply_matches(db, matches)
-    print(
-        f"\nNamed {result['renamed'] + result['merged']} cluster(s) "
-        f"({result['renamed']} renamed, {result['merged']} merged into existing people).",
-        file=sys.stderr,
-    )
-    return 0
+        return _apply_cluster_matches(
+            db, matches, "No clusters matched a recognized name within the threshold.", args
+        )
 
 
 def _handle_faces_ui(args: argparse.Namespace) -> int:

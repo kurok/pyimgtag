@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import queue as _queue
 import shutil
 import subprocess  # nosec B404
 import sys
+import threading as _threading
 from pathlib import Path
 from platform import system as get_platform_name
 from typing import Any
@@ -91,30 +93,128 @@ def _compute_dedup_map(files: list[Path], threshold: int) -> tuple[dict[str, str
     return phash_map, skipped_dedup
 
 
-def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    """Execute the run subcommand (image tagging)."""
+class _HydrationQueue:
+    """Background worker that re-hydrates cached DB results while fresh files are processed."""
+
+    def __init__(
+        self,
+        cached_files: list[Path],
+        source_type: str,
+        args: argparse.Namespace,
+        stats: dict,
+    ) -> None:
+        self._cached_files = cached_files
+        self._source_type = source_type
+        self._args = args
+        self._result_q: _queue.Queue = _queue.Queue()
+        self._thread_stats: dict = {k: 0 for k in stats if k != "scanned"}
+        self._stop_event = _threading.Event()
+        self._worker: _threading.Thread | None = None
+        self._sentinel_seen = False
+
+    def start(self) -> None:
+        def _worker() -> None:
+            thread_db = ProgressDB(db_path=self._args.db)
+            thread_geo = ReverseGeocoder(cache_dir=self._args.cache_dir)
+            try:
+                for fp in self._cached_files:
+                    if self._stop_event.is_set():
+                        break
+                    r = _hydrate_from_db(
+                        fp, self._source_type, self._args, thread_geo, self._thread_stats, thread_db
+                    )
+                    if r is not None:
+                        self._result_q.put(r)
+            finally:
+                thread_db.close()
+                thread_geo.close()
+                self._result_q.put(None)  # sentinel
+
+        self._worker = _threading.Thread(target=_worker, daemon=True)
+        self._worker.start()
+
+    def drain(
+        self,
+        progress_db: ProgressDB,
+        phash_map: dict,
+        results: list,
+        stats: dict,
+        args: argparse.Namespace,
+    ) -> None:
+        while True:
+            try:
+                item = self._result_q.get_nowait()
+            except _queue.Empty:
+                break
+            if item is None:
+                self._sentinel_seen = True
+            else:
+                _finalize_result(
+                    item, Path(item.file_path), args, progress_db, phash_map, results, stats
+                )
+
+    def stop(self) -> None:
+        self._stop_event.set()
+
+    def join(
+        self,
+        progress_db: ProgressDB,
+        phash_map: dict,
+        results: list,
+        stats: dict,
+        args: argparse.Namespace,
+    ) -> None:
+        if self._worker is not None and not self._stop_event.is_set():
+            self._worker.join()
+            while not self._sentinel_seen:
+                self.drain(progress_db, phash_map, results, stats, args)
+
+    @property
+    def thread_stats(self) -> dict:
+        return self._thread_stats
+
+
+def _sort_newest_first(files: list[Path]) -> None:
+    """Sort files in-place by mtime descending; missing files sort last."""
+
+    def _mtime(f: Path) -> float:
+        try:
+            return f.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    files.sort(key=_mtime, reverse=True)
+
+
+def _write_run_outputs(results: list[ImageResult], args: argparse.Namespace) -> None:
+    if args.output_json:
+        write_json(results, args.output_json)
+        print(f"Wrote {len(results)} results to {args.output_json}", file=sys.stderr)
+    if args.output_csv:
+        write_csv(results, args.output_csv)
+        print(f"Wrote {len(results)} results to {args.output_csv}", file=sys.stderr)
+
+
+def _validate_run_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int | None:
+    """Emit warnings and validate args. Returns non-zero exit code on hard error, else None."""
     if not args.input_dir and not args.photos_library:
         parser.error("one of the arguments --input-dir --photos-library is required")
 
     if args.write_back and args.input_dir:
         print("Warning: --write-back has no effect with --input-dir", file=sys.stderr)
-
     if args.skip_if_tagged and args.input_dir:
         print("Warning: --skip-if-tagged has no effect with --input-dir", file=sys.stderr)
-
     if args.write_back and get_platform_name() != "Darwin":
         print(
             "Warning: --write-back requires macOS; feature is disabled on this system",
             file=sys.stderr,
         )
-
     if (args.write_exif or args.sidecar_only) and args.dry_run:
         print(
             "Info: --write-exif/--sidecar-only disabled in --dry-run mode"
             " (use --verbose to preview proposed metadata)",
             file=sys.stderr,
         )
-
     skip_existing_arg = getattr(args, "skip_existing", False)
     if skip_existing_arg and (args.write_back or args.write_exif or args.sidecar_only):
         print(
@@ -123,30 +223,22 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             "photos, run without --skip-existing.",
             file=sys.stderr,
         )
-
     if skip_existing_arg and args.dry_run:
         print(
             "Info: --skip-existing is inactive in --dry-run mode (the progress DB is not opened)",
             file=sys.stderr,
         )
+    return None
 
-    extensions = {e.strip().lstrip(".").lower() for e in args.extensions.split(",")}
 
-    backend = getattr(args, "backend", "ollama")
-    if not isinstance(backend, str):
-        backend = "ollama"
-    if backend == "ollama":
-        ok, msg = check_ollama(args.ollama_url)
-        if not ok:
-            print(f"Warning: {msg}", file=sys.stderr)
-
+def _scan_files(args: argparse.Namespace, extensions: set[str]) -> tuple[str, list[Path]] | int:
+    """Scan input source and return (source_type, files), or an int exit code on error."""
     try:
         if args.input_dir:
-            source_type = "directory"
-            files = scan_directory(args.input_dir, extensions, recursive=not args.no_recursive)
-        else:
-            source_type = "photos_library"
-            files = scan_photos_library(args.photos_library, extensions)
+            return "directory", scan_directory(
+                args.input_dir, extensions, recursive=not args.no_recursive
+            )
+        return "photos_library", scan_photos_library(args.photos_library, extensions)
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -156,135 +248,68 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             _request_photos_access_dialog()
         return 1
 
-    if not files:
-        print("No image files found.", file=sys.stderr)
-        return 0
 
-    if args.newest_first:
-
-        def _mtime(f: Path) -> float:
-            try:
-                return f.stat().st_mtime
-            except OSError:
-                return 0.0
-
-        files.sort(key=_mtime, reverse=True)
-
-    # --- dedup ---
-    phash_map: dict[str, str] = {}
-    skipped_dedup: set[str] = set()
-    if args.dedup:
-        phash_map, skipped_dedup = _compute_dedup_map(files, args.dedup_threshold)
-
+def _create_image_client(args: argparse.Namespace, backend: str) -> ImageClient | None:
+    """Create and return the image tagging client, or None on error."""
     if backend == "ollama":
         # Constructed directly so tests that patch
         # ``pyimgtag.commands.run.OllamaClient`` keep working.
-        ollama: ImageClient = OllamaClient(
+        return OllamaClient(
             model=args.model or "gemma4:e4b",
             base_url=args.ollama_url,
             max_dim=args.max_dim,
             timeout=args.timeout,
         )
-    else:
-        try:
-            ollama = make_image_client(
-                backend,
-                model=args.model,
-                max_dim=args.max_dim,
-                timeout=args.timeout,
-                api_key=getattr(args, "api_key", None),
-                api_base=getattr(args, "api_base", None),
-            )
-        except CloudClientError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
-    geocoder = ReverseGeocoder(cache_dir=args.cache_dir)
-    progress_db: ProgressDB | None = None
-    if not args.no_cache and not args.dry_run:
-        progress_db = ProgressDB(db_path=args.db)
+    try:
+        return make_image_client(
+            backend,
+            model=args.model,
+            max_dim=args.max_dim,
+            timeout=args.timeout,
+            api_key=getattr(args, "api_key", None),
+            api_base=getattr(args, "api_base", None),
+        )
+    except CloudClientError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return None
 
-    results: list[ImageResult] = []
-    stats = _new_stats(len(files))
 
-    from pyimgtag.webapp.bootstrap import start_dashboard_for
-
-    session, dashboard = start_dashboard_for(args, command="run")
-    if session is not None:
-        session.set_counter("scanned", stats["scanned"])
-        session.mark_running()
-
+def _run_tagging(
+    files: list[Path],
+    source_type: str,
+    args: argparse.Namespace,
+    ollama: ImageClient,
+    geocoder: ReverseGeocoder,
+    progress_db: ProgressDB | None,
+    phash_map: dict,
+    skipped_dedup: set[str],
+    results: list[ImageResult],
+    stats: dict,
+    session: Any,
+    use_threaded: bool,
+) -> bool:
+    """Run the tagging loop (threaded or linear). Returns True if interrupted."""
     interrupted = False
     try:
-        use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
-        skip_existing = getattr(args, "skip_existing", False) and not args.no_cache
-        # --skip-existing fully skips complete rows in the linear path, so the
-        # threaded re-hydration worker (which exists only to enrich cached
-        # rows) must not run — skip wins.
-        use_threaded = use_resume and getattr(args, "resume_threaded", False) and not skip_existing
-
         if use_threaded and progress_db is not None:
-            import queue as _queue
-            import threading as _threading
-
-            cached_files = [
+            cached = [
                 f
                 for f in files
                 if str(f) not in skipped_dedup and progress_db.has_usable_model_result(f)
             ]
-            cached_set = {str(f) for f in cached_files}
-            fresh_files = [
-                f for f in files if str(f) not in skipped_dedup and str(f) not in cached_set
-            ]
+            cached_set = {str(f) for f in cached}
+            fresh = [f for f in files if str(f) not in skipped_dedup and str(f) not in cached_set]
             stats["skipped_dedup"] = sum(1 for f in files if str(f) in skipped_dedup)
-            result_q: _queue.Queue = _queue.Queue()
-            thread_stats: dict = {k: 0 for k in stats if k != "scanned"}
-            stop_event = _threading.Event()
-
-            def _cache_worker() -> None:
-                thread_db = ProgressDB(db_path=args.db)
-                thread_geo = ReverseGeocoder(cache_dir=args.cache_dir)
-                try:
-                    for fp in cached_files:
-                        if stop_event.is_set():
-                            break
-                        r = _hydrate_from_db(
-                            fp, source_type, args, thread_geo, thread_stats, thread_db
-                        )
-                        if r is not None:
-                            result_q.put(r)
-                finally:
-                    thread_db.close()
-                    thread_geo.close()
-                    result_q.put(None)  # sentinel
-
-            worker_thread = _threading.Thread(target=_cache_worker, daemon=True)
-            worker_thread.start()
-
-            def _drain(sentinel_seen: bool) -> bool:
-                while True:
-                    try:
-                        item = result_q.get_nowait()
-                    except _queue.Empty:
-                        break
-                    if item is None:
-                        sentinel_seen = True
-                    else:
-                        _finalize_result(
-                            item, Path(item.file_path), args, progress_db, phash_map, results, stats
-                        )
-                return sentinel_seen
-
-            sentinel_seen = False
+            hq = _HydrationQueue(cached, source_type, args, stats)
+            hq.start()
             try:
-                for file_path in fresh_files:
+                for file_path in fresh:
                     if args.limit and stats["processed"] >= args.limit:
                         break
-
                     if session is not None:
                         session.wait_if_paused()
                         session.set_current(str(file_path))
-
-                    sentinel_seen = _drain(sentinel_seen)
+                    hq.drain(progress_db, phash_map, results, stats, args)
                     result = _process_one(
                         file_path, source_type, args, ollama, geocoder, stats, progress_db
                     )
@@ -296,10 +321,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                             status = "ok" if result.processing_status == "ok" else "error"
                             tags = ", ".join(result.tags) if result.tags else None
                             session.record_item(
-                                str(file_path),
-                                status,
-                                error=result.error_message,
-                                detail=tags,
+                                str(file_path), status, error=result.error_message, detail=tags
                             )
                             for k, v in stats.items():
                                 session.set_counter(k, v)
@@ -307,35 +329,25 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                         session.set_current(None)
             except KeyboardInterrupt:
                 interrupted = True
-                stop_event.set()
+                hq.stop()
                 if session is not None:
                     session.mark_interrupted()
                 print("\nInterrupted.", file=sys.stderr)
             finally:
-                if not stop_event.is_set():
-                    worker_thread.join()
-                    while not sentinel_seen:
-                        sentinel_seen = _drain(sentinel_seen)
-                for k, v in thread_stats.items():
+                hq.join(progress_db, phash_map, results, stats, args)
+                for k, v in hq.thread_stats.items():
                     stats[k] += v
-                ollama.close()
-                geocoder.close()
-                if progress_db is not None:
-                    progress_db.close()
         else:
             try:
                 for file_path in files:
                     if args.limit and stats["processed"] >= args.limit:
                         break
-
                     if session is not None:
                         session.wait_if_paused()
                         session.set_current(str(file_path))
-
                     if str(file_path) in skipped_dedup:
                         stats["skipped_dedup"] += 1
                         continue
-
                     result = _process_one(
                         file_path, source_type, args, ollama, geocoder, stats, progress_db
                     )
@@ -343,42 +355,99 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                         if session is not None:
                             session.set_current(None)
                         continue
-
                     _finalize_result(
                         result, file_path, args, progress_db, phash_map, results, stats
                     )
-
                     if session is not None:
                         status = "ok" if result.processing_status == "ok" else "error"
                         tags = ", ".join(result.tags) if result.tags else None
                         session.record_item(
-                            str(file_path),
-                            status,
-                            error=result.error_message,
-                            detail=tags,
+                            str(file_path), status, error=result.error_message, detail=tags
                         )
                         for k, v in stats.items():
                             session.set_counter(k, v)
                         session.set_current(None)
-
             except KeyboardInterrupt:
                 interrupted = True
                 if session is not None:
                     session.mark_interrupted()
                 print("\nInterrupted.", file=sys.stderr)
-            finally:
-                ollama.close()
-                geocoder.close()
-                if progress_db is not None:
-                    progress_db.close()
+    finally:
+        ollama.close()
+        geocoder.close()
+        if progress_db is not None:
+            progress_db.close()
+    return interrupted
 
-        if args.output_json:
-            write_json(results, args.output_json)
-            print(f"Wrote {len(results)} results to {args.output_json}", file=sys.stderr)
-        if args.output_csv:
-            write_csv(results, args.output_csv)
-            print(f"Wrote {len(results)} results to {args.output_csv}", file=sys.stderr)
 
+def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Execute the run subcommand (image tagging)."""
+    if _validate_run_args(args, parser) is not None:
+        return 1
+    extensions = {e.strip().lstrip(".").lower() for e in args.extensions.split(",")}
+    backend = getattr(args, "backend", "ollama")
+    if not isinstance(backend, str):
+        backend = "ollama"
+    if backend == "ollama":
+        ok, msg = check_ollama(args.ollama_url)
+        if not ok:
+            print(f"Warning: {msg}", file=sys.stderr)
+
+    scan = _scan_files(args, extensions)
+    if isinstance(scan, int):
+        return scan
+    source_type, files = scan
+
+    if not files:
+        print("No image files found.", file=sys.stderr)
+        return 0
+    if args.newest_first:
+        _sort_newest_first(files)
+
+    phash_map: dict[str, str] = {}
+    skipped_dedup: set[str] = set()
+    if args.dedup:
+        phash_map, skipped_dedup = _compute_dedup_map(files, args.dedup_threshold)
+
+    ollama = _create_image_client(args, backend)
+    if ollama is None:
+        return 1
+    geocoder = ReverseGeocoder(cache_dir=args.cache_dir)
+    progress_db: ProgressDB | None = None
+    if not args.no_cache and not args.dry_run:
+        progress_db = ProgressDB(db_path=args.db)
+
+    results: list[ImageResult] = []
+    stats = _new_stats(len(files))
+    from pyimgtag.webapp.bootstrap import start_dashboard_for
+
+    session, dashboard = start_dashboard_for(args, command="run")
+    if session is not None:
+        session.set_counter("scanned", stats["scanned"])
+        session.mark_running()
+
+    use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
+    skip_existing = getattr(args, "skip_existing", False) and not args.no_cache
+    # --skip-existing fully skips complete rows in the linear path, so the
+    # threaded re-hydration worker (which exists only to enrich cached
+    # rows) must not run — skip wins.
+    use_threaded = use_resume and getattr(args, "resume_threaded", False) and not skip_existing
+    try:
+        interrupted = _run_tagging(
+            files,
+            source_type,
+            args,
+            ollama,
+            geocoder,
+            progress_db,
+            phash_map,
+            skipped_dedup,
+            results,
+            stats,
+            session,
+            use_threaded,
+        )
+        _write_run_outputs(results, args)
         _print_summary(stats)
         if session is not None:
             for k, v in stats.items():
