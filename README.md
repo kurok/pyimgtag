@@ -946,6 +946,8 @@ now serve the unified app, so the URL paths have shifted. Bookmarks that
 used `http://localhost:8765/api/stats` should be updated to
 `http://localhost:8765/review/api/stats`.
 
+**Security note:** The review server has no authentication. It is designed for single-user, localhost use only. The default `--host 127.0.0.1` / `--web-host 127.0.0.1` binding is safe. Do **not** change the host to `0.0.0.0` on a shared or networked machine — anyone who can reach the port can delete your photos. There is no CSRF protection. The `/edit` page performs irreversible operations on your Photos library.
+
 ## Environment variables
 
 | Variable | Used by | Effect |
