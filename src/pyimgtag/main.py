@@ -273,7 +273,11 @@ def _add_run_subcommand(subparsers: Any) -> None:
     run_p.add_argument(
         "--api-key",
         default=None,
-        help="Cloud-API key. Defaults to the provider's conventional env var.",
+        help=(
+            "Cloud-API key (prefer env var — this value is visible in process "
+            "listings on shared machines). Env vars: ANTHROPIC_API_KEY, "
+            "OPENAI_API_KEY, GEMINI_API_KEY / GOOGLE_API_KEY."
+        ),
     )
     run_p.add_argument(
         "--max-dim",
@@ -770,7 +774,11 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     judge_p.add_argument(
         "--api-key",
         default=None,
-        help="Cloud-API key. Defaults to the provider's conventional env var.",
+        help=(
+            "Cloud-API key (prefer env var — this value is visible in process "
+            "listings on shared machines). Env vars: ANTHROPIC_API_KEY, "
+            "OPENAI_API_KEY, GEMINI_API_KEY / GOOGLE_API_KEY."
+        ),
     )
     judge_p.add_argument(
         "--max-dim",

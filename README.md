@@ -955,6 +955,9 @@ used `http://localhost:8765/api/stats` should be updated to
 | `ANTHROPIC_API_KEY` | `--backend anthropic` | Auth for Claude. Overridden by `--api-key`. |
 | `OPENAI_API_KEY` | `--backend openai` | Auth for OpenAI. Overridden by `--api-key`. |
 | `GOOGLE_API_KEY` / `GEMINI_API_KEY` | `--backend gemini` | Auth for Gemini (either name accepted). Overridden by `--api-key`. |
+
+> **API key security:** Prefer env vars over `--api-key`. The `--api-key` argument is
+> visible to other users in `ps aux` process listings on shared machines.
 | `PYIMGTAG_NO_WEB` | All commands that start the dashboard | `1` / `true` / `yes` disables the dashboard by default (same as `--no-web`). |
 | `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |
