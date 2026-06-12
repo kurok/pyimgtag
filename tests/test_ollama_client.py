@@ -828,6 +828,41 @@ class TestPrepareImageBoundaries:
         assert r.text_summary == "999"
 
 
+class TestParseErrorLog:
+    """Tests for the opt-in parse-error log behaviour."""
+
+    def test_no_log_file_created_by_default(self, tmp_path, monkeypatch):
+        """No file should be written when PYIMGTAG_PARSE_ERROR_LOG is unset."""
+        monkeypatch.delenv("PYIMGTAG_PARSE_ERROR_LOG", raising=False)
+        import os
+
+        original_cwd = os.getcwd()
+        os.chdir(tmp_path)
+        try:
+            _parse_response("this is not json at all")
+        finally:
+            os.chdir(original_cwd)
+        # Nothing should have been written anywhere in tmp_path.
+        assert list(tmp_path.iterdir()) == []
+
+    def test_log_written_when_env_var_set(self, tmp_path, monkeypatch):
+        """When PYIMGTAG_PARSE_ERROR_LOG is set, parse errors are appended to it."""
+        log_path = tmp_path / "parse-errors.log"
+        monkeypatch.setenv("PYIMGTAG_PARSE_ERROR_LOG", str(log_path))
+        _parse_response("this is not json at all")
+        assert log_path.exists()
+        content = log_path.read_text(encoding="utf-8")
+        assert "this is not json at all" in content
+        assert "kind=tag" in content
+
+    def test_log_not_written_on_successful_parse(self, tmp_path, monkeypatch):
+        """Successful parses must not touch the log even when the env var is set."""
+        log_path = tmp_path / "parse-errors.log"
+        monkeypatch.setenv("PYIMGTAG_PARSE_ERROR_LOG", str(log_path))
+        _parse_response('{"tags":["cat"]}')
+        assert not log_path.exists()
+
+
 class TestRepairTruncatedJson:
     """Direct tests for _repair_truncated_json escape and failure branches."""
 

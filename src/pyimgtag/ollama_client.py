@@ -38,11 +38,11 @@ _MODEL_TEMPERATURE: float = 0.3
 # strings.
 _MODEL_MAX_TOKENS: int = 1024
 
-# Append-only log file for unparseable model responses. Set the env var
-# ``PYIMGTAG_PARSE_ERROR_LOG`` to override the location; defaults to
-# ``./pyimgtag-parse-errors.log`` in the current working directory so
-# the file lands in the same folder the user invoked pyimgtag from.
-_DEFAULT_PARSE_ERROR_LOG = "pyimgtag-parse-errors.log"
+# Parse-error logging is opt-in. Set ``PYIMGTAG_PARSE_ERROR_LOG`` to a file
+# path to enable appending unparseable model responses to that file.
+# Disabled by default so pyimgtag never writes model output (which may contain
+# photo descriptions) to disk without explicit consent.
+_DEFAULT_PARSE_ERROR_LOG: str | None = None
 
 # JPEG quality used when compressing images before sending to the model.
 # 85 balances quality vs. payload size well for typical photo resolutions.
@@ -424,19 +424,23 @@ def _try_json(text: str) -> dict | None:
 
 
 def _log_parse_error(raw: str, *, kind: str) -> None:
-    """Append the raw model reply to the local parse-error log.
+    """Append the raw model reply to the parse-error log if opt-in.
 
-    Lets users post-mortem the full text the model returned (truncation,
-    refusal, or noise) instead of relying on the 160-char snippet shown
-    in the review UI. Best-effort: a write failure must never bubble up
-    into the run / judge path, so all OS errors are swallowed.
+    Logging is disabled by default. Set the ``PYIMGTAG_PARSE_ERROR_LOG``
+    environment variable to a file path to enable it. The log may contain
+    photo descriptions, so it should not be stored in a synced or shared
+    directory.
+
+    Best-effort: a write failure must never bubble up into the run / judge
+    path, so all OS errors are swallowed.
     """
     import contextlib
-    import os as _os
     from datetime import datetime as _dt
     from datetime import timezone as _tz
 
-    target = _os.environ.get("PYIMGTAG_PARSE_ERROR_LOG", _DEFAULT_PARSE_ERROR_LOG)
+    target = os.environ.get("PYIMGTAG_PARSE_ERROR_LOG")
+    if not target:
+        return
     line = (
         f"--- {_dt.now(_tz.utc).isoformat(timespec='seconds')} kind={kind} len={len(raw)}\n{raw}\n"
     )

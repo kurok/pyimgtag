@@ -961,7 +961,7 @@ used `http://localhost:8765/api/stats` should be updated to
 | `PYIMGTAG_NO_WEB` | All commands that start the dashboard | `1` / `true` / `yes` disables the dashboard by default (same as `--no-web`). |
 | `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |
-| `PYIMGTAG_PARSE_ERROR_LOG` | `pyimgtag run` | Path to the Ollama JSON-parse error log (default `pyimgtag-parse-errors.log` in the cwd). |
+| `PYIMGTAG_PARSE_ERROR_LOG` | `pyimgtag run` | Path to write JSON-parse error log (opt-in; disabled by default). May contain photo descriptions — do not store in a synced or shared directory. |
 | `PYIMGTAG_DB` | `python -m pyimgtag.webapp` | Override the progress-DB path the standalone webapp opens. |
 | `PYIMGTAG_LOG_LEVEL` | `python -m pyimgtag.webapp` | uvicorn log level (default `info`). |
 | `HOST` / `PORT` | `python -m pyimgtag.webapp` | Bind host / port for the standalone launcher (default `127.0.0.1:8000`). |
