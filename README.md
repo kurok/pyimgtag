@@ -69,7 +69,7 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 
 ## Requirements
 
-- Python 3.11–3.14
+- Python 3.12+
 - [Ollama](https://ollama.ai) installed and running
 - Gemma 4 model pulled: `ollama pull gemma4:e4b`
 
@@ -232,11 +232,11 @@ python -m pip install 'setuptools<81'
 
 ```bash
 # Ubuntu/Debian
-sudo apt-get install exiftool python3.11 python3-pip
+sudo apt-get install exiftool python3.12 python3-pip
 # or install exiftool from https://exiftool.org
 
 # Fedora/RHEL
-sudo dnf install perl-Image-ExifTool python3.11
+sudo dnf install perl-Image-ExifTool python3.12
 
 # Arch
 sudo pacman -S perl-image-exiftool python
@@ -272,7 +272,7 @@ pyimgtag judge --input-dir ~/Pictures/exported --min-score 7 --output-json ranki
 ### Windows Setup
 
 ```powershell
-# Install Python 3.11+ from https://python.org
+# Install Python 3.12+ from https://python.org
 # Install Ollama from https://ollama.com
 
 # Install exiftool — download from https://exiftool.org/
@@ -324,7 +324,7 @@ pyimgtag status
 
 **Windows:**
 - `exiftool` not found → add exiftool directory to PATH, or install via Chocolatey/winget
-- Python not found → ensure Python 3.11+ is installed and added to PATH during install
+- Python not found → ensure Python 3.12+ is installed and added to PATH during install
 - HEIC files not loading → `pip install pillow-heif`
 - Ollama not running → start Ollama from system tray or run `ollama serve`
 - Long paths issue → enable long path support: `Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1`
