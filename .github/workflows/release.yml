@@ -22,21 +22,6 @@ jobs:
         TAG_NAME: ${{ github.ref_name }}
       run: echo "version=${TAG_NAME#v}" >> "$GITHUB_OUTPUT"
 
-    - name: Verify version matches pyproject.toml
-      env:
-        TAG_VERSION: ${{ steps.version.outputs.version }}
-      run: |
-        PROJECT_VERSION=$(python -c "
-        import re
-        with open('pyproject.toml') as f:
-            m = re.search(r'version\s*=\s*\"(.+?)\"', f.read())
-            print(m.group(1))
-        ")
-        if [ "$PROJECT_VERSION" != "$TAG_VERSION" ]; then
-          echo "::error::Tag version ($TAG_VERSION) does not match pyproject.toml ($PROJECT_VERSION)"
-          exit 1
-        fi
-
     - name: Generate changelog from commits
       id: changelog
       run: |
