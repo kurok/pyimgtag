@@ -901,3 +901,35 @@ class TestRepairTruncatedJson:
         from pyimgtag.ollama_client import _repair_truncated_json
 
         assert _repair_truncated_json('{"a": 1') is None
+
+    def test_clean_json_passes_through(self):
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        result = _repair_truncated_json('{"tags": ["a", "b"]}')
+        assert result == {"tags": ["a", "b"]}
+
+    def test_truncated_after_last_value_missing_closing_brace(self):
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        result = _repair_truncated_json('{"tags": ["a", "b"], "scene": "park"')
+        assert result is not None
+        assert result.get("tags") == ["a", "b"]
+
+    def test_truncated_mid_string_discards_incomplete_field(self):
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        result = _repair_truncated_json('{"tags": ["a"], "desc": "unfin')
+        assert result is not None
+        assert result.get("tags") == ["a"]
+        assert "desc" not in result
+
+    def test_returns_none_for_non_dict_result(self):
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        assert _repair_truncated_json('["a", "b"]') is None
+
+    def test_unicode_in_strings(self):
+        from pyimgtag.ollama_client import _repair_truncated_json
+
+        result = _repair_truncated_json('{"desc": "Château d\'If"}')
+        assert result == {"desc": "Château d'If"}
