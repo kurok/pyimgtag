@@ -463,7 +463,14 @@ def _add_cleanup_subcommands(subparsers: Any) -> None:
 def _add_review_subcommand(subparsers: Any) -> None:
     review_p = _sub(subparsers, "review")
     review_p.add_argument("--db", help=_DEFAULT_DB_HELP)
-    review_p.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    review_p.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help=(
+            "Bind host (default: 127.0.0.1). "
+            "WARNING: 0.0.0.0 exposes the server with no authentication."
+        ),
+    )
     review_p.add_argument("--port", type=int, default=8765, help="Bind port (default: 8765)")
     review_p.add_argument(
         "--no-browser", action="store_true", help="Do not open the browser automatically"
@@ -637,7 +644,14 @@ def _add_faces_subcommand(subparsers: Any) -> None:
 
     faces_ui = faces_sub.add_parser("ui", help="Start face management web UI")
     faces_ui.add_argument("--db", help=_DEFAULT_DB_HELP)
-    faces_ui.add_argument("--host", default="127.0.0.1", help="Bind address (default: 127.0.0.1)")
+    faces_ui.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help=(
+            "Bind address (default: 127.0.0.1). "
+            "WARNING: 0.0.0.0 exposes the server with no authentication."
+        ),
+    )
     faces_ui.add_argument("--port", type=int, default=8766, help="Port (default: 8766)")
 
     _RESET_YES_HELP = (
