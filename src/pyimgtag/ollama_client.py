@@ -513,7 +513,8 @@ def _repair_truncated_json(text: str) -> dict | None:
                     # standard decoder gives us; if that fails we fall
                     # through to the truncation path.
                     try:
-                        return json.loads(text[: i + 1])
+                        result = json.loads(text[: i + 1])
+                        return result if isinstance(result, dict) else None
                     except (json.JSONDecodeError, ValueError):
                         pass
         elif ch == "," and len(stack) == 1:
