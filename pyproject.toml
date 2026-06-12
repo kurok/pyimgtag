@@ -95,7 +95,7 @@ all = [
 # [all] extras does not drag in httpx2/h11 0.16 and clobber an environment's
 # classic httpx/httpcore (which pins h11<0.15).
 dev = ["pytest>=9.0", "pytest-xdist>=3.8", "pytest-cov>=7.0", "httpx2>=2.2"]
-lint = ["mypy>=2.1", "ruff>=0.15"]
+lint = ["mypy>=2.1", "ruff>=0.15", "types-requests>=2.31"]
 security = ["bandit>=1.9", "pip-audit>=2.10"]
 # Optional: install Playwright + Pillow for the local screenshot smoke
 # under tests/local/. After `pip install '.[screenshot]'` run
@@ -148,6 +148,16 @@ python_version = "3.12"
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false
+# Global baseline: silence untyped third-party imports for modules not yet migrated.
+# Strict modules override this via [[tool.mypy.overrides]] below.
+ignore_missing_imports = true
+disable_error_codes = ["import-untyped"]
+
+[[tool.mypy.overrides]]
+module = ["pyimgtag.models", "pyimgtag.geocoder"]
+disallow_untyped_defs = true
+warn_return_any = true
+ignore_missing_imports = false
 
 [tool.bandit]
 # no global skips — use per-call nosec annotations only
