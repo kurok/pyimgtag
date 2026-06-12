@@ -92,7 +92,6 @@ Return ONLY valid JSON. No extra text.
 }"""
 
 
-
 def _build_prompt_with_context(context: dict) -> str:
     """Build a context-enriched prompt from EXIF/geocoding data."""
     ctx_lines = []
@@ -373,10 +372,19 @@ def _parse_judge_response(text: str) -> JudgeScores | None:
     # Accept both the current single-score shape and the legacy 13-criterion
     # shape (pick any field as a representative score).
     _LEGACY = (
-        "impact", "story_subject", "composition_center", "lighting",
-        "creativity_style", "color_mood", "presentation_crop", "technical_excellence",
-        "focus_sharpness", "exposure_tonal", "noise_cleanliness",
-        "subject_separation", "edit_integrity",
+        "impact",
+        "story_subject",
+        "composition_center",
+        "lighting",
+        "creativity_style",
+        "color_mood",
+        "presentation_crop",
+        "technical_excellence",
+        "focus_sharpness",
+        "exposure_tonal",
+        "noise_cleanliness",
+        "subject_separation",
+        "edit_integrity",
     )
     if "score" in parsed:
         score = _clamp(parsed["score"])
