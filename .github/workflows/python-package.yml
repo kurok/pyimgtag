@@ -149,10 +149,11 @@ jobs:
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
     - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4.1.0
-    - name: Build Docker image
+    - name: Build heic target (default CLI image)
       uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
       with:
         context: .
+        target: heic
         tags: pyimgtag:ci
         load: true
         cache-from: type=gha
@@ -165,3 +166,21 @@ jobs:
       run: docker run --rm pyimgtag:ci status
     - name: Verify exiftool is on PATH inside image
       run: docker run --rm --entrypoint exiftool pyimgtag:ci -ver
+    - name: Build review target (web UI image)
+      uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf  # v7.2.0
+      with:
+        context: .
+        target: review
+        tags: pyimgtag-review:ci
+        load: true
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    - name: Smoke test review --help
+      run: docker run --rm pyimgtag-review:ci --help
+    - name: Smoke test review --version
+      run: docker run --rm pyimgtag-review:ci --version
+    - name: Smoke test review server health endpoint
+      run: |
+        docker run -d --name review-smoke -p 8080:8080 pyimgtag-review:ci
+        until curl -sf http://localhost:8080/health; do sleep 1; done
+        docker stop review-smoke
