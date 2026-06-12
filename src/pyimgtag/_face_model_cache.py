@@ -53,7 +53,7 @@ def _download(name: str, approx_bytes: int, dest: Path) -> None:
     url = f"{_BASE}/{name}"
     tmp = dest.with_suffix(".tmp")
     try:
-        urllib.request.urlretrieve(url, tmp)
+        urllib.request.urlretrieve(url, tmp)  # nosec B310 — _BASE is a hardcoded https:// URL
         tmp.rename(dest)
     except Exception:
         tmp.unlink(missing_ok=True)

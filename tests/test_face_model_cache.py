@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pyimgtag._face_model_cache import ensure_models_cached, inject_shim
-
 
 # ---------------------------------------------------------------------------
 # ensure_models_cached
@@ -92,9 +90,7 @@ class TestEnsureModelsCached:
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
-            with patch(
-                "urllib.request.urlretrieve", side_effect=_bad_urlretrieve
-            ):
+            with patch("urllib.request.urlretrieve", side_effect=_bad_urlretrieve):
                 with pytest.raises(OSError):
                     ensure_models_cached(tmp_path)
 
