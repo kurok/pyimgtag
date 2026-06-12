@@ -134,8 +134,16 @@ testpaths = ["tests"]
 addopts = "-n auto --dist=worksteal --ignore=tests/local --ignore=tests/e2e"
 
 [tool.coverage.run]
-branch = false
+branch = true
 source = ["src/pyimgtag"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
 
 [tool.mypy]
 python_version = "3.11"
