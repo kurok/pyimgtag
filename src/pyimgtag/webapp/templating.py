@@ -24,6 +24,8 @@ except ImportError:  # pragma: no cover — exercised in minimal envs only
     _ENV = None
     Markup = str  # type: ignore[assignment,misc]
 
+__all__ = ["render", "Markup"]
+
 
 def render(template_name: str, **context: Any) -> str:
     """Render a webapp page template with the given context.
