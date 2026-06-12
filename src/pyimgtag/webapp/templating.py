@@ -14,7 +14,6 @@ from typing import Any
 
 try:
     from jinja2 import Environment, PackageLoader
-    from markupsafe import Markup
 
     _ENV: Any = Environment(
         loader=PackageLoader("pyimgtag.webapp", "templates"),
@@ -22,7 +21,6 @@ try:
     )
 except ImportError:  # pragma: no cover — exercised in minimal envs only
     _ENV = None
-    Markup = str  # type: ignore[assignment,misc]
 
 
 def render(template_name: str, **context: Any) -> str:

@@ -38,12 +38,6 @@ _MODEL_TEMPERATURE: float = 0.3
 # strings.
 _MODEL_MAX_TOKENS: int = 1024
 
-# Parse-error logging is opt-in. Set ``PYIMGTAG_PARSE_ERROR_LOG`` to a file
-# path to enable appending unparseable model responses to that file.
-# Disabled by default so pyimgtag never writes model output (which may contain
-# photo descriptions) to disk without explicit consent.
-_DEFAULT_PARSE_ERROR_LOG: str | None = None
-
 # JPEG quality used when compressing images before sending to the model.
 # 85 balances quality vs. payload size well for typical photo resolutions.
 _JPEG_QUALITY: int = 85
