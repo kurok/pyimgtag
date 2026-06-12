@@ -5,14 +5,17 @@ deps that are NOT installed in CI. Each branch of ``_ensure_face_dep`` is
 exercised by injecting fake modules into ``sys.modules`` (or forcing the
 import to raise), so the real body runs and counts toward coverage without
 the heavy native dependency being present.
+
+All tests that exercise the "models missing" path also patch
+``pyimgtag._face_dep_check``'s import of ``inject_shim`` so no real network
+call is attempted.
 """
 
 from __future__ import annotations
 
-import builtins
 import sys
 from types import ModuleType
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,67 +30,84 @@ def _fake_module(name: str) -> ModuleType:
     return ModuleType(name)
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _patch_face_modules(*, models_ok: bool = True, fr_ok: bool = True):
+    """Return a context manager that injects fake face deps into sys.modules.
+
+    ``inject_shim`` is also patched to a no-op so tests don't hit the network.
+    """
+    mods = {}
+    if models_ok:
+        fake_models = MagicMock()
+        fake_models.face_recognition_model_location.return_value = "/fake/model.dat"
+        mods["face_recognition_models"] = fake_models
+    else:
+        mods["face_recognition_models"] = None  # simulate missing
+    if fr_ok:
+        mods["face_recognition"] = _fake_module("face_recognition")
+    else:
+        mods["face_recognition"] = None  # simulate missing
+
+    return patch.dict(sys.modules, mods)
+
+
+# ---------------------------------------------------------------------------
+# Success path
+# ---------------------------------------------------------------------------
+
+
 class TestEnsureFaceDepSuccess:
     def test_returns_face_recognition_module(self):
         """Both deps importable → returns the face_recognition module."""
-        fake_models = _fake_module("face_recognition_models")
         fake_fr = _fake_module("face_recognition")
+        fake_models = MagicMock()
+        fake_models.face_recognition_model_location.return_value = "/fake/m.dat"
         with patch.dict(
             sys.modules,
             {"face_recognition_models": fake_models, "face_recognition": fake_fr},
         ):
-            result = _ensure_face_dep()
+            with patch("pyimgtag._face_model_cache.inject_shim"):
+                result = _ensure_face_dep()
         assert result is fake_fr
 
 
+# ---------------------------------------------------------------------------
+# Models missing / download-failed path
+# ---------------------------------------------------------------------------
+
+
 class TestEnsureFaceDepModelsMissing:
-    """Cover the ModuleNotFoundError discrimination (models vs pkg_resources)."""
+    """Cover the path where inject_shim raises (download failed)."""
 
-    def test_models_package_missing_uses_models_hint(self):
-        """ModuleNotFoundError whose name != pkg_resources → models hint."""
-        real_import = builtins.__import__
-
-        def fake_import(name, *args, **kwargs):
-            if name == "face_recognition_models":
-                raise ModuleNotFoundError(
-                    "No module named 'face_recognition_models'",
-                    name="face_recognition_models",
-                )
-            return real_import(name, *args, **kwargs)
-
-        with patch.object(builtins, "__import__", side_effect=fake_import):
-            with pytest.raises(MissingFaceModelsError) as exc:
-                _ensure_face_dep()
+    def test_inject_shim_failure_raises_missing_face_models_error(self):
+        """If inject_shim raises, _ensure_face_dep wraps it in MissingFaceModelsError."""
+        with patch.dict(sys.modules, {"face_recognition": None}):
+            with patch(
+                "pyimgtag._face_model_cache.inject_shim",
+                side_effect=OSError("network unreachable"),
+            ):
+                with pytest.raises(MissingFaceModelsError) as exc:
+                    _ensure_face_dep()
         msg = str(exc.value)
-        assert "face_recognition_models is not installed" in msg
+        assert "Could not download face recognition models automatically" in msg
         assert sys.executable in msg
 
-    def test_any_module_not_found_from_models_uses_models_hint(self):
-        """Any ModuleNotFoundError from face_recognition_models → models install hint.
+    def test_models_import_fails_after_inject_raises_missing_error(self):
+        """ModuleNotFoundError from face_recognition_models import → MissingFaceModelsError."""
+        with patch.dict(sys.modules, {"face_recognition_models": None}):
+            with patch("pyimgtag._face_model_cache.inject_shim"):
+                with pytest.raises(MissingFaceModelsError) as exc:
+                    _ensure_face_dep()
+        assert "Could not download face recognition models automatically" in str(exc.value)
 
-        The pkg_resources case is handled by the shim before the import, so
-        if the import still raises ModuleNotFoundError for any reason, the
-        models install hint is the actionable response.
-        """
-        real_import = builtins.__import__
+    def test_generic_import_error_uses_download_failed_hint(self):
+        """A plain ImportError from face_recognition_models → download-failed hint."""
+        import builtins
 
-        def fake_import(name, *args, **kwargs):
-            if name == "face_recognition_models":
-                raise ModuleNotFoundError(
-                    "No module named 'face_recognition_models'",
-                    name="face_recognition_models",
-                )
-            return real_import(name, *args, **kwargs)
-
-        with patch.object(builtins, "__import__", side_effect=fake_import):
-            with pytest.raises(MissingFaceModelsError) as exc:
-                _ensure_face_dep()
-        msg = str(exc.value)
-        assert "face_recognition_models is not installed" in msg
-        assert sys.executable in msg
-
-    def test_generic_import_error_uses_models_hint(self):
-        """A plain ImportError (not ModuleNotFoundError) → models hint (lines 109-110)."""
         real_import = builtins.__import__
 
         def fake_import(name, *args, **kwargs):
@@ -95,34 +115,41 @@ class TestEnsureFaceDepModelsMissing:
                 raise ImportError("broken in some other way")
             return real_import(name, *args, **kwargs)
 
-        with patch.object(builtins, "__import__", side_effect=fake_import):
-            with pytest.raises(MissingFaceModelsError) as exc:
-                _ensure_face_dep()
-        assert "face_recognition_models is not installed" in str(exc.value)
+        with patch.dict(sys.modules, {"face_recognition_models": None}):
+            with patch("pyimgtag._face_model_cache.inject_shim"):
+                with patch.object(builtins, "__import__", side_effect=fake_import):
+                    with pytest.raises(MissingFaceModelsError) as exc:
+                        _ensure_face_dep()
+        assert "Could not download" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# face_recognition missing path
+# ---------------------------------------------------------------------------
 
 
 class TestEnsureFaceDepFaceRecognitionMissing:
     """Cover the branch where models import OK but face_recognition is absent."""
 
     def test_face_recognition_missing_raises_plain_import_error(self):
-        real_import = builtins.__import__
-        fake_models = _fake_module("face_recognition_models")
-
-        def fake_import(name, *args, **kwargs):
-            if name == "face_recognition":
-                raise ImportError("No module named 'face_recognition'")
-            return real_import(name, *args, **kwargs)
-
-        with patch.dict(sys.modules, {"face_recognition_models": fake_models}):
-            with patch.object(builtins, "__import__", side_effect=fake_import):
+        fake_models = MagicMock()
+        fake_models.face_recognition_model_location.return_value = "/fake/m.dat"
+        with patch.dict(
+            sys.modules,
+            {"face_recognition_models": fake_models, "face_recognition": None},
+        ):
+            with patch("pyimgtag._face_model_cache.inject_shim"):
                 with pytest.raises(ImportError) as exc:
                     _ensure_face_dep()
         msg = str(exc.value)
         assert "face_recognition is not installed" in msg
         assert "[face]" in msg
-        # Must be a plain ImportError, NOT the MissingFaceModelsError subclass,
-        # so callers can tell "models missing" from "face_recognition missing".
         assert not isinstance(exc.value, MissingFaceModelsError)
+
+
+# ---------------------------------------------------------------------------
+# _inject_pkg_resources_shim
+# ---------------------------------------------------------------------------
 
 
 class TestInjectPkgResourcesShim:
@@ -149,7 +176,6 @@ class TestInjectPkgResourcesShim:
         original = sys.modules.pop("pkg_resources", None)
         try:
             with patch.dict(sys.modules, {"pkg_resources": None}):
-                # Remove the sentinel None so the import fails
                 del sys.modules["pkg_resources"]
                 _inject_pkg_resources_shim()
                 shim = sys.modules.get("pkg_resources")

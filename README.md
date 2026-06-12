@@ -187,46 +187,28 @@ pyimgtag faces import-photos  # reads system default Photos library
 
 **Note:** Apple Photos library access requires Full Disk Access permission for your terminal app — grant it in System Settings > Privacy & Security > Full Disk Access.
 
-#### Face features: `face_recognition_models` is git-only
+#### Face features: model files are downloaded automatically
 
-`face_recognition` needs a companion package, `face_recognition_models`,
-which only lives on git — it was never published to PyPI. **You always
-need to install it as a separate step**, regardless of whether you got
-pyimgtag from PyPI or source: PyPI rejects packages whose metadata
-declares direct-URL dependencies, so `[face]` / `[all]` extras can't
-list it for you.
+`pip install 'pyimgtag[face]'` is sufficient. The `face_recognition`
+library depends on `face_recognition_models` (dlib `.dat` files) which
+was never published to PyPI. pyimgtag downloads those files automatically
+on first use to `~/.cache/pyimgtag/face_models/` (~130 MB, one-time).
 
 ```bash
-pip install 'pyimgtag[face]'      # or .[all]; models package NOT included
-python -m pip install \
-    "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"
+pip install 'pyimgtag[face]'      # models download on first faces command
 ```
 
-If `pyimgtag faces scan` exits with a "Please install
-`face_recognition_models`" message and no traceback, you skipped that
-second command. Verify the install landed in the right venv with:
+To use pre-downloaded files (air-gapped installs, shared CI caches):
 
 ```bash
-python -m pip show face_recognition_models
+export PYIMGTAG_FACE_MODEL_DIR=/path/to/models
+pyimgtag faces scan ...
 ```
 
-If `pip show` says it's installed but pyimgtag still complains, the
-likely culprit is a missing `pkg_resources`. There are two ways this
-shows up:
-
-1. Python 3.12+ no longer bundles setuptools by default, so
-   `pkg_resources` is just absent.
-2. **setuptools 81 removed `pkg_resources` from the package**, so you
-   can have setuptools 81+ installed and `pip show` happy, yet
-   `import pkg_resources` raises `ModuleNotFoundError`.
-
-Pinning setuptools below 81 fixes both — the `[face]` and `[all]`
-extras pin `setuptools>=68.0,<81` automatically. If you installed
-without the extra (or your env already had setuptools 81+), run:
-
-```bash
-python -m pip install 'setuptools<81'
-```
+The four required files are the standard dlib model files from
+`ageitgey/face_recognition_models`. If the automatic download fails,
+download them manually and point `PYIMGTAG_FACE_MODEL_DIR` at the
+directory containing the `.dat` files.
 
 ### Linux Setup
 
@@ -588,9 +570,9 @@ accepts `--languages ru-RU,en-US` to steer Vision OCR for non-Latin names, and
 > grant it, take the screenshot yourself (Cmd-Shift-4, then Space, click the
 > Photos window) and pass `--screenshot PATH` — that path needs no permission.
 
-The `[face]` extra is required for all detection/embedding; see the
-[`face_recognition_models` install note](#face-features-face_recognition_models-is-git-only)
-above. `import-photos` additionally needs `[photos-db]` (`pip install
+The `[face]` extra is required for all detection/embedding; model files
+are downloaded automatically on first use (see
+[Face features: model files are downloaded automatically](#face-features-model-files-are-downloaded-automatically)). `import-photos` additionally needs `[photos-db]` (`pip install
 'pyimgtag[photos-db]'`); `capture-names` additionally needs `[ocr]` (`pip install
 'pyimgtag[ocr]'`, macOS only).
 
@@ -779,7 +761,7 @@ src/pyimgtag/
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       SQLite progress DB with versioned migrations
   applescript_writer.py  Apple Photos keyword/description write-back
-  _face_dep_check.py   Friendly preflight for face_recognition_models
+  _face_dep_check.py   Preflight for face_recognition; auto-downloads model files via _face_model_cache
   face_ocr.py          Screen-OCR naming: Vision OCR of a People-view screenshot → cluster names
   dedup.py             Perceptual hash duplicate detection
   heic_converter.py    HEIC to JPEG conversion (macOS sips)

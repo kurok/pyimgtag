@@ -33,23 +33,10 @@ photos = ["photoscript>=0.5.3"]
 # (exact names + photo UUIDs), so `faces import-photos` works on Photos builds
 # where AppleScript can't enumerate people (the -2741 failure).
 photos-db = ["osxphotos>=0.69"]
-# IMPORTANT: face_recognition_models is a runtime dependency of
-# face-recognition that is NOT published to PyPI — it only exists at the
-# upstream git URL https://github.com/ageitgey/face_recognition_models.
-# We can NOT list it here, even in extras: PyPI rejects published packages
-# whose core metadata declares direct-URL dependencies (returns
-# `400 Can't have direct dependency …`). Users have to install it
-# themselves after installing pyimgtag from PyPI:
-#
-#     pip install 'pyimgtag[face]'
-#     pip install "face_recognition_models @ git+https://github.com/ageitgey/face_recognition_models"
-#
-# The pre-flight check in src/pyimgtag/_face_dep_check.py prints this
-# command (with `sys.executable -m pip install …`) when the models
-# package is missing, so the user always gets an actionable next step.
-# `_face_dep_check._inject_pkg_resources_shim` handles the case where
-# setuptools>=81 is installed and ``pkg_resources`` is no longer bundled,
-# so no setuptools version cap is needed here.
+# face_recognition_models is NOT on PyPI (archived git-only project).
+# _face_model_cache.inject_shim auto-downloads the .dat files on first use
+# to ~/.cache/pyimgtag/face_models/ so no manual install step is required.
+# Override with PYIMGTAG_FACE_MODEL_DIR to use pre-downloaded files.
 face = [
     "face-recognition>=1.3",
     "scikit-learn>=1.8",
@@ -68,8 +55,6 @@ all = [
     "pillow-heif>=1.3",
     "photoscript>=0.5.3",
     "osxphotos>=0.69",
-    # See note above on [face]: face_recognition_models cannot be listed
-    # here either; it is installed separately from a git URL.
     "face-recognition>=1.3",
     "scikit-learn>=1.8",
     "fastapi>=0.136",
