@@ -66,21 +66,7 @@ def test_judge_pause_gate_blocks_between_files(tmp_path):
         if len(judged_paths) == 1:
             pause_after_first.set()
             pause_requested.wait(timeout=5.0)
-        return JudgeScores(
-            impact=3.0,
-            story_subject=3.0,
-            composition_center=3.0,
-            lighting=3.0,
-            creativity_style=3.0,
-            color_mood=3.0,
-            presentation_crop=3.0,
-            technical_excellence=3.0,
-            focus_sharpness=3.0,
-            exposure_tonal=3.0,
-            noise_cleanliness=3.0,
-            subject_separation=3.0,
-            edit_integrity=3.0,
-        )
+        return JudgeScores(score=3)
 
     result_holder: dict = {}
 

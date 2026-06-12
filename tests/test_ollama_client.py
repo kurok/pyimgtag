@@ -47,10 +47,7 @@ class TestParseResponse:
         assert r.significance is None
 
     def test_parse_judge_simple_prompt_score_and_reason(self):
-        """The current prompt asks for ``{score, reason}``. The parser must
-        accept it, fan the score out across the legacy per-criterion fields
-        so weighted/core/visible all match, and surface the natural-language
-        reason without leaking it into ``verdict``."""
+        """The current prompt asks for ``{score, reason}``."""
         from pyimgtag.ollama_client import _parse_judge_response
 
         text = (
@@ -59,12 +56,8 @@ class TestParseResponse:
         )
         scores = _parse_judge_response(text)
         assert scores is not None
-        assert scores.impact == 7
-        assert scores.composition_center == 7
-        assert scores.edit_integrity == 7
+        assert scores.score == 7
         assert scores.reason.startswith("Strong subject")
-        # The simple prompt does not produce ``verdict`` — that field is for
-        # legacy 13-criterion rows only.
         assert scores.verdict == ""
 
     def test_parse_judge_simple_prompt_clamps_score(self):
@@ -72,7 +65,7 @@ class TestParseResponse:
 
         scores = _parse_judge_response('{"score": 42, "reason": "out of range"}')
         assert scores is not None
-        assert scores.impact == 10
+        assert scores.score == 10
         assert scores.reason == "out of range"
 
     def test_unparseable_response_includes_snippet(self):
@@ -421,8 +414,8 @@ class TestParseJudgeResponse:
         )
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.impact == 4.0
-        assert result.focus_sharpness == 5.0
+        # Average of the 13 legacy values above = 55/13 ≈ 4
+        assert result.score == 4
         assert result.verdict == "Strong composition, weak noise."
 
     def test_missing_verdict_defaults_to_empty(self):
@@ -447,15 +440,17 @@ class TestParseJudgeResponse:
         )
         result = _parse_judge_response(raw)
         assert result is not None
+        assert result.score == 3
         assert result.verdict == ""
 
     def test_score_clamped_to_1_10(self):
+        """Values outside [1,10] are clamped before averaging."""
         import json
 
         raw = json.dumps(
             {
-                "impact": 11,  # over the max
-                "story_subject": 0,  # under the min
+                "impact": 11,  # clamps to 10
+                "story_subject": 0,  # clamps to 1
                 "composition_center": 5,
                 "lighting": 5,
                 "creativity_style": 5,
@@ -471,10 +466,11 @@ class TestParseJudgeResponse:
         )
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.impact == 10
-        assert result.story_subject == 1
+        # avg(10,1,5*11) = 66/13 ≈ 5
+        assert result.score == 5
 
-    def test_missing_score_field_defaults_to_5(self):
+    def test_missing_one_field_averages_rest(self):
+        """If one legacy field is absent, remaining 12 still produce a score."""
         import json
 
         raw = json.dumps(
@@ -495,7 +491,8 @@ class TestParseJudgeResponse:
         )
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.noise_cleanliness == 5
+        # 12 fields all at 8 → score=8
+        assert result.score == 8
 
     def test_unparseable_returns_none(self):
         assert _parse_judge_response("not json at all") is None
@@ -535,7 +532,7 @@ class TestOllamaClientJudgeImage:
         with patch.object(client._session, "post", return_value=mock_response):
             result = client.judge_image(str(img))
         assert result is not None
-        assert result.impact == 4.0
+        assert result.score == 4
         assert result.verdict == "Solid neutral image."
 
     def test_judge_image_returns_none_on_request_error(self, tmp_path):
@@ -591,24 +588,7 @@ class TestParseJudgeResponseEdgeCases:
     def test_non_string_verdict_defaults_to_empty(self):
         import json
 
-        raw = json.dumps(
-            {
-                "impact": 4,
-                "story_subject": 3,
-                "composition_center": 4,
-                "lighting": 4,
-                "creativity_style": 3,
-                "color_mood": 4,
-                "presentation_crop": 4,
-                "technical_excellence": 4,
-                "focus_sharpness": 4,
-                "exposure_tonal": 4,
-                "noise_cleanliness": 3,
-                "subject_separation": 4,
-                "edit_integrity": 4,
-                "verdict": 123,  # integer instead of string
-            }
-        )
+        raw = json.dumps({"score": 4, "verdict": 123})  # integer verdict → ""
         result = _parse_judge_response(raw)
         assert result is not None
         assert result.verdict == ""
@@ -616,57 +596,21 @@ class TestParseJudgeResponseEdgeCases:
     def test_markdown_fenced_judge_response(self):
         import json
 
-        text = (
-            "```json\n"
-            + json.dumps(
-                {
-                    "impact": 4,
-                    "story_subject": 3,
-                    "composition_center": 4,
-                    "lighting": 4,
-                    "creativity_style": 3,
-                    "color_mood": 4,
-                    "presentation_crop": 4,
-                    "technical_excellence": 4,
-                    "focus_sharpness": 4,
-                    "exposure_tonal": 4,
-                    "noise_cleanliness": 3,
-                    "subject_separation": 4,
-                    "edit_integrity": 4,
-                    "verdict": "Good overall",
-                }
-            )
-            + "\n```"
-        )
+        text = "```json\n" + json.dumps({"score": 4, "verdict": "Good overall"}) + "\n```"
         result = _parse_judge_response(text)
         assert result is not None
-        assert result.impact == 4.0
+        assert result.score == 4
         assert result.verdict == "Good overall"
 
     def test_judge_response_with_text_around_json(self):
         import json
 
         text = "The photo is excellent. " + json.dumps(
-            {
-                "impact": 5,
-                "story_subject": 4,
-                "composition_center": 5,
-                "lighting": 4,
-                "creativity_style": 4,
-                "color_mood": 4,
-                "presentation_crop": 4,
-                "technical_excellence": 4,
-                "focus_sharpness": 4,
-                "exposure_tonal": 4,
-                "noise_cleanliness": 4,
-                "subject_separation": 4,
-                "edit_integrity": 4,
-                "verdict": "Excellent composition and light.",
-            }
+            {"score": 5, "verdict": "Excellent composition and light."}
         )
         result = _parse_judge_response(text)
         assert result is not None
-        assert result.impact == 5.0
+        assert result.score == 5
 
     def test_judge_response_missing_all_scores_defaults_to_5(self):
         import json
@@ -674,11 +618,18 @@ class TestParseJudgeResponseEdgeCases:
         raw = json.dumps({"verdict": "No scores provided"})
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.impact == 5
-        assert result.story_subject == 5
-        assert result.composition_center == 5
+        assert result.score == 5
 
-    def test_judge_response_string_scores_converted_to_int(self):
+    def test_judge_response_string_score_converted_to_int(self):
+        import json
+
+        raw = json.dumps({"score": "9", "verdict": "Good"})
+        result = _parse_judge_response(raw)
+        assert result is not None
+        assert result.score == 9
+
+    def test_legacy_fields_averaged_into_score(self):
+        """Legacy 13-criterion payloads are still accepted; average becomes score."""
         import json
 
         raw = json.dumps(
@@ -701,8 +652,8 @@ class TestParseJudgeResponseEdgeCases:
         )
         result = _parse_judge_response(raw)
         assert result is not None
-        assert result.impact == 9
-        assert result.story_subject == 6
+        # avg(9,6,8,8,6,8,8,8,8,8,6,8,8) = 99/13 ≈ 8
+        assert result.score == 8
 
 
 class TestOllamaClientTagImage:

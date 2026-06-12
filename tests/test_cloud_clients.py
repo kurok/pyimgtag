@@ -28,22 +28,7 @@ def jpg(tmp_path):
 
 
 def _judge_payload() -> dict:
-    return {
-        "impact": 8,
-        "story_subject": 7,
-        "composition_center": 8,
-        "lighting": 7,
-        "creativity_style": 6,
-        "color_mood": 8,
-        "presentation_crop": 7,
-        "technical_excellence": 8,
-        "focus_sharpness": 9,
-        "exposure_tonal": 7,
-        "noise_cleanliness": 8,
-        "subject_separation": 6,
-        "edit_integrity": 7,
-        "verdict": "Solid frame.",
-    }
+    return {"score": 8, "verdict": "Solid frame."}
 
 
 def _tag_payload() -> dict:
@@ -113,7 +98,7 @@ class TestAnthropicClient:
         with patch.object(client._session, "post", return_value=mock_resp) as mock_post:
             result = client.judge_image(jpg)
         assert isinstance(result, JudgeScores)
-        assert result.impact == 8
+        assert result.score == 8
         # The request body must include base64 image and text prompt
         sent = mock_post.call_args[1]["json"]
         assert sent["model"] == "claude-sonnet-4-6"
@@ -197,7 +182,7 @@ class TestOpenAIClient:
         with patch.object(client._session, "post", return_value=mock_resp) as mock_post:
             result = client.judge_image(jpg)
         assert isinstance(result, JudgeScores)
-        assert result.focus_sharpness == 9
+        assert result.score == 8
         sent = mock_post.call_args[1]["json"]
         assert sent["model"] == "gpt-4o-mini"
         # The image is sent as a data: URL
@@ -286,7 +271,7 @@ class TestGeminiClient:
         with patch.object(client._session, "post", return_value=mock_resp) as mock_post:
             result = client.judge_image(jpg)
         assert isinstance(result, JudgeScores)
-        assert result.story_subject == 7
+        assert result.score == 8
         # API key travels in the x-goog-api-key header, never in the URL
         url = mock_post.call_args[0][0]
         assert "g-key" not in url

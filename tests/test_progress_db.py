@@ -275,7 +275,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 11
+            assert self._user_version(db._conn) == 12
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db._conn))
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
@@ -300,7 +300,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 11
+            assert self._user_version(db._conn) == 12
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
 
@@ -342,7 +342,7 @@ class TestSchemaVersioning:
             pass
 
         with ProgressDB(db_path=db_path) as db2:
-            assert self._user_version(db2._conn) == 11
+            assert self._user_version(db2._conn) == 12
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db2._conn))
             assert self._table_exists(db2._conn, "faces")
             assert self._table_exists(db2._conn, "persons")
@@ -879,7 +879,7 @@ class TestMigrationV4:
 
         with ProgressDB(db_path=db_path) as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 11
+            assert ver == 12
             cols = {
                 row[1] for row in db._conn.execute("PRAGMA table_info(processed_images)").fetchall()
             }
@@ -1524,22 +1524,7 @@ class TestJudgeScores:
         from pyimgtag.models import JudgeResult, JudgeScores
 
         with ProgressDB(db_path=tmp_path / "test.db") as db:
-            scores = JudgeScores(
-                impact=8,
-                story_subject=7,
-                composition_center=9,
-                lighting=6,
-                creativity_style=5,
-                color_mood=8,
-                presentation_crop=7,
-                technical_excellence=8,
-                focus_sharpness=9,
-                exposure_tonal=7,
-                noise_cleanliness=8,
-                subject_separation=6,
-                edit_integrity=7,
-                verdict="Strong composition, good light",
-            )
+            scores = JudgeScores(score=8, verdict="Strong composition, good light")
             result = JudgeResult(
                 file_path="/photos/img.jpg",
                 file_name="img.jpg",
@@ -1554,7 +1539,7 @@ class TestJudgeScores:
         assert got["weighted_score"] == 7
         assert got["core_score"] == 8
         assert got["verdict"] == "Strong composition, good light"
-        assert got["scores"]["impact"] == 8
+        assert got["score"] == 8
 
     def test_get_judge_result_missing_returns_none(self, tmp_path):
         with ProgressDB(db_path=tmp_path / "test.db") as db:
@@ -1569,7 +1554,7 @@ class TestJudgeScores:
                 return JudgeResult(
                     file_path="/photos/img.jpg",
                     file_name="img.jpg",
-                    scores=JudgeScores(impact=score),
+                    scores=JudgeScores(score=score),
                     weighted_score=score,
                     core_score=score,
                     visible_score=score,
@@ -1997,7 +1982,7 @@ class TestMigrationErrorBranches:
 
         # Must open without raising despite the duplicate scene_category column.
         with ProgressDB(db_path=db_path) as db:
-            assert db._conn.execute("PRAGMA user_version").fetchone()[0] == 11
+            assert db._conn.execute("PRAGMA user_version").fetchone()[0] == 12
 
     def test_migration_failure_rolls_back_and_reraises(self, tmp_path):
         """A non-duplicate OperationalError propagates after savepoint rollback."""

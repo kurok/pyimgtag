@@ -33,12 +33,9 @@ class JudgeDB:
         self._conn.execute(
             """
             INSERT OR REPLACE INTO judge_scores
-                (file_path, scored_at, weighted_score, core_score, visible_score, verdict,
-                 impact, story_subject, composition_center, lighting, creativity_style,
-                 color_mood, presentation_crop, technical_excellence, focus_sharpness,
-                 exposure_tonal, noise_cleanliness, subject_separation, edit_integrity,
-                 reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (file_path, scored_at, weighted_score, core_score, visible_score,
+                 verdict, reason, score)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 result.file_path,
@@ -47,39 +44,17 @@ class JudgeDB:
                 result.core_score,
                 result.visible_score,
                 s.verdict,
-                s.impact,
-                s.story_subject,
-                s.composition_center,
-                s.lighting,
-                s.creativity_style,
-                s.color_mood,
-                s.presentation_crop,
-                s.technical_excellence,
-                s.focus_sharpness,
-                s.exposure_tonal,
-                s.noise_cleanliness,
-                s.subject_separation,
-                s.edit_integrity,
                 s.reason,
+                s.score,
             ),
         )
         self._conn.commit()
 
     def get_judge_result(self, file_path: str) -> dict | None:
-        """Return judge scores for a file, or None if not found.
-
-        Scores are integers in 1-10. The underlying ``judge_scores`` table
-        uses REAL columns for backward compatibility, so values are cast to
-        ``int`` here (rounded for any legacy float rows from the old 1-5
-        scale).
-        """
+        """Return judge scores for a file, or None if not found."""
         row = self._conn.execute(
             """SELECT weighted_score, core_score, visible_score, verdict,
-                      impact, story_subject, composition_center, lighting,
-                      creativity_style, color_mood, presentation_crop,
-                      technical_excellence, focus_sharpness, exposure_tonal,
-                      noise_cleanliness, subject_separation, edit_integrity,
-                      scored_at, reason
+                      scored_at, reason, score
                FROM judge_scores WHERE file_path = ?""",
             (file_path,),
         ).fetchone()
@@ -95,23 +70,9 @@ class JudgeDB:
             "core_score": _i(row[1]),
             "visible_score": _i(row[2]),
             "verdict": row[3],
-            "scored_at": row[17],
-            "reason": row[18] if len(row) > 18 else None,
-            "scores": {
-                "impact": _i(row[4]),
-                "story_subject": _i(row[5]),
-                "composition_center": _i(row[6]),
-                "lighting": _i(row[7]),
-                "creativity_style": _i(row[8]),
-                "color_mood": _i(row[9]),
-                "presentation_crop": _i(row[10]),
-                "technical_excellence": _i(row[11]),
-                "focus_sharpness": _i(row[12]),
-                "exposure_tonal": _i(row[13]),
-                "noise_cleanliness": _i(row[14]),
-                "subject_separation": _i(row[15]),
-                "edit_integrity": _i(row[16]),
-            },
+            "scored_at": row[4],
+            "reason": row[5],
+            "score": _i(row[6]),
         }
 
     def get_all_judge_results(self, limit: int | None = _DEFAULT_JUDGE_RESULTS_LIMIT) -> list[dict]:

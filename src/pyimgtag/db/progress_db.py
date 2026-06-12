@@ -107,6 +107,11 @@ class ProgressDB:
                 image_path TEXT PRIMARY KEY
             )""",
         ),
+        # 0.29.0: single-score judge — add score column and populate from
+        # weighted_score (the two are numerically identical for all existing
+        # rows because all 13 per-criterion fields were set to the same value).
+        (12, "ALTER TABLE judge_scores ADD COLUMN score REAL"),
+        (12, "UPDATE judge_scores SET score = weighted_score WHERE score IS NULL"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:

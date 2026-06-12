@@ -91,21 +91,6 @@ Return ONLY valid JSON. No extra text.
   "reason": "<2–4 concise sentences explaining the score>"
 }"""
 
-_JUDGE_SCORE_FIELDS: tuple[str, ...] = (
-    "impact",
-    "story_subject",
-    "composition_center",
-    "lighting",
-    "creativity_style",
-    "color_mood",
-    "presentation_crop",
-    "technical_excellence",
-    "focus_sharpness",
-    "exposure_tonal",
-    "noise_cleanliness",
-    "subject_separation",
-    "edit_integrity",
-)
 
 
 def _build_prompt_with_context(context: dict) -> str:
@@ -369,22 +354,12 @@ def _parse_response(text: str) -> TagResult:
 
 
 def _parse_judge_response(text: str) -> JudgeScores | None:
-    """Parse a judge model reply.
-
-    The current prompt asks for ``{"score": int, "reason": str}``. To stay
-    compatible with rows produced by the previous 13-criterion prompt
-    (and any older deployment that still issues it) we also accept the
-    legacy shape and copy the per-criterion values over.
-
-    For new-style responses every per-criterion field is filled with the
-    same overall ``score`` so existing weighted/core/visible computations
-    keep returning the same integer the model picked.
-    """
+    """Parse a judge model reply: ``{"score": int, "reason": str}``."""
     parsed = _parse_model_json(text.strip(), kind="judge")
     if parsed is None:
         return None
 
-    def _clamp_score(val: object, default: int = 5) -> int:
+    def _clamp(val: object, default: int = 5) -> int:
         try:
             return int(round(max(1.0, min(10.0, float(val)))))  # type: ignore[arg-type]
         except (TypeError, ValueError):
@@ -395,24 +370,20 @@ def _parse_judge_response(text: str) -> JudgeScores | None:
     verdict_raw = parsed.get("verdict", "")
     verdict = verdict_raw if isinstance(verdict_raw, str) else ""
 
-    if "score" in parsed:
-        # New simple-prompt shape. Spread the same value across the legacy
-        # per-criterion fields so the rest of the pipeline (weighted_score
-        # average, top/bottom criterion picks) is mathematically a no-op
-        # but doesn't crash on missing fields.
-        score = _clamp_score(parsed.get("score"))
-        return JudgeScores(
-            **{k: score for k in _JUDGE_SCORE_FIELDS},
-            verdict=verdict,
-            reason=reason,
-        )
-
-    # Legacy 13-criterion shape.
-    return JudgeScores(
-        **{k: _clamp_score(parsed.get(k)) for k in _JUDGE_SCORE_FIELDS},
-        verdict=verdict,
-        reason=reason,
+    # Accept both the current single-score shape and the legacy 13-criterion
+    # shape (pick any field as a representative score).
+    _LEGACY = (
+        "impact", "story_subject", "composition_center", "lighting",
+        "creativity_style", "color_mood", "presentation_crop", "technical_excellence",
+        "focus_sharpness", "exposure_tonal", "noise_cleanliness",
+        "subject_separation", "edit_integrity",
     )
+    if "score" in parsed:
+        score = _clamp(parsed["score"])
+    else:
+        vals = [_clamp(parsed[k]) for k in _LEGACY if k in parsed]
+        score = round(sum(vals) / len(vals)) if vals else 5
+    return JudgeScores(score=score, verdict=verdict, reason=reason)
 
 
 def _try_json(text: str) -> dict | None:
