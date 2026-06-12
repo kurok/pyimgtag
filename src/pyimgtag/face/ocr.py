@@ -28,7 +28,7 @@ normalized *top-left* coordinates before pairing so the two never collide.
 from __future__ import annotations
 
 import logging
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -326,7 +326,7 @@ def capture_people_screenshot(out_path: str | Path) -> Path:
         raise OcrUnavailableError(f"{_OCR_INSTALL_HINT} ({exc})") from exc
 
     try:
-        subprocess.run(
+        subprocess.run(  # nosec B603 B607
             ["osascript", "-e", 'tell application "Photos" to activate'],
             check=True,
             capture_output=True,
@@ -344,7 +344,7 @@ def capture_people_screenshot(out_path: str | Path) -> Path:
 
     try:
         # -l <id>: capture exactly that window; -o: no window shadow.
-        subprocess.run(
+        subprocess.run(  # nosec B603 B607
             ["screencapture", "-x", "-o", "-l", str(window_id), str(out)],
             check=True,
             capture_output=True,

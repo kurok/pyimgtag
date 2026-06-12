@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 
@@ -89,7 +89,7 @@ def extract_raw_thumbnail(
     try:
         for tag in _THUMBNAIL_TAGS:
             try:
-                proc = subprocess.run(
+                proc = subprocess.run(  # nosec B603 B607
                     ["exiftool", "-b", f"-{tag}", str(input_path)],
                     capture_output=True,
                     timeout=30,

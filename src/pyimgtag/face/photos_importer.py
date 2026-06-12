@@ -7,7 +7,7 @@ Only available on macOS with Apple Photos access.
 from __future__ import annotations
 
 import logging
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
 from collections.abc import Callable
@@ -373,7 +373,7 @@ def _run_bulk_osascript(script: str) -> "subprocess.CompletedProcess[str]":
     an alternate script.
     """
     try:
-        return subprocess.run(  # noqa: S603
+        return subprocess.run(  # noqa: S603  # nosec B603
             ["/usr/bin/osascript", "-e", script],
             capture_output=True,
             text=True,

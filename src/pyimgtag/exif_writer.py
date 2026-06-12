@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 
 # Date tags that exiftool might silently update when writing other fields.
@@ -64,7 +64,7 @@ def _read_date_fields(file_path: str) -> dict[str, str] | None:
     """Read existing date fields from the image so we can restore them after writing."""
     try:
         args = ["exiftool", "-json", "-n"] + [f"-{tag}" for tag in _DATE_TAGS] + [file_path]
-        proc = subprocess.run(args, capture_output=True, text=True, timeout=10)  # noqa: S603
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=10)  # noqa: S603  # nosec B603 B607
         if proc.returncode != 0:
             return None
         data = json.loads(proc.stdout)
@@ -168,7 +168,7 @@ def write_exif_description(
     args.append(file_path)
 
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             args,
             capture_output=True,
             text=True,
@@ -240,7 +240,7 @@ def write_xmp_sidecar(
         args += ["-o", str(sidecar_path), file_path]
 
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             args,
             capture_output=True,
             text=True,
@@ -277,7 +277,7 @@ def read_existing_metadata(file_path: str) -> dict[str, object]:
     target = str(sidecar) if sidecar.exists() else file_path
 
     try:
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             [
                 "exiftool",
                 "-json",

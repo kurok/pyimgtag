@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import shutil
-import subprocess
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 from platform import system as get_platform_name
@@ -50,7 +50,7 @@ def _request_photos_access_dialog() -> None:
     if get_platform_name() != "Darwin" or not shutil.which("osascript"):
         return
     try:
-        subprocess.run(  # noqa: S603
+        subprocess.run(  # noqa: S603  # nosec B603 B607
             ["osascript", "-e", _FDA_DIALOG_SCRIPT],  # noqa: S607
             check=False,
             timeout=120,

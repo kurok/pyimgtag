@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404
 from pathlib import Path
 
 import requests
@@ -83,7 +83,7 @@ def check_exiftool() -> tuple[bool, str]:
         Tuple of (success, message).
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607
             ["exiftool", "-ver"],
             capture_output=True,
             text=True,
