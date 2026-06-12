@@ -77,7 +77,8 @@ def _inject_pkg_resources_shim() -> None:
             return str(_ir.files(package_name) / resource_name)
         except Exception:
             mod = sys.modules.get(package_name) or __import__(package_name)
-            return str(_pl.Path(mod.__file__).parent / resource_name)
+            file = getattr(mod, "__file__", None) or ""
+            return str(_pl.Path(file).parent / resource_name)
 
     shim = types.ModuleType("pkg_resources")
     shim.resource_filename = _resource_filename  # type: ignore[attr-defined]
