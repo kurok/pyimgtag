@@ -50,13 +50,13 @@ class TestCheckFaceRecognition:
             assert "face_recognition_models" in msg
             assert "git+https://github.com/ageitgey/face_recognition_models" in msg
 
-    def test_pkg_resources_missing_gets_setuptools_hint(self):
-        """face_recognition_models is installed but ``pkg_resources`` is
-        missing — either because setuptools isn't installed at all, or
-        because setuptools 81+ dropped the bundled ``pkg_resources``
-        module. The pre-flight must distinguish this from "package not
-        installed" and tell the user to pin setuptools<81, not re-install
-        the models package."""
+    def test_models_import_error_raises_missing_face_models(self):
+        """Any ImportError from face_recognition_models raises MissingFaceModelsError.
+
+        The pkg_resources case is handled transparently by the shim in
+        _inject_pkg_resources_shim, so any residual ImportError from the
+        models package maps to the models install hint.
+        """
         import builtins
 
         from pyimgtag._face_dep_check import MissingFaceModelsError, _ensure_face_dep
@@ -65,10 +65,10 @@ class TestCheckFaceRecognition:
 
         def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
             if name == "face_recognition_models":
-                # Simulate the real-world failure: package import fires
-                # ``from pkg_resources import resource_filename`` and that
-                # raises ModuleNotFoundError with name='pkg_resources'.
-                raise ModuleNotFoundError("No module named 'pkg_resources'", name="pkg_resources")
+                raise ModuleNotFoundError(
+                    "No module named 'face_recognition_models'",
+                    name="face_recognition_models",
+                )
             return real_import(name, globals, locals, fromlist, level)
 
         with patch.object(builtins, "__import__", side_effect=fake_import):
@@ -76,16 +76,8 @@ class TestCheckFaceRecognition:
                 _ensure_face_dep()
 
         msg = str(excinfo.value)
-        # Must call out setuptools and pkg_resources by name.
-        assert "setuptools" in msg
-        assert "pkg_resources" in msg
-        # Must include the version-pinned install command — without the
-        # <81 cap the user can land on setuptools 81+ and still hit the
-        # same ModuleNotFoundError after "fixing" the install.
-        assert "setuptools<81" in msg
-        # Must NOT instruct re-installing face_recognition_models from git
-        # for this case — that would be misleading.
-        assert "git+https://github.com/ageitgey/face_recognition_models" not in msg
+        assert "face_recognition_models is not installed" in msg
+        assert "git+https://github.com/ageitgey/face_recognition_models" in msg
 
 
 class TestLoadAndResize:
