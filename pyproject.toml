@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=68.0", "setuptools-scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyimgtag"
-version = "0.28.0"
+dynamic = ["version"]
 description = "Tag macOS Photos library images using local Gemma model for searchable tags"
 readme = "README.md"
 license = {text = "MIT"}
@@ -158,6 +158,11 @@ module = ["pyimgtag.models", "pyimgtag.geocoder"]
 disallow_untyped_defs = true
 warn_return_any = true
 ignore_missing_imports = false
+
+[tool.setuptools_scm]
+version_file = "src/pyimgtag/_version.py"
+# Fallback when no git tags are available (Docker builds, shallow clones).
+fallback_version = "0.0.0+unknown"
 
 [tool.bandit]
 # no global skips — use per-call nosec annotations only
