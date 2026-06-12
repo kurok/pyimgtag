@@ -85,7 +85,7 @@ def inject_shim(cache_dir: Path | None = None) -> None:
 
         _frm.face_recognition_model_location()
         return  # real package present and working — nothing to do
-    except Exception:
+    except Exception:  # nosec B110 — intentional: fall through to auto-download
         pass
 
     paths = ensure_models_cached(cache_dir)
