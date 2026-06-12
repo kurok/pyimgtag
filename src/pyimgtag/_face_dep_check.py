@@ -45,32 +45,43 @@ _MODELS_INSTALL_HINT = (
     "to confirm the install path matches your pyimgtag environment."
 )
 
-# face_recognition_models does ``from pkg_resources import resource_filename``
-# at import time. There are two ways this can fail:
-#
-# 1. ``setuptools`` itself is missing — Python 3.12+ no longer bundles it.
-# 2. ``setuptools`` is installed at version 81.0.0 or newer, but
-#    setuptools 81 *removed* the bundled ``pkg_resources`` module while
-#    leaving the install metadata intact. So ``pip show setuptools``
-#    succeeds yet ``import pkg_resources`` still raises
-#    ``ModuleNotFoundError: No module named 'pkg_resources'``.
-#
-# Both surface the same exception, so this hint covers both — the
-# ``setuptools<81`` pin is the load-bearing detail.
-_PKG_RESOURCES_HINT = (
-    "face_recognition_models is installed but cannot be imported because\n"
-    "``pkg_resources`` is not available in this Python environment.\n"
-    "``pkg_resources`` used to ship with setuptools, but setuptools\n"
-    "**81.0.0 removed it** from the package while leaving the install\n"
-    "metadata intact — so ``pip show setuptools`` succeeds yet\n"
-    "``import pkg_resources`` raises ``ModuleNotFoundError``. Pin\n"
-    "setuptools below 81 to bring ``pkg_resources`` back (the same\n"
-    "command installs setuptools if it was missing entirely):\n"
-    "\n"
-    "    {python} -m pip install 'setuptools<81'\n"
-    "\n"
-    "Then re-run your pyimgtag faces command."
-)
+
+def _inject_pkg_resources_shim() -> None:
+    """Inject a minimal pkg_resources shim when the real one is absent.
+
+    ``face_recognition_models`` calls ``pkg_resources.resource_filename``
+    at import time. setuptools>=81 no longer bundles ``pkg_resources``, so
+    on those environments ``import pkg_resources`` raises
+    ``ModuleNotFoundError``. We provide a shim that implements only
+    ``resource_filename`` via ``importlib.resources.files`` (stdlib since
+    Python 3.9) to keep ``face_recognition_models`` importable.
+    """
+    try:
+        import pkg_resources  # noqa: F401
+
+        return
+    except ModuleNotFoundError:
+        pass
+
+    import importlib.resources as _ir
+    import pathlib as _pl
+    import types
+
+    def _resource_filename(package_or_requirement: object, resource_name: str) -> str:
+        package_name = (
+            package_or_requirement
+            if isinstance(package_or_requirement, str)
+            else str(package_or_requirement)
+        )
+        try:
+            return str(_ir.files(package_name) / resource_name)
+        except Exception:
+            mod = sys.modules.get(package_name) or __import__(package_name)
+            return str(_pl.Path(mod.__file__).parent / resource_name)
+
+    shim = types.ModuleType("pkg_resources")
+    shim.resource_filename = _resource_filename  # type: ignore[attr-defined]
+    sys.modules["pkg_resources"] = shim
 
 
 def _ensure_face_dep() -> ModuleType:
@@ -87,25 +98,19 @@ def _ensure_face_dep() -> ModuleType:
         MissingFaceModelsError: If ``face_recognition_models`` is not
             importable. The error message includes the active Python
             interpreter path so the user can install the missing package
-            into the correct environment, and discriminates between
-            "package not installed" and "pkg_resources / setuptools
-            missing" so the hint matches the real cause.
+            into the correct environment.
         ImportError: If ``face_recognition`` itself is not installed.
     """
+    _inject_pkg_resources_shim()
+
     try:
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore", message="pkg_resources is deprecated", category=UserWarning
             )
             import face_recognition_models  # noqa: F401
-    except ModuleNotFoundError as exc:
-        # Disambiguate "models package missing" vs. "models package
-        # installed but its `from pkg_resources import …` fails".
-        if exc.name == "pkg_resources":
-            hint = _PKG_RESOURCES_HINT
-        else:
-            hint = _MODELS_INSTALL_HINT
-        raise MissingFaceModelsError(hint.format(python=sys.executable)) from None
+    except ModuleNotFoundError:
+        raise MissingFaceModelsError(_MODELS_INSTALL_HINT.format(python=sys.executable)) from None
     except ImportError:
         raise MissingFaceModelsError(_MODELS_INSTALL_HINT.format(python=sys.executable)) from None
 
