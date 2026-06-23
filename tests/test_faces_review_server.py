@@ -37,8 +37,11 @@ class TestBuildApp:
 
     def test_returns_app_with_routes(self, db):
         app = build_app(db)
-        # FastAPI exposes .routes; our faces router must have contributed paths.
-        paths = {getattr(r, "path", None) for r in app.routes}
+        # Assert our faces router contributed paths via the OpenAPI schema
+        # rather than introspecting app.routes internals: FastAPI restructures
+        # route objects between releases (0.138 wraps them in a lazy
+        # _IncludedRouter whose .path is None), so schema paths are stable.
+        paths = set(app.openapi().get("paths", {}).keys())
         assert "/api/persons" in paths
         assert app.title == "pyimgtag Faces"
 
