@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "requests>=2.34",
-    "Pillow>=12.0",
+    "Pillow>=12.3",
     "imagehash>=4.3.2",
     "exifread>=3.5",
 ]
@@ -77,7 +77,7 @@ security = ["bandit>=1.9", "pip-audit>=2.10"]
 # Optional: install Playwright + Pillow for the local screenshot smoke
 # under tests/local/. After `pip install '.[screenshot]'` run
 # `playwright install chromium` once to fetch the browser binary.
-screenshot = ["playwright>=1.60", "Pillow>=12.0"]
+screenshot = ["playwright>=1.60", "Pillow>=12.3"]
 # End-to-end Playwright smoke (tests/e2e/) used by both the local
 # `scripts/test-smoke-local.sh` runner and the `pr-tests` GH workflow.
 # After `pip install '.[e2e]'` run `playwright install chromium` once.
