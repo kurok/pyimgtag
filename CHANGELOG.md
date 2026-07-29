@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.2] - 2026-07-29
+
+### Security
+- **Pillow bumped to 12.3.0** (#336): clears 13 Dependabot advisories against 12.2.0 — GHSA-9hw9-ch79-4vh6, GHSA-vjc4-5qp5-m44j, GHSA-jjj6-mw9f-p565, GHSA-6r8x-57c9-28j4, GHSA-xj96-63gp-2gmr, GHSA-phj9-mv4w-65pm, GHSA-45hq-cxwh-f6vc, GHSA-5x94-69rx-g8h2, GHSA-8v84-f9pq-wr9x, GHSA-62p4-gmf7-7g93 (high) and GHSA-fj7v-r99m-22gq, GHSA-4x4j-2g7c-83w6, GHSA-pg7v-jwj7-p798 (medium). All thirteen share 12.3.0 as their first patched version.
+- **Declared Pillow floor raised from `>=12.0` to `>=12.3`** (#336): applies to the core dependency and the `screenshot` extra, so a fresh resolve cannot select a vulnerable build. Note for downstream consumers: an environment pinned to Pillow 12.0–12.2 will no longer resolve against this release.
+- **pip bumped to 26.1.2** (#337): fixes CVE-2026-8643 / GHSA-wf93-45jw-7689 (medium), a path traversal in `console_scripts`/`gui_scripts` entry point names that allowed installing scripts outside the target directory. `pip` is a transitive dependency of the `security` extra (`pip-audit` → `pip-api` → `pip`), so this is a lockfile-only change.
+- **msgpack bumped to 1.2.1** (#322): fixes an out-of-bounds read on `Unpacker` reuse.
+
+### Tests
+- **`TestInjectShim` now isolates `face_recognition_models` for real** (#338): the previous helpers popped the module out of `sys.modules` and restored it afterwards, which does not make an installed package missing — the import machinery simply reloads it from disk. The tests only reached the download branch because the reloaded package happened to fail on an absent `pkg_resources`; once anything supplied a working one, `inject_shim()` returned early and `_download` was never called. That broke `test_propagates_download_error` under `pytest -n auto` with the face extras installed, and silently reduced two sibling tests to no-ops asserting against the real module rather than the shim. A `missing_frm` fixture now sets `sys.modules["face_recognition_models"] = None` so the import raises `ImportError` outright, with `monkeypatch` guaranteeing teardown. No production code changed.
+
 ## [0.28.0] - 2026-06-11
 
 ### Changed
