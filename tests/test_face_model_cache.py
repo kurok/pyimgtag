@@ -102,82 +102,105 @@ class TestEnsureModelsCached:
 # ---------------------------------------------------------------------------
 
 
-def _setup_missing_frm():
-    """Remove face_recognition_models from sys.modules, return original."""
-    return sys.modules.pop("face_recognition_models", None)
+@pytest.fixture
+def missing_frm(monkeypatch):
+    """Make ``face_recognition_models`` genuinely unimportable.
 
+    Popping the module out of ``sys.modules`` is not sufficient: the package
+    is a real installation in environments that pull in the face extras, so
+    the import machinery simply reloads it from disk. ``inject_shim`` then
+    finds a working package and returns early, and any test that expects the
+    download/shim path silently exercises the wrong branch.
 
-def _restore_frm(original):
-    if original is None:
-        sys.modules.pop("face_recognition_models", None)
-    else:
-        sys.modules["face_recognition_models"] = original
+    A ``None`` entry makes ``import face_recognition_models`` raise
+    ImportError outright, which is the condition ``inject_shim`` actually
+    branches on. ``monkeypatch`` restores the previous entry -- or removes
+    the key if there was none -- at teardown, so the state cannot leak into
+    tests running later in the same worker under ``pytest -n auto``.
+    """
+    monkeypatch.setitem(sys.modules, "face_recognition_models", None)
 
 
 class TestInjectShim:
-    def test_noop_when_real_package_works(self, tmp_path):
+    def test_noop_when_real_package_works(self, tmp_path, monkeypatch):
         """If face_recognition_models is importable and callable, skip injection."""
         real = MagicMock()
         real.face_recognition_model_location.return_value = "/some/path.dat"
-        original = sys.modules.get("face_recognition_models")
-        try:
-            sys.modules["face_recognition_models"] = real
-            inject_shim(tmp_path)
-            assert sys.modules["face_recognition_models"] is real
-        finally:
-            if original is None:
-                sys.modules.pop("face_recognition_models", None)
-            else:
-                sys.modules["face_recognition_models"] = original
+        monkeypatch.setitem(sys.modules, "face_recognition_models", real)
 
-    def test_injects_shim_when_package_missing(self, tmp_path):
+        inject_shim(tmp_path)
+
+        assert sys.modules["face_recognition_models"] is real
+
+    def test_injects_shim_when_package_missing(self, tmp_path, missing_frm):
         """When face_recognition_models is absent, inject shim after download."""
 
         def _fake_dl(name, size, dest):
             dest.write_bytes(b"model")
 
-        original = _setup_missing_frm()
-        try:
-            with patch("pyimgtag._face_model_cache._download", side_effect=_fake_dl):
-                inject_shim(tmp_path)
+        with patch("pyimgtag._face_model_cache._download", side_effect=_fake_dl):
+            inject_shim(tmp_path)
 
-            shim = sys.modules.get("face_recognition_models")
-            assert shim is not None
-            assert callable(shim.face_recognition_model_location)
-            assert callable(shim.pose_predictor_model_location)
-            assert callable(shim.pose_predictor_five_point_model_location)
-            assert callable(shim.cnn_face_detector_model_location)
-        finally:
-            _restore_frm(original)
+        shim = sys.modules.get("face_recognition_models")
+        assert shim is not None
+        assert callable(shim.face_recognition_model_location)
+        assert callable(shim.pose_predictor_model_location)
+        assert callable(shim.pose_predictor_five_point_model_location)
+        assert callable(shim.cnn_face_detector_model_location)
 
-    def test_shim_location_functions_return_strings(self, tmp_path):
+    def test_shim_location_functions_return_strings(self, tmp_path, missing_frm):
         """Each shim location function returns a string path."""
 
         def _fake_dl(name, size, dest):
             dest.write_bytes(b"model")
 
-        original = _setup_missing_frm()
-        try:
-            with patch("pyimgtag._face_model_cache._download", side_effect=_fake_dl):
+        with patch("pyimgtag._face_model_cache._download", side_effect=_fake_dl):
+            inject_shim(tmp_path)
+
+        shim = sys.modules["face_recognition_models"]
+        assert isinstance(shim.face_recognition_model_location(), str)
+        assert isinstance(shim.pose_predictor_model_location(), str)
+        assert isinstance(shim.pose_predictor_five_point_model_location(), str)
+        assert isinstance(shim.cnn_face_detector_model_location(), str)
+
+    def test_propagates_download_error(self, tmp_path, missing_frm):
+        """If download fails, inject_shim lets the exception propagate."""
+        with patch(
+            "pyimgtag._face_model_cache._download",
+            side_effect=OSError("timeout"),
+        ):
+            with pytest.raises(OSError, match="timeout"):
                 inject_shim(tmp_path)
 
-            shim = sys.modules["face_recognition_models"]
-            assert isinstance(shim.face_recognition_model_location(), str)
-            assert isinstance(shim.pose_predictor_model_location(), str)
-            assert isinstance(shim.pose_predictor_five_point_model_location(), str)
-            assert isinstance(shim.cnn_face_detector_model_location(), str)
-        finally:
-            _restore_frm(original)
+    def test_download_path_taken_even_when_pkg_resources_present(
+        self, tmp_path, missing_frm, monkeypatch
+    ):
+        """Regression: the shim path must not depend on pkg_resources being absent.
 
-    def test_propagates_download_error(self, tmp_path):
-        """If download fails, inject_shim lets the exception propagate."""
-        original = _setup_missing_frm()
-        try:
-            with patch(
-                "pyimgtag._face_model_cache._download",
-                side_effect=OSError("timeout"),
-            ):
-                with pytest.raises(OSError, match="timeout"):
-                    inject_shim(tmp_path)
-        finally:
-            _restore_frm(original)
+        Previously these tests only cleared ``sys.modules``, so an installed
+        ``face_recognition_models`` was re-imported from disk. That import
+        happened to fail for an unrelated reason -- ``pkg_resources`` was
+        missing -- which is what made ``inject_shim`` fall through to the
+        download branch. Once anything put a working ``pkg_resources`` into
+        ``sys.modules`` (``_inject_pkg_resources_shim`` does exactly that),
+        the location lookup succeeded, ``inject_shim`` returned early, and
+        the download assertions above became silent no-ops.
+        """
+        from pyimgtag._face_dep_check import _inject_pkg_resources_shim
+
+        # delitem records the current entry so monkeypatch restores it at
+        # teardown, including removing whatever the helper injects here.
+        monkeypatch.delitem(sys.modules, "pkg_resources", raising=False)
+        _inject_pkg_resources_shim()
+
+        called = []
+
+        def _fake_dl(name, size, dest):
+            called.append(name)
+            dest.write_bytes(b"model")
+
+        with patch("pyimgtag._face_model_cache._download", side_effect=_fake_dl):
+            inject_shim(tmp_path)
+
+        assert len(called) == 4
+        assert sys.modules["face_recognition_models"] is not None
