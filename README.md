@@ -62,7 +62,8 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`, `insights`
+- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`, `insights`, `prompt`
+- Controlled vocabulary, custom prompt templates, and output language: constrain tags to *your* taxonomy with synonyms and a hierarchy, deterministic across backends (`--vocabulary`, `--prompt-template`, `--tag-language`)
 - Library insights report: one command summarises the whole tagged library as a terminal table, a self-contained HTML page, or JSON (`insights` subcommand)
 - Photo quality scoring: a single 1–10 score plus a model-written reason (`judge` subcommand)
 - Dry-run mode, date/limit filters, JSON/CSV export
@@ -393,6 +394,9 @@ identically for `pyimgtag judge`.
 | `--date-from` / `--date-to` | Date range filter |
 | `--extensions jpg,png` | File types (default: jpg,jpeg,heic,png) |
 | `--skip-no-gps` | Skip images without GPS data |
+| `--vocabulary FILE` | Controlled tag vocabulary (`.json`, or `.yaml` with `[vocab]`): embedded in the prompt and used to canonicalize tags via synonyms; `strict: true` drops off-vocabulary tags. Env `PYIMGTAG_VOCABULARY`. |
+| `--prompt-template FILE` | Custom tagging prompt (start from `pyimgtag prompt show`); the JSON-schema block is validated or injected. Env `PYIMGTAG_PROMPT_TEMPLATE`. |
+| `--tag-language LANG` | Ask the model for tags/summaries in another language (with `--vocabulary`, only summaries are localized). Model-dependent. |
 | `--dry-run` | Verbose output, no DB writes |
 | `--verbose` / `-v` | Detailed per-file output |
 | `--output-json FILE` | Write results to JSON |
@@ -498,6 +502,61 @@ pyimgtag query --no-text
 pyimgtag query --tag beach --format json
 pyimgtag query --tag beach --format paths --limit 50
 ```
+
+#### Controlled vocabulary & custom prompts
+
+Tag quality is otherwise at the mercy of whatever word the model picks that
+day (`beach` / `seaside` / `shore`). A vocabulary file pins tags to *your*
+taxonomy, with two enforcement layers that make the result deterministic
+across all backends:
+
+1. **Prompt** — the flattened tag list is embedded as the allowed set.
+2. **Post-mapping** — model output is canonicalized: synonym table first,
+   then case/whitespace/plural normalization, then (strict mode only)
+   drop-with-count.
+
+```yaml
+# my-tags.yaml  (YAML needs `pip install 'pyimgtag[vocab]'`; JSON works without it)
+tags:
+  - beach:
+      synonyms: [seaside, shore, coast]
+  - hiking
+  - family
+  - food:
+      children: [restaurant, home-cooking, baking]
+strict: false        # false: unknown tags kept (and counted); true: dropped (and counted)
+```
+
+```bash
+pyimgtag run --input-dir ~/Pictures --vocabulary my-tags.yaml
+#   ... --- Vocabulary ---  Exact matches / Mapped / Kept off-vocab, with raw -> canonical counts
+
+# With --output-json the raw -> canonical counts are also written next to it:
+pyimgtag run --input-dir ~/Pictures --vocabulary my-tags.yaml --output-json out.json
+#   -> out.json (results) + out.vocabulary.json (vocabulary + mapping counts)
+
+# Hierarchy roll-up: match "food" and every child (restaurant, home-cooking, baking)
+pyimgtag query --tag food --include-children --vocabulary my-tags.yaml
+
+# Custom prompt template — copy the default, edit the domain wording, pass it back.
+# Placeholders: {context} {vocabulary} {language} {max_tags} {fields}; the JSON-schema
+# block ({fields}) is validated or injected so a custom domain can never break parsing.
+pyimgtag prompt show > birding-prompt.txt
+pyimgtag run --input-dir ~/Pictures/birds --prompt-template birding-prompt.txt
+
+# Output language (model-dependent). With --vocabulary only the summary is localized.
+pyimgtag run --input-dir ~/Pictures --tag-language ru
+```
+
+Vocabulary spec: a top-level `tags` list where each entry is a tag name or a
+one-key mapping `{name: {synonyms: [...], children: [...]}}` (children nest
+recursively), plus an optional `strict` boolean. Names, synonyms and model
+tags are all compared lower-cased with collapsed whitespace. Validation errors
+name the file and line (parse errors) or the entry path (structural errors).
+`PYIMGTAG_VOCABULARY` / `PYIMGTAG_PROMPT_TEMPLATE` provide defaults for
+daemon-style use; flags win over env. A worked birding example lives in
+[`examples/vocabularies/`](examples/vocabularies/) with
+[`examples/12_controlled_vocabulary.sh`](examples/12_controlled_vocabulary.sh).
 
 #### `pyimgtag insights` — library report
 
@@ -974,6 +1033,8 @@ used `http://localhost:8765/api/stats` should be updated to
 | Variable | Used by | Effect |
 |---|---|---|
 | `PYIMGTAG_BACKEND` | `pyimgtag run` / `pyimgtag judge` | Default vision backend (`ollama` / `anthropic` / `openai` / `gemini`). Overridden by `--backend`. |
+| `PYIMGTAG_VOCABULARY` | `pyimgtag run` / `pyimgtag query --include-children` | Default controlled-vocabulary file. Overridden by `--vocabulary`. |
+| `PYIMGTAG_PROMPT_TEMPLATE` | `pyimgtag run` | Default custom prompt template file. Overridden by `--prompt-template`. |
 | `OLLAMA_URL` | `pyimgtag run` / `judge` / `preflight` | Default Ollama base URL (default `http://localhost:11434`). Overridden by `--ollama-url`. |
 | `ANTHROPIC_API_KEY` | `--backend anthropic` | Auth for Claude. Overridden by `--api-key`. |
 | `OPENAI_API_KEY` | `--backend openai` | Auth for OpenAI. Overridden by `--api-key`. |

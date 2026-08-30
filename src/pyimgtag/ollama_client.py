@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+from typing import Any
 
 import requests
 from PIL import Image
@@ -114,6 +115,11 @@ def _build_prompt_with_context(context: dict) -> str:
 class OllamaClient:
     """Client for local Ollama vision model."""
 
+    #: Optional :class:`pyimgtag.prompt_template.PromptBuilder`. When set,
+    #: it renders the tagging prompt (vocabulary / template / language);
+    #: otherwise the built-in prompt is used.
+    prompt_builder: Any = None
+
     def __init__(
         self,
         model: str = "gemma4:e4b",
@@ -144,7 +150,10 @@ class OllamaClient:
         except (OSError, ValueError, RuntimeError) as e:
             return TagResult(error=f"Image load failed: {e}")
 
-        prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
+        if self.prompt_builder is not None:
+            prompt = self.prompt_builder.render(context)
+        else:
+            prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
         try:
             resp = self._post_chat(prompt, img_b64)
         except requests.RequestException as e:

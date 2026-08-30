@@ -9,7 +9,7 @@ macOS image tagger using local Ollama Gemma vision model with EXIF GPS reverse g
 - Nominatim reverse geocoding with disk cache
 - Optional: pillow-heif (HEIC), exiftool (reliable HEIC EXIF)
 - `pyproject.toml` with src layout
-- Optional extras: [heic], [photos], [photos-db], [face], [ocr], [review], [raw], [all], [dev], [lint], [security], [screenshot], [e2e]
+- Optional extras: [heic], [photos], [photos-db], [face], [ocr], [review], [raw], [vocab], [all], [dev], [lint], [security], [screenshot], [e2e]
 
 ## Commands
 
@@ -43,13 +43,17 @@ pre-commit run --all-files
 ```
 src/pyimgtag/
   main.py              CLI entry point, subcommand dispatch (run/status/reprocess/preflight/cleanup/
-                       cleanup-drift/review/faces/query/judge/tags/insights)
+                       cleanup-drift/review/faces/query/judge/tags/insights/prompt)
   models.py            Data classes (ExifData, TagResult, GeoResult, ImageResult)
   scanner.py           Directory and Photos library scanning
   exif_reader.py       EXIF GPS + date (exiftool primary, Pillow fallback)
   exif_writer.py       EXIF tag/description write-back
   ollama_client.py     Ollama vision API client (1 call/image, rich structured response)
   cloud_clients.py     Anthropic / OpenAI / Gemini vision-API adapters
+  vocabulary.py        Controlled tag vocabulary (JSON/YAML load + validate, synonym/plural
+                       canonicalization, hierarchy roll-up, mapping stats)
+  prompt_template.py   PromptBuilder: tagging prompt from template + vocabulary + language;
+                       validates placeholders and guarantees the JSON-schema block
   geocoder.py          Nominatim reverse geocoder with JSON disk cache
   filters.py           Date range filters
   output_writer.py     JSON/CSV/JSONL output
@@ -220,7 +224,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 
 ## Important Notes
 
-- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag preflight`, `pyimgtag cleanup`, `pyimgtag cleanup-drift`, `pyimgtag review`, `pyimgtag faces`, `pyimgtag query`, `pyimgtag judge`, `pyimgtag tags`, `pyimgtag insights`
+- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag preflight`, `pyimgtag cleanup`, `pyimgtag cleanup-drift`, `pyimgtag review`, `pyimgtag faces`, `pyimgtag query`, `pyimgtag judge`, `pyimgtag tags`, `pyimgtag insights`, `pyimgtag prompt`
 - `--write-back` flag enables writing tags/description back to Apple Photos via AppleScript
 - One Ollama call per image with structured JSON prompt (rich metadata)
 - EXIF GPS is source of truth for location — model does not guess location

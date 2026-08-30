@@ -24,7 +24,14 @@ from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test pa
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
 from pyimgtag.preflight import check_ollama
 from pyimgtag.progress_db import ProgressDB
+from pyimgtag.prompt_template import (
+    DEFAULT_TEMPLATE,
+    PromptBuilder,
+    PromptTemplateError,
+    load_prompt_template,
+)
 from pyimgtag.scanner import scan_directory, scan_photos_library
+from pyimgtag.vocabulary import Vocabulary, VocabularyError, load_vocabulary
 
 logger = logging.getLogger(__name__)
 
@@ -186,10 +193,30 @@ def _sort_newest_first(files: list[Path]) -> None:
     files.sort(key=_mtime, reverse=True)
 
 
+def _vocabulary_report_path(output_json: str) -> Path:
+    """``results.json`` -> ``results.vocabulary.json`` (sibling of the JSON output)."""
+    p = Path(output_json)
+    return p.with_name(f"{p.stem}.vocabulary.json")
+
+
 def _write_run_outputs(results: list[ImageResult], args: argparse.Namespace) -> None:
     if args.output_json:
         write_json(results, args.output_json)
         print(f"Wrote {len(results)} results to {args.output_json}", file=sys.stderr)
+        vocabulary = getattr(args, "_vocabulary", None)
+        if isinstance(vocabulary, Vocabulary):
+            import json as _json
+
+            report = _vocabulary_report_path(args.output_json)
+            report.write_text(
+                _json.dumps(
+                    {"vocabulary": vocabulary.to_dict(), "mapping": vocabulary.stats.to_dict()},
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            print(f"Wrote vocabulary mapping report to {report}", file=sys.stderr)
     if args.output_csv:
         write_csv(results, args.output_csv)
         print(f"Wrote {len(results)} results to {args.output_csv}", file=sys.stderr)
@@ -249,29 +276,67 @@ def _scan_files(args: argparse.Namespace, extensions: set[str]) -> tuple[str, li
         return 1
 
 
-def _create_image_client(args: argparse.Namespace, backend: str) -> ImageClient | None:
+def _resolve_prompt_options(
+    args: argparse.Namespace,
+) -> tuple[PromptBuilder | None, Vocabulary | None]:
+    """Build the prompt customisation from flags (flags win over env vars).
+
+    Returns ``(builder, vocabulary)``; ``builder`` is ``None`` when nothing was
+    customised so the clients keep using their built-in prompt.
+
+    Raises:
+        VocabularyError: The vocabulary file is unreadable or invalid.
+        PromptTemplateError: The template file is unreadable or invalid.
+    """
+    import os
+
+    def _opt(name: str) -> str | None:
+        # Only real strings count — tests build ``args`` from MagicMock, whose
+        # auto-attributes are truthy non-strings.
+        value = getattr(args, name, None)
+        return value if isinstance(value, str) and value else None
+
+    vocab_path = _opt("vocabulary") or os.environ.get("PYIMGTAG_VOCABULARY")
+    template_path = _opt("prompt_template") or os.environ.get("PYIMGTAG_PROMPT_TEMPLATE")
+    language = _opt("tag_language")
+
+    vocabulary = load_vocabulary(vocab_path) if vocab_path else None
+    template = load_prompt_template(template_path) if template_path else DEFAULT_TEMPLATE
+    if vocabulary is None and template == DEFAULT_TEMPLATE and not language:
+        return None, None
+    return PromptBuilder(template=template, vocabulary=vocabulary, language=language), vocabulary
+
+
+def _create_image_client(
+    args: argparse.Namespace, backend: str, prompt_builder: PromptBuilder | None = None
+) -> ImageClient | None:
     """Create and return the image tagging client, or None on error."""
+    client: Any
     if backend == "ollama":
         # Constructed directly so tests that patch
         # ``pyimgtag.commands.run.OllamaClient`` keep working.
-        return OllamaClient(
+        client = OllamaClient(
             model=args.model or "gemma4:e4b",
             base_url=args.ollama_url,
             max_dim=args.max_dim,
             timeout=args.timeout,
         )
-    try:
-        return make_image_client(
-            backend,
-            model=args.model,
-            max_dim=args.max_dim,
-            timeout=args.timeout,
-            api_key=getattr(args, "api_key", None),
-            api_base=getattr(args, "api_base", None),
-        )
-    except CloudClientError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return None
+    else:
+        try:
+            client = make_image_client(
+                backend,
+                model=args.model,
+                max_dim=args.max_dim,
+                timeout=args.timeout,
+                api_key=getattr(args, "api_key", None),
+                api_base=getattr(args, "api_base", None),
+            )
+        except CloudClientError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return None
+    if prompt_builder is not None:
+        client.prompt_builder = prompt_builder
+    return client
 
 
 def _run_tagging(
@@ -409,7 +474,23 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if args.dedup:
         phash_map, skipped_dedup = _compute_dedup_map(files, args.dedup_threshold)
 
-    ollama = _create_image_client(args, backend)
+    try:
+        prompt_builder, vocabulary = _resolve_prompt_options(args)
+    except (VocabularyError, PromptTemplateError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    # Stash the loaded vocabulary on the namespace so _process_one (which
+    # only receives ``args``) can canonicalize and the summary can report.
+    args._vocabulary = vocabulary
+    if vocabulary is not None:
+        mode = "strict" if vocabulary.strict else "non-strict"
+        print(
+            f"Vocabulary: {len(vocabulary.tags)} tags, {len(vocabulary.synonyms)} synonyms "
+            f"({mode}) from {vocabulary.source}",
+            file=sys.stderr,
+        )
+
+    ollama = _create_image_client(args, backend, prompt_builder)
     if ollama is None:
         return 1
     geocoder = ReverseGeocoder(cache_dir=args.cache_dir)
@@ -449,6 +530,8 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         )
         _write_run_outputs(results, args)
         _print_summary(stats)
+        if vocabulary is not None:
+            _print_vocabulary_summary(vocabulary)
         if session is not None:
             for k, v in stats.items():
                 session.set_counter(k, v)
@@ -563,7 +646,12 @@ def _process_one(
         result.error_message = tag_result.error
         stats["model_failures"] += 1
     else:
-        result.tags = tag_result.tags
+        vocabulary = getattr(args, "_vocabulary", None)
+        result.tags = (
+            vocabulary.canonicalize(tag_result.tags)
+            if isinstance(vocabulary, Vocabulary)
+            else tag_result.tags
+        )
         result.scene_summary = tag_result.summary
         result.scene_category = tag_result.scene_category
         result.emotional_tone = tag_result.emotional_tone
@@ -811,3 +899,21 @@ def _print_summary(stats: dict) -> None:
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
     print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
     print(f"  Resumed (DB):     {stats['resumed_from_db']}", file=sys.stderr)
+
+
+def _print_vocabulary_summary(vocabulary: Vocabulary, top: int = 15) -> None:
+    """Print raw→canonical mapping counts so users can grow their synonym lists."""
+    st = vocabulary.stats
+    print("\n--- Vocabulary ---", file=sys.stderr)
+    print(f"  Exact matches:    {st.exact}", file=sys.stderr)
+    print(f"  Mapped:           {st.total_mapped}", file=sys.stderr)
+    if vocabulary.strict:
+        print(f"  Dropped (strict): {st.total_dropped}", file=sys.stderr)
+    else:
+        print(f"  Kept off-vocab:   {st.total_kept}", file=sys.stderr)
+    for (raw, canon), n in st.mapped.most_common(top):
+        print(f"    {raw} -> {canon}  x{n}", file=sys.stderr)
+    off = st.dropped if vocabulary.strict else st.kept
+    for raw, n in off.most_common(top):
+        label = "dropped" if vocabulary.strict else "kept"
+        print(f"    {raw}  ({label} x{n})", file=sys.stderr)

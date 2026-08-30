@@ -104,6 +104,10 @@ class BaseCloudClient(ABC):
     #: Backend name used in error messages (e.g. ``"anthropic"``).
     _backend: str
 
+    #: Optional :class:`pyimgtag.prompt_template.PromptBuilder`; see
+    #: :attr:`pyimgtag.ollama_client.OllamaClient.prompt_builder`.
+    prompt_builder: Any = None
+
     def __init__(
         self,
         model: str,
@@ -163,7 +167,10 @@ class BaseCloudClient(ABC):
             img_b64 = prepare_image_b64(file_path, self.max_dim)
         except (OSError, ValueError, RuntimeError) as e:
             return TagResult(error=f"Image load failed: {e}")
-        prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
+        if self.prompt_builder is not None:
+            prompt = self.prompt_builder.render(context)
+        else:
+            prompt = _build_prompt_with_context(context) if context else _PROMPT_BASE
         text = self._call(prompt, img_b64, on_error_msg=f"{self._backend} request failed")
         if isinstance(text, TagResult):
             return text
@@ -405,6 +412,7 @@ def make_image_client(
     timeout: int = 120,
     api_key: str | None = None,
     api_base: str | None = None,
+    prompt_builder: Any = None,
 ) -> ImageClient:
     """Build a vision-model client for *backend*.
 
@@ -418,6 +426,9 @@ def make_image_client(
         api_base: Override the base URL. For ``ollama`` this is the full
             Ollama URL (default ``http://localhost:11434``); for cloud
             backends it points at the API endpoint root.
+        prompt_builder: Optional :class:`pyimgtag.prompt_template.PromptBuilder`
+            that renders the tagging prompt (controlled vocabulary, custom
+            template, output language). ``None`` keeps the built-in prompt.
 
     Returns:
         An :class:`ImageClient` exposing ``tag_image``, ``judge_image``, and
@@ -428,42 +439,47 @@ def make_image_client(
         CloudClientError: If a cloud backend is selected without an API key.
     """
     backend_norm = backend.lower().strip()
+    client: Any
     if backend_norm == "ollama":
         from pyimgtag.ollama_client import OllamaClient
 
-        return OllamaClient(
+        client = OllamaClient(
             model=model or "gemma4:e4b",
             base_url=api_base or "http://localhost:11434",
             max_dim=max_dim,
             timeout=timeout,
         )
-    if backend_norm == "anthropic":
-        return AnthropicClient(
+    elif backend_norm == "anthropic":
+        client = AnthropicClient(
             model=model or DEFAULT_ANTHROPIC_MODEL,
             max_dim=max_dim,
             timeout=timeout,
             api_key=api_key,
             base_url=api_base or DEFAULT_ANTHROPIC_BASE_URL,
         )
-    if backend_norm == "openai":
-        return OpenAIClient(
+    elif backend_norm == "openai":
+        client = OpenAIClient(
             model=model or DEFAULT_OPENAI_MODEL,
             max_dim=max_dim,
             timeout=timeout,
             api_key=api_key,
             base_url=api_base or DEFAULT_OPENAI_BASE_URL,
         )
-    if backend_norm == "gemini":
-        return GeminiClient(
+    elif backend_norm == "gemini":
+        client = GeminiClient(
             model=model or DEFAULT_GEMINI_MODEL,
             max_dim=max_dim,
             timeout=timeout,
             api_key=api_key,
             base_url=api_base or DEFAULT_GEMINI_BASE_URL,
         )
-    raise ValueError(
-        f"Unknown backend {backend!r}; expected one of ollama, anthropic, openai, gemini"
-    )
+    else:
+        raise ValueError(
+            f"Unknown backend {backend!r}; expected one of ollama, anthropic, openai, gemini"
+        )
+    if prompt_builder is not None:
+        client.prompt_builder = prompt_builder
+    return client
 
 
 SUPPORTED_BACKENDS: tuple[str, ...] = ("ollama", "anthropic", "openai", "gemini")

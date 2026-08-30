@@ -3,14 +3,38 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from pyimgtag.progress_db import ProgressDB
 
 
+def _rollup_tags(args: argparse.Namespace) -> list[str] | None:
+    """Expand ``--tag`` into itself + vocabulary descendants for ``--include-children``.
+
+    Returns ``None`` when roll-up is not requested. Raises
+    :class:`pyimgtag.vocabulary.VocabularyError` on a bad vocabulary file.
+    """
+    if not getattr(args, "include_children", False):
+        return None
+    from pyimgtag.vocabulary import load_vocabulary
+
+    path = getattr(args, "vocabulary", None) or os.environ.get("PYIMGTAG_VOCABULARY") or ""
+    vocabulary = load_vocabulary(str(path))  # path presence is enforced by the parser
+    return vocabulary.descendants(args.tag)
+
+
 def cmd_query(args: argparse.Namespace) -> int:
     """Execute the query subcommand."""
     import json as _json
+
+    from pyimgtag.vocabulary import VocabularyError
+
+    try:
+        tags_any = _rollup_tags(args)
+    except VocabularyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     with ProgressDB(db_path=args.db) as db:
         has_text: bool | None = None
@@ -20,7 +44,8 @@ def cmd_query(args: argparse.Namespace) -> int:
             has_text = False
 
         results = db.query_images(
-            tag=args.tag,
+            # Roll-up switches from substring to exact-set matching.
+            tag=None if tags_any is not None else args.tag,
             has_text=has_text,
             cleanup_class=args.cleanup,
             scene_category=args.scene_category,
@@ -28,7 +53,11 @@ def cmd_query(args: argparse.Namespace) -> int:
             country=args.country,
             status=args.status,
             limit=args.limit,
+            tags_any=tags_any,
         )
+
+    if tags_any is not None:
+        print(f"Matching tags: {', '.join(tags_any)}", file=sys.stderr)
 
     if not results:
         print("No images matched the given filters.", file=sys.stderr)
