@@ -527,7 +527,37 @@ def _add_run_flags(run_p: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Process newest files first (by modification time)",
     )
+    _add_concurrency_flags(run_p)
     add_web_flags(run_p)
+
+
+def _add_concurrency_flags(p: argparse.ArgumentParser) -> None:
+    """Register ``-j/--jobs`` and ``--max-rps`` (shared by ``run`` and ``judge``)."""
+    p.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Concurrent model requests (default 1 = serial, unchanged behaviour). "
+            "Workers only compute; SQLite writes, output rows, and write-back stay "
+            "single-threaded and in scan order. Try -j 4..8 for cloud backends and "
+            "-j 2..4 for Ollama (raise OLLAMA_NUM_PARALLEL to match). "
+            "0 = auto (2 for ollama, min(8, CPUs) for cloud backends)."
+        ),
+    )
+    p.add_argument(
+        "--max-rps",
+        type=float,
+        default=None,
+        metavar="RPS",
+        help=(
+            "Cap model requests per second across all workers (default: unlimited). "
+            "Safety valve for cloud rate limits; 429/503 responses are retried with "
+            "Retry-After or exponential backoff regardless."
+        ),
+    )
 
 
 def _add_status_reprocess_preflight_subcommands(subparsers: Any) -> None:
@@ -968,6 +998,7 @@ def _add_judge_subcommand(subparsers: Any) -> None:
             "one left off instead of rescoring from scratch."
         ),
     )
+    _add_concurrency_flags(judge_p)
     add_web_flags(judge_p)
 
 

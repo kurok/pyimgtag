@@ -415,3 +415,115 @@ class TestMakeImageClient:
     def test_unknown_backend_raises(self):
         with pytest.raises(ValueError, match="Unknown backend"):
             make_image_client("bogus")
+
+
+class TestRetryAfterParsing:
+    def test_delta_seconds_and_http_date(self):
+        from datetime import datetime, timedelta, timezone
+        from email.utils import format_datetime
+
+        from pyimgtag.cloud_clients import _parse_retry_after
+
+        assert _parse_retry_after("3") == 3.0
+        assert _parse_retry_after(" 2.5 ") == 2.5
+        assert _parse_retry_after("-4") == 0.0
+        assert _parse_retry_after(None) is None
+        assert _parse_retry_after("") is None
+        assert _parse_retry_after("soon") is None
+
+        soon = datetime.now(timezone.utc) + timedelta(seconds=30)
+        parsed = _parse_retry_after(format_datetime(soon))
+        assert parsed is not None and 25 <= parsed <= 31
+
+    def test_backoff_is_exponential_capped_and_jittered(self):
+        from pyimgtag.cloud_clients import _BACKOFF_CAP, _backoff_delay
+
+        for attempt in range(1, 8):
+            base = min(_BACKOFF_CAP, 2 ** (attempt - 1))
+            delay = _backoff_delay(attempt)
+            assert base <= delay <= base * 1.25
+        # A server-supplied delay wins outright (still capped).
+        assert _backoff_delay(1, 7.0) == 7.0
+        assert _backoff_delay(1, 900.0) == _BACKOFF_CAP
+
+
+def _limited(status: int = 429, retry_after: str | None = None) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status
+    resp.headers = {"Retry-After": retry_after} if retry_after else {}
+    return resp
+
+
+def _ok_tag_response() -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.headers = {}
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"content": [{"type": "text", "text": json.dumps(_tag_payload())}]}
+    return resp
+
+
+class TestRateLimitRetries:
+    def test_429_with_retry_after_backs_off_then_succeeds(self, jpg):
+        client = AnthropicClient(api_key="x")
+        delays: list[float] = []
+        with (
+            patch.object(
+                client._session, "post", side_effect=[_limited(429, "1"), _ok_tag_response()]
+            ) as post,
+            patch("pyimgtag.cloud_clients.time.sleep", side_effect=delays.append),
+        ):
+            result = client.tag_image(jpg)
+        assert post.call_count == 2
+        assert delays == [1.0]  # Retry-After honoured verbatim
+        assert "sunset" in result.tags
+
+    def test_503_is_retried_too(self, jpg):
+        client = AnthropicClient(api_key="x")
+        with (
+            patch.object(
+                client._session, "post", side_effect=[_limited(503), _ok_tag_response()]
+            ) as post,
+            patch("pyimgtag.cloud_clients.time.sleep"),
+        ):
+            result = client.tag_image(jpg)
+        assert post.call_count == 2
+        assert result.error is None
+
+    def test_sustained_429_fails_the_image_in_bounded_time(self, jpg):
+        from pyimgtag.cloud_clients import _MAX_ATTEMPTS
+
+        client = AnthropicClient(api_key="x")
+        delays: list[float] = []
+        with (
+            patch.object(client._session, "post", return_value=_limited(429)) as post,
+            patch("pyimgtag.cloud_clients.time.sleep", side_effect=delays.append),
+        ):
+            result = client.tag_image(jpg)
+        assert post.call_count == _MAX_ATTEMPTS
+        assert len(delays) == _MAX_ATTEMPTS - 1
+        assert delays == sorted(delays)  # exponential, never shrinking
+        for attempt, delay in enumerate(delays, start=1):
+            base = 2 ** (attempt - 1)
+            assert base <= delay <= base * 1.25
+        assert "rate limited (HTTP 429)" in (result.error or "")
+
+    def test_sustained_429_returns_none_on_the_judge_path(self, jpg):
+        client = AnthropicClient(api_key="x")
+        with (
+            patch.object(client._session, "post", return_value=_limited(429)),
+            patch("pyimgtag.cloud_clients.time.sleep"),
+        ):
+            assert client.judge_image(jpg) is None
+
+    def test_max_rps_bucket_is_acquired_per_request(self, jpg):
+        from pyimgtag import concurrent_pipeline
+
+        client = AnthropicClient(api_key="x")
+        concurrent_pipeline.set_global_rate_limit(1000.0)
+        limiter = concurrent_pipeline.get_global_rate_limit()
+        assert limiter is not None
+        with patch.object(limiter, "acquire", wraps=limiter.acquire) as acquire:
+            with patch.object(client._session, "post", return_value=_ok_tag_response()):
+                client.tag_image(jpg)
+        assert acquire.call_count == 1

@@ -2,10 +2,19 @@
 
 Coordinates are rounded to 2 decimal places (~1.1 km at the equator) for
 cache keys so that nearby images share a single lookup.
+
+Thread safety: Nominatim's usage policy caps clients at 1 request/second, and
+that cap is per *client*, not per object. All network lookups therefore go
+through a single module-level lock and a shared monotonic-clock schedule, so
+the limit holds process-wide no matter how many :class:`ReverseGeocoder`
+instances or ``-j`` worker threads exist. Cache hits never take the lock, and
+a double-checked read inside it means threads racing on the same coordinates
+issue one request, not N.
 """
 
 from __future__ import annotations
 
+import threading
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -24,6 +33,12 @@ _CACHE_PRECISION = 2
 _MIN_INTERVAL = 1.1  # seconds — Nominatim usage policy
 _DEFAULT_CACHE_MAX_SIZE = 10_000  # entries
 _DEFAULT_CACHE_TTL_DAYS = 365  # days before a cached result is re-fetched
+
+# Process-wide gate for Nominatim: held for the whole rate-limit + request +
+# cache-write sequence so the 1 req/s policy (and the not-thread-safe
+# DiskCache) survive any number of geocoder objects and worker threads.
+_REQUEST_LOCK = threading.Lock()
+_LAST_REQUEST_TS: float = 0.0
 
 
 class ReverseGeocoder:
@@ -44,10 +59,13 @@ class ReverseGeocoder:
         )
         self._session = requests.Session()
         self._session.headers["User-Agent"] = _USER_AGENT
-        self._last_ts: float = 0
 
     def resolve(self, lat: float | None, lon: float | None) -> GeoResult:
-        """Resolve coordinates to a place name.  Returns empty on *None*."""
+        """Resolve coordinates to a place name.  Returns empty on *None*.
+
+        Safe to call from several threads: cache hits return without blocking,
+        while misses queue behind the process-wide 1 req/s Nominatim gate.
+        """
         if lat is None or lon is None:
             return GeoResult()
 
@@ -55,25 +73,37 @@ class ReverseGeocoder:
             return GeoResult(error=f"GPS coordinates out of range: lat={lat}, lon={lon}")
 
         key = f"{round(lat, _CACHE_PRECISION)},{round(lon, _CACHE_PRECISION)}"
-        cached = self._cache.get(key)
-        if cached is not None:
-            try:
-                return GeoResult(**cached)
-            except TypeError:
-                pass  # stale cache entry with unexpected keys — re-fetch
+        hit = self._cached(key)
+        if hit is not None:
+            return hit
 
-        result = self._fetch(lat, lon)
-        if result.error is None:
-            self._cache.set(
-                key,
-                {
-                    "nearest_place": result.nearest_place,
-                    "nearest_city": result.nearest_city,
-                    "nearest_region": result.nearest_region,
-                    "nearest_country": result.nearest_country,
-                },
-            )
+        with _REQUEST_LOCK:
+            # Another thread may have fetched these coordinates while we waited
+            # for the gate — re-read before spending a request on them.
+            hit = self._cached(key)
+            if hit is not None:
+                return hit
+            result = self._fetch(lat, lon)
+            if result.error is None:
+                self._cache.set(
+                    key,
+                    {
+                        "nearest_place": result.nearest_place,
+                        "nearest_city": result.nearest_city,
+                        "nearest_region": result.nearest_region,
+                        "nearest_country": result.nearest_country,
+                    },
+                )
         return result
+
+    def _cached(self, key: str) -> GeoResult | None:
+        cached = self._cache.get(key)
+        if cached is None:
+            return None
+        try:
+            return GeoResult(**cached)
+        except TypeError:
+            return None  # stale cache entry with unexpected keys — re-fetch
 
     def _fetch(self, lat: float, lon: float) -> GeoResult:
         self._rate_limit()
@@ -118,10 +148,16 @@ class ReverseGeocoder:
         )
 
     def _rate_limit(self) -> None:
-        elapsed = time.monotonic() - self._last_ts
+        """Sleep until at least ``_MIN_INTERVAL`` has passed since the last request.
+
+        The schedule is a module global, so the spacing is process-wide. Call
+        only while holding ``_REQUEST_LOCK``.
+        """
+        global _LAST_REQUEST_TS
+        elapsed = time.monotonic() - _LAST_REQUEST_TS
         if elapsed < _MIN_INTERVAL:
             time.sleep(_MIN_INTERVAL - elapsed)
-        self._last_ts = time.monotonic()
+        _LAST_REQUEST_TS = time.monotonic()
 
     def close(self) -> None:
         self._session.close()

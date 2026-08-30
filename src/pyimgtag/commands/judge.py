@@ -5,12 +5,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pyimgtag import run_registry
 from pyimgtag.applescript_writer import write_to_photos
 from pyimgtag.cloud_clients import CloudClientError, ImageClient, make_image_client
+from pyimgtag.concurrent_pipeline import (
+    resolve_jobs,
+    resolve_max_rps,
+    run_pipeline,
+    set_global_rate_limit,
+)
 from pyimgtag.judge_scorer import compute_scores
 from pyimgtag.models import JudgeResult, JudgeScores
 from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
@@ -63,6 +70,56 @@ def _result_to_dict(result: JudgeResult) -> dict[str, Any]:
         "verdict": scores.verdict,
         "reason": scores.reason,
     }
+
+
+_JudgeItem = tuple[int, Path]
+
+
+def _judge_concurrent(
+    files: list[Path],
+    client: ImageClient,
+    jobs: int,
+    session: Any,
+    skip_judged: bool,
+    db: Any,
+    finalize: Callable[[int, Path, JudgeScores | None], None],
+) -> bool:
+    """Score ``files`` with ``jobs`` in-flight model calls. True if interrupted.
+
+    Workers only call ``judge_image``; the already-judged DB lookup, the score
+    persistence, the write-back, and the printing all stay on this thread, and
+    the pipeline hands results back in scan order so ``[i/N]`` lines and DB
+    writes match a serial run.
+    """
+
+    def _items() -> Iterator[_JudgeItem]:
+        for idx, file_path in enumerate(files, start=1):
+            if skip_judged and db.get_judge_result(str(file_path)) is not None:
+                if session is not None:
+                    session.increment("skipped_already_judged")
+                continue
+            yield idx, file_path
+
+    def _prepare(item: _JudgeItem) -> tuple[int, Path, JudgeScores | None]:
+        return item[0], item[1], client.judge_image(str(item[1]))
+
+    def _finalize(_seq: int, _item: _JudgeItem, done: tuple[int, Path, JudgeScores | None]) -> None:
+        finalize(*done)
+
+    def _on_interrupt() -> None:
+        if session is not None:
+            session.mark_interrupted()
+        print("\nInterrupted.", file=sys.stderr)
+
+    return run_pipeline(
+        _items(),
+        _prepare,
+        _finalize,
+        jobs=jobs,
+        session=session,
+        on_interrupt=_on_interrupt,
+        describe=lambda item: str(item[1]),
+    )
 
 
 def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
@@ -150,9 +207,69 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
     total = len(files)
 
     session, dashboard = start_dashboard_for(args, command="judge")
+    jobs = resolve_jobs(getattr(args, "jobs", 1), backend)
+    set_global_rate_limit(resolve_max_rps(getattr(args, "max_rps", None)))
+    if jobs > 1:
+        print(f"Concurrency: {jobs} in-flight model requests", file=sys.stderr)
     if session is not None:
         session.set_counter("scanned", total)
+        session.set_counter("jobs", jobs)
         session.mark_running()
+
+    def _finalize(idx: int, file_path: Path, scores: JudgeScores | None) -> None:
+        """Persist, filter, write back, and print one score — main thread only."""
+        if scores is None:
+            print(
+                f"  [{idx}/{total}] {file_path.name}: judge failed, skipping",
+                file=sys.stderr,
+            )
+            if session is not None:
+                session.increment("judge_failed")
+                session.record_item(str(file_path), "error", error="judge failed")
+            return
+
+        weighted, core, visible = compute_scores(scores)
+        result = JudgeResult(
+            file_path=str(file_path),
+            file_name=file_path.name,
+            scores=scores,
+            weighted_score=weighted,
+            core_score=core,
+            visible_score=visible,
+        )
+
+        # Persist every computed score — even below-threshold ones —
+        # so --skip-judged reruns don't re-send filtered images to
+        # the model. --min-score only filters display and write-back.
+        if _db is not None:
+            _db.save_judge_result(result)
+
+        if args.min_score is not None and weighted < args.min_score:
+            if session is not None:
+                session.increment("skipped_min_score")
+            return
+
+        results.append(result)
+
+        if write_back and getattr(args, "photos_library", None):
+            score_tag = f"score:{weighted}"
+            err = write_to_photos(
+                result.file_name,
+                [score_tag],
+                None,
+                mode=write_back_mode,
+            )
+            if err:
+                print(f"  Write-back failed: {err}", file=sys.stderr)
+
+        if args.verbose:
+            _print_verbose(result, idx, total)
+        else:
+            _print_brief(result, idx, total)
+
+        if session is not None:
+            session.record_item(str(file_path), "ok")
+            session.increment("processed")
 
     interrupted = False
     try:
@@ -160,79 +277,32 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
         # so a test that builds args with MagicMock doesn't trigger this path
         # by accident.
         skip_judged = getattr(args, "skip_judged", False) is True and _db is not None
-        try:
-            for idx, file_path in enumerate(files, start=1):
+
+        if jobs > 1:
+            interrupted = _judge_concurrent(
+                files, ollama, jobs, session, skip_judged, _db, _finalize
+            )
+        else:
+            try:
+                for idx, file_path in enumerate(files, start=1):
+                    if session is not None:
+                        session.wait_if_paused()
+                        session.set_current(str(file_path))
+
+                    if skip_judged and _db.get_judge_result(str(file_path)) is not None:
+                        if session is not None:
+                            session.increment("skipped_already_judged")
+                            session.set_current(None)
+                        continue
+
+                    _finalize(idx, file_path, ollama.judge_image(str(file_path)))
+                    if session is not None:
+                        session.set_current(None)
+            except KeyboardInterrupt:
+                interrupted = True
                 if session is not None:
-                    session.wait_if_paused()
-                    session.set_current(str(file_path))
-
-                if skip_judged and _db.get_judge_result(str(file_path)) is not None:
-                    if session is not None:
-                        session.increment("skipped_already_judged")
-                        session.set_current(None)
-                    continue
-
-                scores: JudgeScores | None = ollama.judge_image(str(file_path))
-                if scores is None:
-                    print(
-                        f"  [{idx}/{total}] {file_path.name}: judge failed, skipping",
-                        file=sys.stderr,
-                    )
-                    if session is not None:
-                        session.increment("judge_failed")
-                        session.record_item(str(file_path), "error", error="judge failed")
-                        session.set_current(None)
-                    continue
-
-                weighted, core, visible = compute_scores(scores)
-                result = JudgeResult(
-                    file_path=str(file_path),
-                    file_name=file_path.name,
-                    scores=scores,
-                    weighted_score=weighted,
-                    core_score=core,
-                    visible_score=visible,
-                )
-
-                # Persist every computed score — even below-threshold ones —
-                # so --skip-judged reruns don't re-send filtered images to
-                # the model. --min-score only filters display and write-back.
-                if _db is not None:
-                    _db.save_judge_result(result)
-
-                if args.min_score is not None and weighted < args.min_score:
-                    if session is not None:
-                        session.increment("skipped_min_score")
-                        session.set_current(None)
-                    continue
-
-                results.append(result)
-
-                if write_back and getattr(args, "photos_library", None):
-                    score_tag = f"score:{weighted}"
-                    err = write_to_photos(
-                        result.file_name,
-                        [score_tag],
-                        None,
-                        mode=write_back_mode,
-                    )
-                    if err:
-                        print(f"  Write-back failed: {err}", file=sys.stderr)
-
-                if args.verbose:
-                    _print_verbose(result, idx, total)
-                else:
-                    _print_brief(result, idx, total)
-
-                if session is not None:
-                    session.record_item(str(file_path), "ok")
-                    session.increment("processed")
-                    session.set_current(None)
-        except KeyboardInterrupt:
-            interrupted = True
-            if session is not None:
-                session.mark_interrupted()
-            print("\nInterrupted.", file=sys.stderr)
+                    session.mark_interrupted()
+                print("\nInterrupted.", file=sys.stderr)
 
         if args.sort_by == "score":
             results.sort(key=lambda r: r.weighted_score, reverse=True)

@@ -28,12 +28,18 @@ URL, request payload shape, and response-text extraction).
 
 from __future__ import annotations
 
+import logging
 import os
+import random
+import time
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
 import requests
 
+from pyimgtag.concurrent_pipeline import acquire_global_rate_limit
 from pyimgtag.models import JudgeScores, TagResult
 from pyimgtag.ollama_client import (
     _JUDGE_PROMPT,
@@ -77,6 +83,61 @@ _ANTHROPIC_API_VERSION = "2023-06-01"
 
 # Token budget for the JSON response; matches Ollama's _MODEL_MAX_TOKENS.
 _CLOUD_MAX_TOKENS = 1024
+
+logger = logging.getLogger(__name__)
+
+# --- throttling -----------------------------------------------------------
+# Statuses worth retrying: 429 is the providers' rate-limit signal, 503 their
+# "overloaded, come back" signal. Anything else is a real failure.
+_RETRY_STATUSES = frozenset({429, 503})
+_MAX_ATTEMPTS = 5
+_BACKOFF_BASE = 1.0  # seconds
+_BACKOFF_CAP = 30.0  # seconds
+_JITTER_FRACTION = 0.25
+# SystemRandom keeps bandit's B311 quiet; the jitter only needs to be
+# uncorrelated across workers, not unpredictable.
+_jitter = random.SystemRandom()
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse a ``Retry-After`` header (delta-seconds or HTTP-date) to seconds."""
+    if not value:
+        return None
+    text = value.strip()
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
+def _retry_after_seconds(resp: Any) -> float | None:
+    """Extract the ``Retry-After`` delay from *resp*, or ``None`` if absent."""
+    headers: Any = getattr(resp, "headers", None)
+    value = headers.get("Retry-After") if headers is not None and hasattr(headers, "get") else None
+    return _parse_retry_after(value) if isinstance(value, str) else None
+
+
+def _backoff_delay(attempt: int, retry_after: float | None = None) -> float:
+    """Seconds to wait before retry *attempt* (1-based).
+
+    A server-supplied ``Retry-After`` wins and is used as-is (capped); otherwise
+    the delay doubles per attempt from :data:`_BACKOFF_BASE` up to
+    :data:`_BACKOFF_CAP`, plus up to 25% jitter so parallel workers do not
+    re-collide in lockstep.
+    """
+    if retry_after is not None:
+        return min(retry_after, _BACKOFF_CAP)
+    base = min(_BACKOFF_CAP, _BACKOFF_BASE * (2 ** (attempt - 1)))
+    return base + _jitter.uniform(0.0, base * _JITTER_FRACTION)
 
 
 class CloudClientError(RuntimeError):
@@ -209,23 +270,57 @@ class BaseCloudClient(ABC):
           failure when ``on_error_msg`` is provided (the ``tag_image`` path).
         - ``None``: on the same failures when ``on_error_msg`` is ``None`` (the
           ``judge_image`` path, which swallows failures into a ``None`` score).
+
+        Throttling: every attempt first acquires from the process-wide
+        ``--max-rps`` bucket (a no-op when unset). HTTP 429/503 are retried up
+        to :data:`_MAX_ATTEMPTS` times honouring ``Retry-After``, then fall
+        back to capped exponential backoff with jitter. A sustained rate limit
+        therefore fails the image with a clear message in bounded time instead
+        of hanging.
         """
         payload = self._build_payload(prompt, img_b64)
-        try:
-            resp = self._session.post(
-                self._request_url(),
-                json=payload,
-                timeout=self.timeout,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-        except requests.RequestException as e:
-            return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
-        try:
-            return self._extract_text(data)
-        except (KeyError, IndexError, TypeError):
-            detail = f"{self._backend} response shape unexpected: {str(data)[:160]!r}"
-            return TagResult(error=detail) if on_error_msg else None
+        url = self._request_url()
+        status: Any = None
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            acquire_global_rate_limit()
+            try:
+                resp = self._session.post(url, json=payload, timeout=self.timeout)
+            except requests.RequestException as e:
+                return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
+
+            status = getattr(resp, "status_code", None)
+            if status in _RETRY_STATUSES and attempt < _MAX_ATTEMPTS:
+                delay = _backoff_delay(attempt, _retry_after_seconds(resp))
+                logger.debug(
+                    "%s HTTP %s on attempt %d/%d; retrying in %.2fs",
+                    self._backend,
+                    status,
+                    attempt,
+                    _MAX_ATTEMPTS,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
+            if status in _RETRY_STATUSES:
+                detail = (
+                    f"{self._backend} rate limited (HTTP {status}) after {_MAX_ATTEMPTS} attempts"
+                )
+                return TagResult(error=detail) if on_error_msg else None
+
+            try:
+                resp.raise_for_status()
+                data = resp.json()
+            except requests.RequestException as e:
+                return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
+            try:
+                return self._extract_text(data)
+            except (KeyError, IndexError, TypeError):
+                detail = f"{self._backend} response shape unexpected: {str(data)[:160]!r}"
+                return TagResult(error=detail) if on_error_msg else None
+
+        # Unreachable: the loop's final attempt always returns.
+        detail = f"{self._backend} request failed (HTTP {status})"
+        return TagResult(error=detail) if on_error_msg else None
 
     def close(self) -> None:
         """Release the underlying HTTP session."""

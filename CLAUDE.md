@@ -54,7 +54,12 @@ src/pyimgtag/
                        canonicalization, hierarchy roll-up, mapping stats)
   prompt_template.py   PromptBuilder: tagging prompt from template + vocabulary + language;
                        validates placeholders and guarantees the JSON-schema block
-  geocoder.py          Nominatim reverse geocoder with JSON disk cache
+  concurrent_pipeline.py  Bounded order-preserving thread pool behind `-j/--jobs` for run and
+                       judge (workers compute, main thread is the single writer, reorder
+                       buffer keyed by sequence number), plus the process-wide `--max-rps`
+                       token bucket and `-j 0` auto resolution
+  geocoder.py          Nominatim reverse geocoder with JSON disk cache; network lookups are
+                       serialized process-wide at 1 req/s so any `-j` stays policy-compliant
   filters.py           Date range filters
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
