@@ -119,7 +119,10 @@ def test_tile_url_defaults_to_openstreetmap(monkeypatch):
     monkeypatch.delenv("PYIMGTAG_MAP_TILES_ATTRIBUTION", raising=False)
     assert tile_config() == {"url": DEFAULT_TILE_URL, "attribution": DEFAULT_TILE_ATTRIBUTION}
     html = render_map_html("/map")
-    assert "tile.openstreetmap.org" in _tile_hosts(html)
+    # Exact hostname equality on the configured URL (CodeQL rejects substring /
+    # containment checks against hostnames as incomplete sanitization).
+    assert urlparse(DEFAULT_TILE_URL).hostname == "tile.openstreetmap.org"
+    assert DEFAULT_TILE_URL in html
     assert "OpenStreetMap" in html
 
 
