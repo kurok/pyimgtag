@@ -62,7 +62,8 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`, `insights`, `prompt`
+- Subcommands: `run`, `watch`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`, `insights`, `prompt`
+- Continuous tagging: `watch` polls the source and tags new/changed photos as they land, with a one-command launchd/systemd service install
 - Controlled vocabulary, custom prompt templates, and output language: constrain tags to *your* taxonomy with synonyms and a hierarchy, deterministic across backends (`--vocabulary`, `--prompt-template`, `--tag-language`)
 - Library insights report: one command summarises the whole tagged library as a terminal table, a self-contained HTML page, or JSON (`insights` subcommand)
 - Photo quality scoring: a single 1–10 score plus a model-written reason (`judge` subcommand)
@@ -502,6 +503,58 @@ pyimgtag query --no-text
 pyimgtag query --tag beach --format json
 pyimgtag query --tag beach --format paths --limit 50
 ```
+
+#### `pyimgtag watch` — continuous tagging
+
+`run` is a batch; `watch` is the loop around it. Every `--interval` seconds
+(default 300) it re-scans the source and pushes files that are **new or
+changed** through the exact same incremental pipeline as
+`run --skip-existing` — same Nominatim rate limit, same write-back gating,
+same dedup, same dashboard. Nothing is re-implemented.
+
+```bash
+pyimgtag watch --input-dir ~/Pictures/exported                 # foreground, every 5 min
+pyimgtag watch --input-dir ~/Pictures --interval 60 --no-web   # terminal-only, every minute
+pyimgtag watch --photos-library ~/Pictures/Photos\ Library.photoslibrary --interval 900
+pyimgtag watch --input-dir ~/Pictures --write-exif --backend openai   # any run flag works
+```
+
+- **Stability gate** — a file is processed only after its size and mtime are
+  unchanged across two consecutive polls, so half-copied imports are never
+  tagged. Changed files (new size/mtime) are re-processed; unchanged ones
+  never hit the model again. A file that errored is not retried until it changes.
+- **One watch per DB** — a PID lockfile next to the progress DB
+  (`progress.db.watch.lock`). A second `watch` on the same DB exits non-zero
+  naming the holder's PID; locks left by a dead process are reclaimed.
+- **Graceful stop** — Ctrl-C, SIGTERM, or the dashboard **Stop** button let
+  the in-flight image finish, commit the DB, and release the lock. The
+  dashboard shows a `watching` state with per-cycle counters.
+- Each cycle logs one line: `[watch] cycle 12: checked 4,213 · pending 2 · new 12 · tagged 12 · errors 0`
+  (`pending` = files seen once but not yet stable).
+- `--max-cycles N` exits after N polls (handy for cron or smoke tests).
+  `--dry-run` / `--no-cache` are rejected — watch needs the progress DB.
+
+##### Run it as a service
+
+```bash
+# macOS — writes ~/Library/LaunchAgents/com.pyimgtag.watch.plist and `launchctl load`s it
+pyimgtag watch --input-dir ~/Pictures/exported --interval 600 --install-service
+
+# Linux — writes ~/.config/systemd/user/pyimgtag-watch.service and `systemctl --user enable --now`s it
+pyimgtag watch --input-dir ~/Pictures/exported --interval 600 --install-service
+
+# Windows — prints a Task Scheduler (schtasks) recipe; no automation in this version
+pyimgtag watch --input-dir C:\Photos --install-service
+
+# Remove exactly what install created (unit file + unload/disable), nothing else
+pyimgtag watch --uninstall-service
+```
+
+The unit embeds the exact flags you passed (minus `--install-service`),
+runs `<current python> -m pyimgtag watch …` so it does not depend on PATH,
+sets `PYIMGTAG_NO_WEB=1`, and restarts on failure. Logs go to
+`~/Library/Logs/pyimgtag-watch.log` (macOS) or `journalctl --user -u pyimgtag-watch`
+(Linux). An existing unit is never overwritten without `--force`.
 
 #### Controlled vocabulary & custom prompts
 

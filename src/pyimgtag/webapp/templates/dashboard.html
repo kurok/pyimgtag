@@ -69,7 +69,10 @@
         stopBtn.disabled = true;
         return;
       }
-      stateEl.textContent = d.state || 'running';
+      // `watch` idles between poll cycles while still "running" — label it so
+      // the user can tell a live daemon from a batch run.
+      const isWatching = d.command === 'watch' && (d.state || 'running') === 'running';
+      stateEl.textContent = isWatching ? 'watching' : (d.state || 'running');
       stateEl.className = 'pill-state ' + (d.state || 'running');
       cmdEl.textContent = d.command || '';
       currentEl.innerHTML = '';

@@ -159,6 +159,26 @@ Examples:
   pyimgtag judge --photos-library LIB --sort-by score --verbose
 """,
     ),
+    "watch": (
+        "Continuously tag new and changed photos (polling daemon)",
+        "Re-scan the source every --interval seconds and run the standard incremental\n"
+        "tagging pipeline on files that are new or changed. A file is only processed\n"
+        "once its size and mtime are unchanged across two consecutive polls, so\n"
+        "half-copied imports are never tagged. Accepts the same flags as 'run'\n"
+        "(--skip-existing is implied; --dry-run/--no-cache are not supported).\n"
+        "One watch per progress DB: a second instance exits with the holder's PID.",
+        """\
+Examples:
+  pyimgtag watch --input-dir ~/Pictures/exported                # foreground, every 5 min
+  pyimgtag watch --input-dir ~/Pictures --interval 60 --no-web
+  pyimgtag watch --photos-library ~/Pictures/Photos\\ Library.photoslibrary --interval 900
+  pyimgtag watch --input-dir ~/Pictures --install-service       # launchd / systemd unit
+  pyimgtag watch --uninstall-service
+
+Stop with Ctrl-C / SIGTERM (or the dashboard Stop button): the in-flight image
+finishes, the DB is committed, and the lock is released.
+""",
+    ),
     "prompt": (
         "Inspect the tagging prompt template",
         "Print the default tagging prompt template so you can copy it, edit the\n"
@@ -263,7 +283,48 @@ def add_web_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_run_subcommand(subparsers: Any) -> None:
-    run_p = _sub(subparsers, "run")
+    _add_run_flags(_sub(subparsers, "run"))
+
+
+def _add_watch_subcommand(subparsers: Any) -> None:
+    watch_p = _sub(subparsers, "watch")
+    watch_p.add_argument(
+        "--interval",
+        type=float,
+        default=300.0,
+        metavar="SECONDS",
+        help="Poll interval in seconds (default: 300)",
+    )
+    watch_p.add_argument(
+        "--max-cycles",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Exit after N poll cycles (default: 0 = run until stopped)",
+    )
+    watch_p.add_argument(
+        "--install-service",
+        action="store_true",
+        help=(
+            "Write and load a launchd agent (macOS) / systemd user unit (Linux) that runs "
+            "this exact watch command at login; prints a Task Scheduler recipe on Windows"
+        ),
+    )
+    watch_p.add_argument(
+        "--uninstall-service",
+        action="store_true",
+        help="Unload and remove the unit created by --install-service",
+    )
+    watch_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow --install-service to overwrite an existing unit file",
+    )
+    _add_run_flags(watch_p)
+
+
+def _add_run_flags(run_p: argparse.ArgumentParser) -> None:
+    """Register the tagging flags shared by ``run`` and ``watch``."""
     src = run_p.add_mutually_exclusive_group(required=False)
     src.add_argument("--input-dir", help="Path to an exported image folder")
     src.add_argument("--photos-library", help="Path to an Apple Photos library package")
@@ -971,6 +1032,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = p.add_subparsers(dest="subcommand")
 
     _add_run_subcommand(subparsers)
+    _add_watch_subcommand(subparsers)
     _add_status_reprocess_preflight_subcommands(subparsers)
     _add_cleanup_subcommands(subparsers)
     _add_review_subcommand(subparsers)
@@ -1022,12 +1084,14 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+    # The raw argv is what `watch --install-service` bakes into the unit file.
+    args._argv = list(argv) if argv is not None else sys.argv[1:]
 
     if args.subcommand is None:
         parser.print_help()
         return 1
 
-    if args.subcommand == "run" and args.date and (args.date_from or args.date_to):
+    if args.subcommand in ("run", "watch") and args.date and (args.date_from or args.date_to):
         parser.error("--date cannot be combined with --date-from/--date-to")
     if args.subcommand == "cleanup-drift" and args.dry_run and args.prune_photos_missing:
         parser.error("--dry-run cannot be combined with --prune-photos-missing")
@@ -1050,6 +1114,7 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.review_cmd import cmd_review
     from pyimgtag.commands.run import cmd_run
     from pyimgtag.commands.tags import cmd_tags
+    from pyimgtag.commands.watch import cmd_watch
     from pyimgtag.progress_db import ProgressDB
 
     progress_db: ProgressDB | None = None
@@ -1064,6 +1129,7 @@ def main(argv: list[str] | None = None) -> int:
 
     dispatch: dict[str, Any] = {
         "run": lambda: cmd_run(args, parser),
+        "watch": lambda: cmd_watch(args, parser),
         "status": lambda: cmd_status(args),
         "reprocess": lambda: cmd_reprocess(args),
         "preflight": lambda: cmd_preflight(args),
