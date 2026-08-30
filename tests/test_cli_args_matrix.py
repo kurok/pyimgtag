@@ -123,6 +123,9 @@ _QUERY_DEFAULTS = [
     ("city", None),
     ("country", None),
     ("status", None),
+    ("bbox", None),
+    ("year", None),
+    ("month", None),
     ("format", "table"),
     ("limit", None),
 ]
@@ -508,6 +511,40 @@ class TestQueryFlagSemantics:
         for fmt in ("table", "json", "paths"):
             args = _parse("query", "--format", fmt)
             assert args.format == fmt
+
+    def test_bbox_parsed_into_floats(self) -> None:
+        args = _parse("query", "--bbox", "39.3,-9.3,39.4,-9.1")
+        assert args.bbox == (39.3, -9.3, 39.4, -9.1)
+
+    def test_bbox_keeps_longitude_order_for_the_antimeridian(self) -> None:
+        # ``--bbox=`` form because argparse would read a leading "-20" as a flag.
+        args = _parse("query", "--bbox=-20,170,-10,-170")
+        assert args.bbox == (-20.0, 170.0, -10.0, -170.0)
+
+    @pytest.mark.parametrize(
+        "value", ["1,2,3", "a,b,c,d", "91,0,0,0", "0,181,0,0", "0,0,-91,0", "0,0,0,-181"]
+    )
+    def test_bbox_rejects_bad_values(self, value: str) -> None:
+        with pytest.raises(SystemExit):
+            _parse("query", f"--bbox={value}")
+
+    def test_year_and_month_parsed(self) -> None:
+        assert _parse("query", "--year", "2024").year == "2024"
+        assert _parse("query", "--month", "2024-03").month == "2024-03"
+
+    @pytest.mark.parametrize("value", ["24", "2024-03", "abcd"])
+    def test_year_rejects_bad_values(self, value: str) -> None:
+        with pytest.raises(SystemExit):
+            _parse("query", "--year", value)
+
+    @pytest.mark.parametrize("value", ["2024", "2024-13", "2024-00", "2024-3"])
+    def test_month_rejects_bad_values(self, value: str) -> None:
+        with pytest.raises(SystemExit):
+            _parse("query", "--month", value)
+
+    def test_year_xor_month(self) -> None:
+        with pytest.raises(SystemExit):
+            _parse("query", "--year", "2024", "--month", "2024-03")
 
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ from pyimgtag.db.face_db import FaceDB
 from pyimgtag.db.image_db import _DEFAULT_PATH_BATCH_SIZE, ImageDB
 from pyimgtag.db.insights_db import InsightsDB
 from pyimgtag.db.judge_db import _DEFAULT_JUDGE_RESULTS_LIMIT, JudgeDB
+from pyimgtag.db.map_db import MAX_CELLS, MapDB
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
 
 if TYPE_CHECKING:
@@ -144,6 +145,16 @@ class ProgressDB:
         ),
         (13, "CREATE INDEX IF NOT EXISTS idx_dedup_members_group ON dedup_members(group_id)"),
         (13, "CREATE INDEX IF NOT EXISTS idx_pi_phash ON processed_images(phash)"),
+        # 0.31.0: /map and /timeline. Until now only the reverse-geocoded place
+        # names were persisted, so the EXIF coordinates on ``ImageResult`` were
+        # thrown away after the run. Store them (plus the covering indexes the
+        # cluster and month-histogram queries need) so the map can bin photos
+        # SQL-side. Existing libraries backfill with
+        # ``pyimgtag run … --resume-from-db`` (re-reads EXIF, no model calls).
+        (14, "ALTER TABLE processed_images ADD COLUMN gps_lat REAL"),
+        (14, "ALTER TABLE processed_images ADD COLUMN gps_lon REAL"),
+        (14, "CREATE INDEX IF NOT EXISTS idx_pi_gps ON processed_images(gps_lat, gps_lon)"),
+        (14, "CREATE INDEX IF NOT EXISTS idx_pi_image_date ON processed_images(image_date)"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -205,6 +216,34 @@ class ProgressDB:
     def _dedup(self) -> DedupDB:
         """Duplicate-group helper bound to the current connection."""
         return DedupDB(self._conn)
+
+    @property
+    def _map(self) -> MapDB:
+        """Map/timeline aggregation helper bound to the current connection."""
+        return MapDB(self._conn)
+
+    # --- map / timeline (delegated to MapDB) ---
+
+    def gps_coverage(self) -> dict[str, int]:
+        """Delegate to :meth:`MapDB.gps_coverage`."""
+        return self._map.gps_coverage()
+
+    def map_clusters(
+        self,
+        bbox: tuple[float, float, float, float] | None = None,
+        zoom: int = 2,
+        limit: int = MAX_CELLS,
+    ) -> list[dict]:
+        """Delegate to :meth:`MapDB.clusters`."""
+        return self._map.clusters(bbox, zoom, limit)
+
+    def timeline_months(self) -> list[dict]:
+        """Delegate to :meth:`MapDB.timeline_months`."""
+        return self._map.timeline_months()
+
+    def timeline_days(self, month: str) -> list[dict]:
+        """Delegate to :meth:`MapDB.timeline_days`."""
+        return self._map.timeline_days(month)
 
     def get_insights(self, top_n: int = 10) -> dict:
         """Delegate to :meth:`InsightsDB.compute`."""
@@ -296,6 +335,8 @@ class ProgressDB:
         judged: bool | None = None,
         sort: str = "path_asc",
         tags_any: list[str] | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        date_prefix: str | None = None,
     ) -> list[dict]:
         """Delegate to :meth:`ImageDB.query_images`."""
         return self._images.query_images(
@@ -312,6 +353,8 @@ class ProgressDB:
             judged,
             sort,
             tags_any,
+            bbox,
+            date_prefix,
         )
 
     def get_tag_counts(self) -> list[tuple[str, int]]:

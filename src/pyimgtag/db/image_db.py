@@ -82,8 +82,8 @@ class ImageDB:
                  scene_category, emotional_tone, cleanup_class, has_text,
                  text_summary, event_hint, significance,
                  nearest_city, nearest_region, nearest_country, image_date,
-                 phash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 phash, gps_lat, gps_lon)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(file_path),
@@ -108,6 +108,10 @@ class ImageDB:
                 # ``run --dedup`` computes this; persisting it here means
                 # ``dedup scan`` has nothing left to hash for those photos.
                 result.phash,
+                # EXIF coordinates back the /map page; ``None`` for photos
+                # without GPS, which the map reports as "not on map".
+                result.gps_lat,
+                result.gps_lon,
             ),
         )
         self._conn.commit()
@@ -153,6 +157,31 @@ class ImageDB:
     }
 
     @staticmethod
+    def _bbox_conditions(bbox: tuple[float, float, float, float]) -> tuple[str, list[object]]:
+        """Return the ``(sql, params)`` pair selecting rows inside *bbox*.
+
+        ``bbox`` is ``(lat1, lon1, lat2, lon2)`` and the box is inclusive on
+        every edge. Latitudes are normalised to ``min``/``max`` order. When
+        ``lon1 > lon2`` the box is read as crossing the antimeridian and the
+        longitude test becomes ``lon >= lon1 OR lon <= lon2`` so, for example,
+        ``170 → -170`` selects the 20-degree strip around 180 rather than the
+        340-degree complement.
+        """
+        lat1, lon1, lat2, lon2 = bbox
+        lat_lo, lat_hi = (lat1, lat2) if lat1 <= lat2 else (lat2, lat1)
+        if lon1 <= lon2:
+            lon_sql = "pi.gps_lon BETWEEN ? AND ?"
+            lon_params: list[object] = [lon1, lon2]
+        else:
+            lon_sql = "(pi.gps_lon >= ? OR pi.gps_lon <= ?)"
+            lon_params = [lon1, lon2]
+        sql = (
+            "(pi.gps_lat IS NOT NULL AND pi.gps_lon IS NOT NULL "
+            "AND pi.gps_lat BETWEEN ? AND ? AND " + lon_sql + ")"
+        )
+        return sql, [lat_lo, lat_hi, *lon_params]
+
+    @staticmethod
     def _build_query_conditions(
         tag: str | None,
         has_text: bool | None,
@@ -165,10 +194,25 @@ class ImageDB:
         max_judge_score: int | None,
         judged: bool | None,
         tags_any: list[str] | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        date_prefix: str | None = None,
     ) -> tuple[list[str], list[object]]:
         """Translate filter arguments into ``(conditions, params)`` for query_images."""
         conditions: list[str] = []
         params: list[object] = []
+
+        if bbox is not None:
+            bbox_sql, bbox_params = ImageDB._bbox_conditions(bbox)
+            conditions.append(bbox_sql)
+            params.extend(bbox_params)
+        if date_prefix:
+            # image_date is ISO-8601 text, so a prefix match is an exact
+            # year ("2024") / month ("2024-03") / day ("2024-03-17") filter.
+            # Expressed as a half-open range rather than LIKE/substr so the
+            # idx_pi_image_date index can serve it: no stored date can sort
+            # above ``prefix + U+FFFF`` while still starting with ``prefix``.
+            conditions.append("(pi.image_date >= ? AND pi.image_date < ?)")
+            params.extend([date_prefix, date_prefix + "\uffff"])
 
         if tag is not None:
             conditions.append(
@@ -230,7 +274,8 @@ class ImageDB:
             "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, pi.status, "
             "pi.cleanup_class, pi.scene_category, pi.emotional_tone, pi.event_hint, "
             "pi.significance, pi.nearest_city, pi.nearest_region, pi.nearest_country, "
-            "pi.error_message, js.weighted_score, js.reason, js.verdict, pi.image_date "
+            "pi.error_message, js.weighted_score, js.reason, js.verdict, pi.image_date, "
+            "pi.gps_lat, pi.gps_lon "
             "FROM processed_images pi "
             "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
             + where  # nosec B608
@@ -253,6 +298,8 @@ class ImageDB:
         judged: bool | None = None,
         sort: str = "path_asc",
         tags_any: list[str] | None = None,
+        bbox: tuple[float, float, float, float] | None = None,
+        date_prefix: str | None = None,
     ) -> list[dict]:
         """Query images with advanced filters.
 
@@ -275,6 +322,11 @@ class ImageDB:
             sort: One of ``path_asc`` (default), ``path_desc``, ``newest``,
                 ``oldest``, ``judge_desc``, ``judge_asc``, ``shot_desc``,
                 ``shot_asc``.
+            bbox: ``(lat1, lon1, lat2, lon2)`` inclusive geographic box; only
+                photos with stored EXIF coordinates inside it are returned.
+                ``lon1 > lon2`` means the box crosses the antimeridian.
+            date_prefix: ISO-8601 prefix matched against ``image_date`` —
+                ``"2024"`` (year), ``"2024-03"`` (month), ``"2024-03-17"`` (day).
 
         Returns:
             List of image metadata dicts.
@@ -291,6 +343,8 @@ class ImageDB:
             max_judge_score,
             judged,
             tags_any,
+            bbox,
+            date_prefix,
         )
         order_clause = self._QUERY_SORTS.get(sort, self._QUERY_SORTS["path_asc"])
         query = self._build_images_query(conditions, order_clause, limit)
@@ -303,8 +357,8 @@ class ImageDB:
 
         Columns 14-16 (``js.weighted_score``, ``js.reason``, ``js.verdict``)
         come from the LEFT JOIN with ``judge_scores`` and are ``None`` for any
-        image that has not been judged yet; the trailing column 17 is
-        ``pi.image_date``.
+        image that has not been judged yet; the trailing columns 17-19 are
+        ``pi.image_date``, ``pi.gps_lat`` and ``pi.gps_lon``.
         """
         file_path: str = row[0]
         tags_raw: str | None = row[1]
@@ -333,6 +387,8 @@ class ImageDB:
             "judge_reason": row[15] if len(row) > 15 else None,
             "judge_verdict": row[16] if len(row) > 16 else None,
             "image_date": row[17] if len(row) > 17 else None,
+            "gps_lat": row[18] if len(row) > 18 else None,
+            "gps_lon": row[19] if len(row) > 19 else None,
         }
 
     def get_tag_counts(self) -> list[tuple[str, int]]:
@@ -570,7 +626,7 @@ class ImageDB:
             "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, "
             "pi.status, pi.cleanup_class, pi.scene_category, pi.emotional_tone, "
             "pi.event_hint, pi.significance, pi.error_message, "
-            "js.weighted_score, js.verdict, js.reason "
+            "js.weighted_score, js.verdict, js.reason, pi.gps_lat, pi.gps_lon "
             "FROM processed_images pi "
             "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
             + joined_where  # nosec B608
@@ -609,7 +665,7 @@ class ImageDB:
             "SELECT pi.file_path, pi.tags, pi.scene_summary, pi.processed_at, "
             "pi.status, pi.cleanup_class, pi.scene_category, pi.emotional_tone, "
             "pi.event_hint, pi.significance, pi.error_message, "
-            "js.weighted_score, js.verdict, js.reason "
+            "js.weighted_score, js.verdict, js.reason, pi.gps_lat, pi.gps_lon "
             "FROM processed_images pi "
             "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
             "WHERE pi.file_path = ?",
@@ -754,6 +810,8 @@ class ImageDB:
             "judge_score": int(round(float(weighted_raw))) if weighted_raw is not None else None,
             "judge_verdict": row[12] if len(row) > 12 else None,
             "judge_reason": row[13] if len(row) > 13 else None,
+            "gps_lat": row[14] if len(row) > 14 else None,
+            "gps_lon": row[15] if len(row) > 15 else None,
         }
 
     def is_fresh(self, file_path: Path) -> bool:
@@ -873,6 +931,11 @@ class ImageDB:
         ``has_text`` additionally treats 0 as unset (it can be upgraded
         0 -> 1 but never downgraded). Other existing non-null values are
         never overwritten.
+
+        ``gps_lat``/``gps_lon`` ride along on the same COALESCE rule: this is
+        the ``run --resume-from-db`` path, which re-reads EXIF without calling
+        the model, so it is how a library processed before migration v14
+        back-fills its coordinates.
         """
         self._conn.execute(
             """
@@ -885,7 +948,9 @@ class ImageDB:
                                       THEN ? ELSE has_text END,
                 text_summary   = COALESCE(text_summary,   ?),
                 event_hint     = COALESCE(event_hint,     ?),
-                significance   = COALESCE(significance,   ?)
+                significance   = COALESCE(significance,   ?),
+                gps_lat        = COALESCE(gps_lat,        ?),
+                gps_lon        = COALESCE(gps_lon,        ?)
             WHERE file_path = ?
             """,
             (
@@ -897,6 +962,8 @@ class ImageDB:
                 result.text_summary,
                 result.event_hint,
                 result.significance,
+                result.gps_lat,
+                result.gps_lon,
                 str(file_path),
             ),
         )

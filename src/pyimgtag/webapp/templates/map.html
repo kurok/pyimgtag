@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pyimgtag Map</title>
+  <link rel="stylesheet" href="/static/leaflet/leaflet.css">
+  <style>
+    {{ nav_styles }}
+    .map-bar{display:flex;align-items:center;gap:12px;padding:16px 32px 12px;flex-wrap:wrap}
+    .badge{background:var(--surface);border:1px solid var(--border);border-radius:20px;
+           padding:6px 14px;font-size:12px;color:var(--muted);box-shadow:var(--shadow-sm)}
+    .badge b{color:var(--text);font-variant-numeric:tabular-nums}
+    #map{height:calc(100vh - 190px);min-height:360px;margin:0 32px 24px;
+         border-radius:var(--radius-md);box-shadow:var(--shadow-md);background:#e5e5ea}
+    .cluster-marker{display:flex;align-items:center;justify-content:center;
+                    border-radius:50%;background:rgba(0,113,227,.85);color:#fff;
+                    font-size:12px;font-weight:700;border:2px solid #fff;
+                    box-shadow:0 2px 8px rgba(0,0,0,.3);font-variant-numeric:tabular-nums}
+    .cluster-lg{background:rgba(255,59,48,.85)}
+    .cluster-md{background:rgba(255,159,10,.9)}
+    .pop-grid{display:grid;grid-template-columns:repeat(3,64px);gap:4px;margin:4px 0 8px}
+    .pop-grid img{width:64px;height:64px;object-fit:cover;border-radius:4px;
+                  background:#e5e5ea;cursor:pointer;display:block;border:none}
+    .pop-hdr{font-size:12px;font-weight:600;margin-bottom:4px}
+    .pop-empty{font-size:12px;color:var(--muted)}
+    .lightbox{display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:1200;
+              align-items:center;justify-content:center;flex-direction:column;gap:12px}
+    .lightbox.open{display:flex}
+    .lightbox img{max-width:92vw;max-height:82vh;object-fit:contain;border-radius:6px}
+    .lightbox .cap{color:#fff;font-size:12px;font-family:ui-monospace,'SF Mono',monospace;
+                   max-width:92vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .privacy{padding:0 32px 28px;font-size:12px;color:var(--muted);max-width:900px;
+             line-height:1.6}
+    .privacy code{font-family:ui-monospace,'SF Mono',monospace;background:var(--surface);
+                  padding:2px 6px;border-radius:4px}
+  </style>
+</head>
+<body>
+{{ nav }}
+<div class="page-hdr">
+  <h1 class="page-title">Map</h1>
+  <span class="page-meta" id="meta">loading…</span>
+</div>
+<div class="map-bar">
+  <span class="badge" id="offmap-badge"><b id="offmap">0</b> photos not on map</span>
+  <button class="btn btn-secondary btn-sm" id="gridBtn" type="button">Show as grid</button>
+  <button class="btn btn-secondary btn-sm" id="worldBtn" type="button">Whole world</button>
+</div>
+<div id="map"></div>
+<p class="privacy">
+  Clustering happens locally in SQLite. Map <em>tiles</em> are the one external request this
+  page makes — the tile host can see which regions you look at. Point
+  <code>PYIMGTAG_MAP_TILES</code> at your own tile server to avoid that
+  (<code>PYIMGTAG_MAP_TILES_ATTRIBUTION</code> sets the credit line). Leaflet itself is
+  vendored into the package, so the UI works with no internet beyond the tiles.
+</p>
+<div class="lightbox" id="lightbox">
+  <img id="lightbox-img" alt="">
+  <div class="cap" id="lightbox-cap"></div>
+</div>
+<script src="/static/leaflet/leaflet.js"></script>
+<script>
+const API_BASE = '{{ api_base }}';
+const LEAF_ZOOM = {{ leaf_zoom }};
+const POPOVER_LIMIT = {{ popover_limit }};
+const TILE_URL = {{ tile_url | tojson }};
+const TILE_ATTRIBUTION = {{ tile_attribution | tojson }};
+
+const map = L.map('map', {worldCopyJump: true}).setView([20, 0], 2);
+L.tileLayer(TILE_URL, {attribution: TILE_ATTRIBUTION, maxZoom: 19}).addTo(map);
+
+const NO_GPS_HINT =
+  'No photos have coordinates yet — run "pyimgtag run … --resume-from-db" to backfill.';
+
+let markers = [];
+let inFlight = null;
+let hasGps = false;
+
+function clearMarkers() {
+  for (const m of markers) map.removeLayer(m);
+  markers = [];
+}
+
+function wrapLon(v) {
+  return ((v + 180) % 360 + 360) % 360 - 180;
+}
+
+// Leaflet reports the visible rectangle; the API wants "lat1,lon1,lat2,lon2".
+// getBounds() runs past ±180 once the viewport is wider than one copy of the
+// world, so: a viewport at least a full turn wide becomes the whole planet,
+// and anything narrower has its corners wrapped back into range. Wrapping a
+// full-width viewport instead would hand the server lon1 > lon2 and be read
+// as a thin antimeridian strip — the opposite of what the user sees.
+function currentBbox() {
+  const b = map.getBounds();
+  const sw = b.getSouthWest();
+  const ne = b.getNorthEast();
+  const lat1 = Math.max(-90, Math.min(90, sw.lat));
+  const lat2 = Math.max(-90, Math.min(90, ne.lat));
+  let lon1 = sw.lng;
+  let lon2 = ne.lng;
+  if (lon2 - lon1 >= 360) {
+    lon1 = -180;
+    lon2 = 180;
+  } else {
+    lon1 = wrapLon(lon1);
+    lon2 = wrapLon(lon2);
+  }
+  return [lat1, lon1, lat2, lon2].map((v) => v.toFixed(6)).join(',');
+}
+
+function cellBbox(cluster, zoom) {
+  // A small box around the cluster centroid, sized to the bin the server
+  // used, so the drill-down asks for exactly the photos behind the marker.
+  const cell = 360 / Math.pow(2, Math.max(0, Math.min(20, zoom)));
+  const half = cell / 2;
+  const lat1 = Math.max(-90, cluster.lat - half);
+  const lat2 = Math.min(90, cluster.lat + half);
+  const lon1 = Math.max(-180, cluster.lon - half);
+  const lon2 = Math.min(180, cluster.lon + half);
+  return [lat1, lon1, lat2, lon2].map((v) => v.toFixed(6)).join(',');
+}
+
+function markerSize(count) {
+  if (count >= 1000) return 52;
+  if (count >= 100) return 44;
+  if (count >= 10) return 36;
+  return 30;
+}
+
+function markerClass(count) {
+  if (count >= 1000) return 'cluster-marker cluster-lg';
+  if (count >= 100) return 'cluster-marker cluster-md';
+  return 'cluster-marker';
+}
+
+function formatCount(n) {
+  return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n);
+}
+
+async function loadClusters() {
+  const zoom = Math.round(map.getZoom());
+  const bbox = currentBbox();
+  const url = API_BASE + '/api/clusters?zoom=' + zoom + '&bbox=' + encodeURIComponent(bbox);
+  if (inFlight) inFlight.abort();
+  const ctl = new AbortController();
+  inFlight = ctl;
+  let data;
+  try {
+    const r = await fetch(url, {signal: ctl.signal});
+    if (!r.ok) return;
+    data = await r.json();
+  } catch (e) {
+    return;  // aborted by a newer pan/zoom, or the request failed — keep the old pins
+  } finally {
+    if (inFlight === ctl) inFlight = null;
+  }
+  clearMarkers();
+  const cells = data.clusters || [];
+  let shown = 0;
+  for (const c of cells) {
+    shown += c.count;
+    const size = markerSize(c.count);
+    const icon = L.divIcon({
+      html: '<div class="' + markerClass(c.count) + '" style="width:' + size +
+            'px;height:' + size + 'px">' + formatCount(c.count) + '</div>',
+      className: '',
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+    const marker = L.marker([c.lat, c.lon], {icon: icon, title: c.count + ' photos'});
+    marker.on('click', () => onClusterClick(c, zoom));
+    marker.addTo(map);
+    markers.push(marker);
+  }
+  document.getElementById('meta').textContent =
+    shown ? formatCount(shown) + ' photos in view · ' + cells.length + ' clusters' :
+            (hasGps ? 'no photos with coordinates in view' : NO_GPS_HINT);
+}
+
+function onClusterClick(cluster, zoom) {
+  // Below leaf zoom a click means "zoom in on this cluster"; at leaf zoom
+  // (or for a handful of photos) it opens the thumbnail popover instead.
+  if (zoom < LEAF_ZOOM && cluster.count > POPOVER_LIMIT) {
+    map.setView([cluster.lat, cluster.lon], Math.min(LEAF_ZOOM, zoom + 3));
+    return;
+  }
+  openPopover(cluster, zoom);
+}
+
+async function openPopover(cluster, zoom) {
+  const bbox = cellBbox(cluster, zoom);
+  const popup = L.popup({maxWidth: 240})
+    .setLatLng([cluster.lat, cluster.lon])
+    .setContent('<div class="pop-empty">loading…</div>')
+    .openOn(map);
+  let rows = [];
+  try {
+    const r = await fetch(API_BASE + '/api/photos?limit=' + POPOVER_LIMIT +
+                          '&bbox=' + encodeURIComponent(bbox));
+    if (r.ok) rows = await r.json();
+  } catch (e) {
+    rows = [];
+  }
+  if (!rows.length) {
+    popup.setContent('<div class="pop-empty">No photos here.</div>');
+    return;
+  }
+  const wrap = document.createElement('div');
+  const hdr = document.createElement('div');
+  hdr.className = 'pop-hdr';
+  hdr.textContent = cluster.count + ' photo' + (cluster.count === 1 ? '' : 's');
+  wrap.appendChild(hdr);
+  const grid = document.createElement('div');
+  grid.className = 'pop-grid';
+  for (const row of rows) {
+    const img = document.createElement('img');
+    img.src = '/review/thumbnail?path=' + encodeURIComponent(row.file_path) + '&size=200';
+    img.alt = row.file_name || '';
+    img.title = row.file_name || '';
+    img.addEventListener('click', () => openLightbox(row));
+    grid.appendChild(img);
+  }
+  wrap.appendChild(grid);
+  const link = document.createElement('a');
+  link.className = 'btn btn-secondary btn-sm';
+  link.href = '/query?bbox=' + encodeURIComponent(bbox);
+  link.textContent = 'Show as grid';
+  wrap.appendChild(link);
+  popup.setContent(wrap);
+}
+
+function openLightbox(row) {
+  const box = document.getElementById('lightbox');
+  document.getElementById('lightbox-img').src =
+    '/review/original?path=' + encodeURIComponent(row.file_path);
+  document.getElementById('lightbox-cap').textContent = row.file_path;
+  box.classList.add('open');
+}
+
+document.getElementById('lightbox').addEventListener('click', () => {
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('lightbox-img').src = '';
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.getElementById('lightbox').classList.remove('open');
+    document.getElementById('lightbox-img').src = '';
+  }
+});
+
+document.getElementById('gridBtn').addEventListener('click', () => {
+  window.location.href = '/query?bbox=' + encodeURIComponent(currentBbox());
+});
+document.getElementById('worldBtn').addEventListener('click', () => {
+  map.setView([20, 0], 2);
+});
+
+async function loadCoverage() {
+  try {
+    const r = await fetch(API_BASE + '/api/coverage');
+    if (!r.ok) return;
+    const c = await r.json();
+    hasGps = Boolean(c.with_gps);
+    document.getElementById('offmap').textContent = (c.without_gps || 0).toLocaleString();
+  } catch (e) {
+    // A failed badge must not take the map down with it.
+  }
+}
+
+map.on('moveend', loadClusters);
+// Coverage first so the empty-library hint is known before the first
+// cluster response decides what to write into the meta line.
+loadCoverage().then(loadClusters);
+</script>
+</body>
+</html>

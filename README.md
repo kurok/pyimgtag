@@ -502,10 +502,34 @@ pyimgtag query --cleanup delete
 pyimgtag query --has-text
 pyimgtag query --no-text
 
+# Filter by a geographic box — the same slice the /map page shows
+pyimgtag query --bbox 39.30,-9.30,39.42,-9.10
+
+# A box crossing the antimeridian: pass lon1 > lon2. Use the --bbox=...
+# form whenever the first value is negative, or argparse reads it as a flag.
+pyimgtag query --bbox=-20,170,-10,-170
+
+# Filter by capture year or month (mutually exclusive)
+pyimgtag query --year 2024
+pyimgtag query --month 2024-03
+
+# Every filter composes
+pyimgtag query --month 2024-03 --bbox 39.30,-9.30,39.42,-9.10 --tag beach
+
 # Output as JSON or just paths (e.g. for shell pipelines)
 pyimgtag query --tag beach --format json
 pyimgtag query --tag beach --format paths --limit 50
 ```
+
+| Filter | Value | Notes |
+|---|---|---|
+| `--bbox` | `lat1,lon1,lat2,lon2` | Inclusive box over the stored EXIF coordinates. Latitudes may be given in either order; **longitude order is meaningful** — `lon1 > lon2` means the box crosses the antimeridian. Photos with no coordinates never match. |
+| `--year` | `YYYY` | Prefix match on the EXIF capture date. |
+| `--month` | `YYYY-MM` | Prefix match on the EXIF capture date. |
+
+`--bbox` only sees photos whose coordinates are in the database. If your
+library was tagged before migration v14, backfill it first — see
+[Populating GPS for an existing library](#populating-gps-for-an-existing-library).
 
 #### `pyimgtag watch` — continuous tagging
 
@@ -1180,10 +1204,18 @@ hosts a single top-nav with these pages:
 - `/review` — browse DB entries, edit tags, change cleanup class.
 - `/faces` — manage person clusters, rename, merge, delete.
 - `/tags` — list, rename, merge, delete tags across the DB.
-- `/query` — full-text/tag/scene/judge filters with hover thumbnails.
+- `/query` — full-text/tag/scene/judge filters (plus `bbox` / `year` /
+  `month` / `day`) with hover thumbnails.
 - `/judge` — judge-score grid with rating filter / sort / pager.
 - `/insights` — library report (totals, time, places, content, people,
   quality, housekeeping) with an Export HTML button for the standalone file.
+- `/map` — pan/zoom map of photos with EXIF coordinates, server-side
+  clustering, a "N photos not on map" badge, thumbnail popovers into a
+  lightbox at leaf zoom, and a "Show as grid" hand-off to `/query?bbox=…`.
+  See [Map tiles and privacy](#map-tiles-and-privacy).
+- `/timeline` — month histogram of capture dates; click a month for its day
+  strip, a day for that day's grid. Bars can be coloured by average judge
+  score or cleanup-class share.
 - `/dedup` — duplicate/burst groups with side-by-side thumbnails, the best
   pick highlighted with reason badges, per-photo keep toggles, and a gated
   "apply plan" that moves the losers into a quarantine folder (never deletes).
@@ -1212,6 +1244,42 @@ Flags (apply to `run`, `judge`, `faces scan`):
 
 Pause semantics are cooperative: the gate is checked before each file so
 in-flight Ollama / face-detection requests are never interrupted mid-call.
+
+### Map tiles and privacy
+
+Leaflet is **vendored into the package** (`pyimgtag/webapp/static/leaflet/`,
+BSD-2-Clause, served from `/static/leaflet/…`) — the webapp never loads
+anything from a CDN, and clustering is a SQL aggregate over your local
+database.
+
+The one external request the `/map` page makes is for raster map tiles.
+**Tile fetches reveal the regions you look at to the tile host** (by default
+`tile.openstreetmap.org`, which sees your IP and the tile coordinates — not
+your photos). Two environment variables control this:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PYIMGTAG_MAP_TILES` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` | Tile URL template. Point it at a LAN or offline tile server to make `/map` fully local. |
+| `PYIMGTAG_MAP_TILES_ATTRIBUTION` | `© OpenStreetMap contributors` | Credit line drawn on the map. Most tile providers require one. |
+
+Without internet (or with an unreachable tile server) the page still renders:
+you get the clusters, the counts, the popovers, and the lightbox over a blank
+background. Only the basemap imagery is missing.
+
+### Populating GPS for an existing library
+
+Coordinates are stored on the image row (migration **v14**). Libraries tagged
+before that upgrade have place names but no `gps_lat` / `gps_lon`, so they
+show up in the "not on map" badge. Backfill them with:
+
+```bash
+pyimgtag run --photos-library ~/Pictures/Photos.photoslibrary --resume-from-db
+```
+
+That path re-reads EXIF and fills in only the columns that are still NULL —
+**no model calls, no re-tagging**, so it is cheap even on a large library.
+Photos genuinely without EXIF GPS stay off the map; that is what the badge
+counts.
 
 **Migration note:** the `pyimgtag review` and `pyimgtag faces ui` commands
 now serve the unified app, so the URL paths have shifted. Bookmarks that
@@ -1333,6 +1401,8 @@ a default server cannot see them at all. No tool deletes anything.
 > visible to other users in `ps aux` process listings on shared machines.
 | `PYIMGTAG_MCP_ENABLE_WRITES` | `pyimgtag mcp` | `1` / `true` / `yes` / `on` registers the write tools (same as `--enable-writes`). Unset = read-only. |
 | `PYIMGTAG_NO_WEB` | All commands that start the dashboard | `1` / `true` / `yes` disables the dashboard by default (same as `--no-web`). |
+| `PYIMGTAG_MAP_TILES` | `/map` page | Raster tile URL template (default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`). Point at a LAN/offline tile server to keep browsing private — see [Map tiles and privacy](#map-tiles-and-privacy). |
+| `PYIMGTAG_MAP_TILES_ATTRIBUTION` | `/map` page | Attribution line drawn on the map (default `© OpenStreetMap contributors`). |
 | `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |
 | `PYIMGTAG_PARSE_ERROR_LOG` | `pyimgtag run` | Path to write JSON-parse error log (opt-in; disabled by default). May contain photo descriptions — do not store in a synced or shared directory. |

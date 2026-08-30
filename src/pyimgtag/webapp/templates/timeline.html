@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pyimgtag Timeline</title>
+  <style>
+    {{ nav_styles }}
+    .tl-bar{display:flex;align-items:center;gap:10px;padding:16px 32px 0;flex-wrap:wrap}
+    .tl-bar .ctrl-label{font-size:11px;font-weight:600;color:var(--muted);
+                        text-transform:uppercase;letter-spacing:.4px}
+    .panel{margin:16px 32px 0;background:var(--surface);border-radius:var(--radius-md);
+           box-shadow:var(--shadow-sm);padding:18px 20px}
+    .panel h2{font-size:14px;font-weight:600;margin-bottom:14px;letter-spacing:-.2px}
+    .chart{display:flex;align-items:flex-end;gap:2px;height:180px;overflow-x:auto;
+           padding-bottom:26px;position:relative}
+    .chart .bar{flex:0 0 14px;min-width:14px;background:var(--accent);border-radius:3px 3px 0 0;
+                min-height:2px;cursor:pointer;position:relative;transition:opacity .12s}
+    .chart .bar:hover{opacity:.75}
+    .chart .bar.sel{outline:2px solid var(--text);outline-offset:1px}
+    .chart .bar .yr{position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);
+                    font-size:10px;color:var(--muted);white-space:nowrap}
+    /* Colour scales for the toggles — plain classes so switching is CSS only. */
+    .bar.q-none{background:#c7c7cc}
+    .bar.q-low{background:#ff3b30}
+    .bar.q-mid{background:#ff9f0a}
+    .bar.q-high{background:#34c759}
+    .bar.c-clean{background:#34c759}
+    .bar.c-some{background:#ff9f0a}
+    .bar.c-dirty{background:#ff3b30}
+    .days{display:flex;flex-wrap:wrap;gap:4px}
+    .day{padding:6px 10px;border-radius:6px;border:1px solid var(--border);
+         background:var(--bg);font-size:12px;cursor:pointer;font-variant-numeric:tabular-nums}
+    .day:hover{border-color:var(--accent);color:var(--accent)}
+    .day.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+    .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+    .photos a{display:block;text-decoration:none}
+    .photos img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:var(--radius-sm);
+                background:#e5e5ea;display:block}
+    .photos .nm{font-size:11px;color:var(--muted);margin-top:4px;white-space:nowrap;
+                overflow:hidden;text-overflow:ellipsis}
+    .empty{margin:24px 32px;background:var(--surface);border-radius:var(--radius-md);
+           padding:48px;text-align:center;color:var(--muted);box-shadow:var(--shadow-sm)}
+    .empty p:first-child{font-size:17px;color:var(--text);margin-bottom:8px}
+    .hint{font-size:12px;color:var(--muted)}
+    code{font-family:ui-monospace,'SF Mono',monospace;font-size:12px;background:var(--bg);
+         padding:2px 6px;border-radius:4px}
+  </style>
+</head>
+<body>
+{{ nav }}
+<div class="page-hdr">
+  <h1 class="page-title">Timeline</h1>
+  <span class="page-meta" id="meta">loading…</span>
+</div>
+<div class="tl-bar">
+  <span class="ctrl-label">Colour by</span>
+  <select id="colourBy" class="day" style="cursor:pointer">
+    <option value="count">Count only</option>
+    <option value="judge">Judge score (average)</option>
+    <option value="cleanup">Cleanup class share</option>
+  </select>
+</div>
+<div id="content"></div>
+<script>
+const API_BASE = '{{ api_base }}';
+let MONTHS = [];
+let DAYS = [];
+let selectedMonth = null;
+let selectedDay = null;
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+
+// Score bands mirror the Judge page: 8+ good, 6+ mixed, below that poor.
+function judgeClass(avg) {
+  if (avg == null) return 'q-none';
+  if (avg >= 8) return 'q-high';
+  if (avg >= 6) return 'q-mid';
+  return 'q-low';
+}
+
+// "Dirty" = more than a fifth of the period is flagged delete/review.
+function cleanupClass(row) {
+  const flagged = (row.cleanup.delete || 0) + (row.cleanup.review || 0);
+  if (!row.count || !flagged) return 'c-clean';
+  const share = flagged / row.count;
+  if (share >= 0.2) return 'c-dirty';
+  return 'c-some';
+}
+
+function barClass(row) {
+  const mode = document.getElementById('colourBy').value;
+  if (mode === 'judge') return 'bar ' + judgeClass(row.avg_judge_score);
+  if (mode === 'cleanup') return 'bar ' + cleanupClass(row);
+  return 'bar';
+}
+
+function barTitle(row) {
+  const bits = [row.period + ': ' + row.count + ' photos'];
+  if (row.avg_judge_score != null) bits.push('avg judge ' + row.avg_judge_score);
+  const flagged = (row.cleanup.delete || 0) + (row.cleanup.review || 0);
+  if (flagged) bits.push(flagged + ' flagged for cleanup');
+  return bits.join(' · ');
+}
+
+function renderChart(rows, onPick, selected, labelFor) {
+  const chart = el('div', 'chart');
+  const max = Math.max(1, ...rows.map((r) => r.count));
+  for (const row of rows) {
+    const bar = el('div', barClass(row));
+    bar.style.height = Math.max(2, Math.round((row.count / max) * 150)) + 'px';
+    bar.title = barTitle(row);
+    if (row.period === selected) bar.classList.add('sel');
+    const label = labelFor(row);
+    if (label) bar.appendChild(el('span', 'yr', label));
+    bar.addEventListener('click', () => onPick(row.period));
+    chart.appendChild(bar);
+  }
+  return chart;
+}
+
+function repaint() {
+  for (const [i, bar] of [...document.querySelectorAll('#months-chart .bar')].entries()) {
+    const keep = bar.classList.contains('sel');
+    bar.className = barClass(MONTHS[i]) + (keep ? ' sel' : '');
+  }
+  for (const bar of document.querySelectorAll('#days-chart .bar')) {
+    const row = DAYS[bar.dataset.idx];
+    const keep = bar.classList.contains('sel');
+    bar.className = barClass(row) + (keep ? ' sel' : '');
+  }
+}
+
+async function loadMonths() {
+  const content = document.getElementById('content');
+  const r = await fetch(API_BASE + '/api/months');
+  const data = await r.json();
+  MONTHS = data.months || [];
+  content.innerHTML = '';
+  if (!MONTHS.length) {
+    const box = el('div', 'empty');
+    box.appendChild(el('p', null, 'No dated photos yet'));
+    box.appendChild(el('p', null,
+      'Run "pyimgtag run" over a library — capture dates come from EXIF, ' +
+      'and the timeline fills in automatically.'));
+    content.appendChild(box);
+    document.getElementById('meta').textContent = 'empty library';
+    return;
+  }
+  document.getElementById('meta').textContent =
+    data.total.toLocaleString() + ' dated photos · ' + MONTHS.length + ' months';
+  const panel = el('div', 'panel');
+  panel.appendChild(el('h2', null, 'Photos per month'));
+  // Only label January so a decade of bars stays readable.
+  const chart = renderChart(MONTHS, pickMonth, selectedMonth,
+    (row) => (row.period.endsWith('-01') ? row.period.slice(0, 4) : ''));
+  chart.id = 'months-chart';
+  panel.appendChild(chart);
+  content.appendChild(panel);
+  content.appendChild(el('div', 'panel hidden-days'));
+}
+
+async function pickMonth(month) {
+  selectedMonth = month;
+  selectedDay = null;
+  for (const [i, bar] of [...document.querySelectorAll('#months-chart .bar')].entries()) {
+    bar.classList.toggle('sel', MONTHS[i].period === month);
+  }
+  const r = await fetch(API_BASE + '/api/days?month=' + encodeURIComponent(month));
+  const data = await r.json();
+  DAYS = data.days || [];
+  const panel = document.querySelector('.hidden-days');
+  panel.innerHTML = '';
+  panel.appendChild(el('h2', null, month + ' — ' + data.total.toLocaleString() + ' photos'));
+  if (!DAYS.length) {
+    panel.appendChild(el('p', 'hint', 'No photos with a full date in this month.'));
+    return;
+  }
+  const chart = renderChart(DAYS, pickDay, selectedDay, (row) => row.period.slice(8));
+  chart.id = 'days-chart';
+  [...chart.children].forEach((bar, i) => { bar.dataset.idx = i; });
+  panel.appendChild(chart);
+  const grid = el('div', 'panel');
+  grid.id = 'day-grid';
+  grid.appendChild(el('p', 'hint', 'Pick a day to see its photos.'));
+  const old = document.getElementById('day-grid');
+  if (old) old.remove();
+  document.getElementById('content').appendChild(grid);
+}
+
+async function pickDay(day) {
+  selectedDay = day;
+  for (const bar of document.querySelectorAll('#days-chart .bar')) {
+    bar.classList.toggle('sel', DAYS[bar.dataset.idx].period === day);
+  }
+  const grid = document.getElementById('day-grid');
+  grid.innerHTML = '';
+  grid.appendChild(el('h2', null, day));
+  const r = await fetch('/query/api/images?day=' + encodeURIComponent(day) +
+                        '&limit=200&sort=shot_asc');
+  const rows = await r.json();
+  if (!rows.length) {
+    grid.appendChild(el('p', 'hint', 'No photos on this day.'));
+    return;
+  }
+  const wrap = el('div', 'photos');
+  for (const row of rows) {
+    const link = document.createElement('a');
+    link.href = '/review?file=' + encodeURIComponent(row.file_path);
+    link.target = '_blank';
+    link.rel = 'noopener';
+    const img = document.createElement('img');
+    img.src = '/review/thumbnail?path=' + encodeURIComponent(row.file_path) + '&size=300';
+    img.alt = row.file_name || '';
+    img.loading = 'lazy';
+    link.appendChild(img);
+    link.appendChild(el('div', 'nm', row.file_name || ''));
+    wrap.appendChild(link);
+  }
+  grid.appendChild(wrap);
+  const all = el('p', 'hint');
+  const a = document.createElement('a');
+  a.href = '/query?day=' + encodeURIComponent(day);
+  a.textContent = 'Open this day in Query';
+  all.appendChild(a);
+  grid.appendChild(all);
+}
+
+document.getElementById('colourBy').addEventListener('change', repaint);
+loadMonths();
+</script>
+</body>
+</html>

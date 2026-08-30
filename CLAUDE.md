@@ -60,14 +60,18 @@ src/pyimgtag/
                        token bucket and `-j 0` auto resolution
   geocoder.py          Nominatim reverse geocoder with JSON disk cache; network lookups are
                        serialized process-wide at 1 req/s so any `-j` stays policy-compliant
-  filters.py           Date range filters
+  filters.py           Date range filters plus the --bbox / --year / --month / day
+                       parsers shared by the CLI and the query/map web APIs
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
   db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
-                       versioned migrations via PRAGMA user_version), image_db (ImageDB),
+                       versioned migrations via PRAGMA user_version — latest is v14, which
+                       persists EXIF gps_lat/gps_lon plus the gps and image_date indexes),
+                       image_db (ImageDB — incl. the bbox / ISO date-prefix query filters),
                        face_db (FaceDB), judge_db (JudgeDB), insights_db (InsightsDB —
                        SQL-side library aggregation for `insights`), dedup_db (DedupDB —
-                       dedup_groups/dedup_members plus the phash columns)
+                       dedup_groups/dedup_members plus the phash columns), map_db (MapDB —
+                       zoom-binned GPS clustering + month/day timeline aggregates)
   insights_report.py   Terminal + self-contained HTML renderers for the insights document
   mcp_server.py        MCP (stdio) tool surface over the DB for AI assistants: read tools always
                        registered, write tools only with --enable-writes /
@@ -97,8 +101,11 @@ src/pyimgtag/
                        photos_importer (Apple Photos face/people import)
   review_server.py / faces_review_server.py  FastAPI review and face-management UI servers
   commands/            Per-subcommand handlers (run, judge, db, query, tags, faces, ...)
-  webapp/              FastAPI dashboard + review/faces/tags/query/judge/insights/dedup UIs; page HTML/CSS/JS
-                       lives in webapp/templates/*.html, rendered via Jinja2 (webapp/templating.py)
+  webapp/              FastAPI dashboard + review/faces/tags/query/judge/insights/map/timeline/
+                       dedup UIs; page HTML/CSS/JS lives in webapp/templates/*.html, rendered via
+                       Jinja2 (webapp/templating.py). webapp/static/ holds vendored front-end
+                       assets (Leaflet, BSD-2) served by routes_static.py at /static — no CDN
+                       anywhere; the only external request is map tiles (PYIMGTAG_MAP_TILES)
 tests/                 Unit tests (no network, no Ollama required)
 ```
 
