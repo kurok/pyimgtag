@@ -17,6 +17,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from pyimgtag.db.dedup_db import DedupDB
+
 INSIGHTS_SCHEMA_VERSION = 1
 
 # Hard ceiling on the "top photos" list — the HTML report inlines a
@@ -251,11 +253,16 @@ class InsightsDB:
             "(tags IS NULL OR tags = '' OR tags = '[]')"
         )
         errors = self._scalar("SELECT COUNT(*) FROM processed_images WHERE status = 'error'")
+        # Duplicate totals come from the dedup tables (populated by
+        # ``pyimgtag dedup scan``); an un-scanned library reports zeros.
+        dedup = DedupDB(self._conn).totals()
         return {
             "delete_candidates": cleanup.get("delete", {"count": 0, "bytes": 0}),
             "review_candidates": cleanup.get("review", {"count": 0, "bytes": 0}),
             "untagged": int(untagged or 0),
             "errors": int(errors or 0),
+            "duplicate_groups": dedup["groups"],
+            "duplicates_reclaimable_bytes": dedup["reclaimable_bytes"],
         }
 
     # --- public ------------------------------------------------------------

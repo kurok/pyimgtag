@@ -205,6 +205,29 @@ Examples:
   pyimgtag insights --top 25 --output report.html --no-thumbnails
 """,
     ),
+    "dedup": (
+        "Find and resolve duplicate photos and bursts",
+        "Group photos by perceptual hash, pick the copy worth keeping, and act on\n"
+        "the rest. Report-only by default: --move-to relocates the losers (fully\n"
+        "reversible with 'dedup undo'), --delete --yes sends them to the OS trash.\n"
+        "Apple Photos originals are never touched on disk — they are tagged with\n"
+        "the 'pyimgtag:duplicate' keyword instead. Run 'judge' first for the best\n"
+        "best-pick quality.",
+        """\
+Examples:
+  pyimgtag dedup scan                          # hash the library and build the plan
+  pyimgtag dedup scan --threshold 8            # looser: also groups bursts
+  pyimgtag dedup list                          # groups, best pick, reclaimable bytes
+  pyimgtag dedup resolve                       # print the plan, change nothing
+  pyimgtag dedup resolve --move-to ~/pyimgtag-duplicates
+  pyimgtag dedup resolve --delete --yes        # OS trash (needs the [dedup] extra)
+  pyimgtag dedup undo                          # move quarantined copies back
+
+Ranking order for the keeper (reorder with --prefer):
+  judge score -> resolution -> file size -> format (RAW > HEIC > JPEG > TIFF > PNG)
+  -> oldest mtime -> path
+""",
+    ),
     "tags": (
         "Manage tags across the image database",
         "List, rename, delete, or merge tags across all images in the database.",
@@ -1021,6 +1044,89 @@ def _add_tags_subcommand(subparsers: Any) -> None:
     tags_merge_p.add_argument("--db", help=_DEFAULT_DB_HELP)
 
 
+def _add_dedup_subcommand(subparsers: Any) -> None:
+    from pyimgtag.dedup_groups import CRITERIA, DEFAULT_THRESHOLD
+
+    prefer_help = (
+        "Comma-separated ranking criteria, highest priority first "
+        f"(choose from: {', '.join(CRITERIA)}). Unlisted criteria keep their "
+        "default relative order."
+    )
+
+    dedup_p = _sub(subparsers, "dedup")
+    dedup_sub = dedup_p.add_subparsers(dest="dedup_action")
+
+    scan_p = dedup_sub.add_parser("scan", help="Hash the library and (re)build duplicate groups")
+    scan_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    scan_p.add_argument(
+        "--threshold",
+        type=int,
+        default=DEFAULT_THRESHOLD,
+        metavar="N",
+        help=f"Hamming distance for a match (default: {DEFAULT_THRESHOLD}; 6-10 finds bursts)",
+    )
+    scan_p.add_argument(
+        "--rehash",
+        action="store_true",
+        help="Recompute hashes for every known photo, not just the ones missing one",
+    )
+
+    list_p = dedup_sub.add_parser("list", help="List duplicate groups with the best pick")
+    list_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    list_p.add_argument(
+        "--include-resolved",
+        action="store_true",
+        help="Also list groups that were already resolved",
+    )
+    list_p.add_argument(
+        "--format",
+        choices=["table", "json"],
+        default="table",
+        help="Output format (default: table)",
+    )
+    list_p.add_argument("--prefer", default=None, metavar="CRITERIA", help=prefer_help)
+
+    resolve_p = dedup_sub.add_parser(
+        "resolve", help="Act on duplicate groups (report-only default)"
+    )
+    resolve_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    resolve_action = resolve_p.add_mutually_exclusive_group()
+    resolve_action.add_argument(
+        "--move-to",
+        metavar="DIR",
+        help="Relocate losing copies under DIR, preserving path structure (reversible)",
+    )
+    resolve_action.add_argument(
+        "--delete",
+        action="store_true",
+        help="Send losing copies to the OS trash (requires --yes and the [dedup] extra)",
+    )
+    resolve_p.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm --delete. Without it, --delete refuses to run.",
+    )
+    resolve_p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the plan and touch nothing (implied when no action flag is given)",
+    )
+    resolve_p.add_argument("--group", type=int, metavar="ID", help="Only resolve this group id")
+    resolve_p.add_argument(
+        "--write-back",
+        action="store_true",
+        help=(
+            "For Apple Photos originals, add the 'pyimgtag:duplicate' keyword via "
+            "AppleScript (macOS only). Without it the tag action is only recorded."
+        ),
+    )
+    resolve_p.add_argument("--prefer", default=None, metavar="CRITERIA", help=prefer_help)
+
+    undo_p = dedup_sub.add_parser("undo", help="Move quarantined copies back and un-resolve")
+    undo_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    undo_p.add_argument("--group", type=int, metavar="ID", help="Only undo this group id")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="pyimgtag",
@@ -1040,6 +1146,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_query_subcommand(subparsers)
     _add_judge_subcommand(subparsers)
     _add_tags_subcommand(subparsers)
+    _add_dedup_subcommand(subparsers)
     _add_insights_subcommand(subparsers)
     _add_prompt_subcommand(subparsers)
 
@@ -1095,6 +1202,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--date cannot be combined with --date-from/--date-to")
     if args.subcommand == "cleanup-drift" and args.dry_run and args.prune_photos_missing:
         parser.error("--dry-run cannot be combined with --prune-photos-missing")
+    if args.subcommand == "dedup" and getattr(args, "prefer", None):
+        from pyimgtag.dedup_groups import parse_prefer
+
+        try:
+            parse_prefer(args.prefer)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.subcommand == "query" and args.include_children:
         if not args.tag:
             parser.error("--include-children requires --tag")
@@ -1105,6 +1219,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from pyimgtag.commands.cleanup_drift import cmd_cleanup_drift
     from pyimgtag.commands.db import cmd_cleanup, cmd_reprocess, cmd_status
+    from pyimgtag.commands.dedup import cmd_dedup
     from pyimgtag.commands.faces import cmd_faces
     from pyimgtag.commands.insights import cmd_insights
     from pyimgtag.commands.judge import cmd_judge
@@ -1140,6 +1255,7 @@ def main(argv: list[str] | None = None) -> int:
         "query": lambda: cmd_query(args),
         "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
+        "dedup": lambda: cmd_dedup(args),
         "insights": lambda: cmd_insights(args),
         "prompt": lambda: cmd_prompt(args),
     }

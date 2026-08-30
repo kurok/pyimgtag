@@ -60,6 +60,16 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     """List photos flagged for cleanup and exit."""
     with ProgressDB(db_path=args.db) as db:
         candidates = db.get_cleanup_candidates(include_review=args.include_review)
+        dedup_totals = db.get_dedup_totals()
+
+    if dedup_totals["groups"]:
+        from pyimgtag.insights_report import format_bytes
+
+        print(
+            f"Duplicate groups: {dedup_totals['groups']} "
+            f"({format_bytes(dedup_totals['reclaimable_bytes'])} reclaimable) — "
+            "see 'pyimgtag dedup list'"
+        )
 
     if not candidates:
         print("No cleanup candidates found.", file=sys.stderr)

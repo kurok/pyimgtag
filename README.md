@@ -62,10 +62,11 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `watch`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`, `insights`, `prompt`
+- Subcommands: `run`, `watch`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `dedup`, `faces`, `review`, `insights`, `prompt`
 - Continuous tagging: `watch` polls the source and tags new/changed photos as they land, with a one-command launchd/systemd service install
 - Controlled vocabulary, custom prompt templates, and output language: constrain tags to *your* taxonomy with synonyms and a hierarchy, deterministic across backends (`--vocabulary`, `--prompt-template`, `--tag-language`)
 - Library insights report: one command summarises the whole tagged library as a terminal table, a self-contained HTML page, or JSON (`insights` subcommand)
+- Duplicate and burst resolution: group the library by perceptual hash, pick the copy worth keeping, and quarantine or trash the rest — report-only by default and reversible (`dedup` subcommand, `/dedup` page)
 - Photo quality scoring: a single 1–10 score plus a model-written reason (`judge` subcommand)
 - Dry-run mode, date/limit filters, JSON/CSV export
 - SQLite progress DB with schema versioning for incremental re-runs
@@ -642,10 +643,76 @@ Sections appear only when the DB has data for them:
 | Content | top tags, scene categories, emotional tones, event hints, has-text share |
 | People | named people by photo count with a per-year breakdown (needs named faces) |
 | Quality | judge score histogram, average, coverage %, top photos (needs `judge` scores) |
-| Housekeeping | delete/review candidates with reclaimable bytes, untagged remainder, errors |
+| Housekeeping | delete/review candidates with reclaimable bytes, duplicate groups and their reclaimable bytes, untagged remainder, errors |
 
 The same report lives in the webapp at `/insights`, with an **Export HTML**
 button that downloads the identical standalone file.
+
+#### `pyimgtag dedup` — finding and resolving duplicates
+
+Answers "which of these 60k photos are the same shot, and which copy should I
+keep?". It reuses data pyimgtag already has: the perceptual hash (visual
+identity), judge scores (which copy is best), and resolution/size/format
+(tie-breakers). Requires nothing new except `send2trash` for the optional
+delete path (`pip install 'pyimgtag[dedup]'`).
+
+```bash
+# 1. Hash every DB row that still needs it and build the group plan
+pyimgtag dedup scan                    # threshold 5 = near-identical copies
+pyimgtag dedup scan --threshold 8      # 6-10 also groups bursts
+pyimgtag dedup scan --rehash           # recompute hashes that already exist
+
+# 2. Look at the plan
+pyimgtag dedup list                    # id, kind, count, best pick, reclaimable
+pyimgtag dedup list --format json
+
+# 3. Act, in increasing order of commitment
+pyimgtag dedup resolve                             # print the plan, change nothing
+pyimgtag dedup resolve --move-to ~/pyimgtag-duplicates   # reversible quarantine
+pyimgtag dedup resolve --delete --yes              # OS trash, needs both flags
+pyimgtag dedup undo                                # move quarantined copies back
+```
+
+**Safety model — graduated, and never destructive by default:**
+
+1. **Report-only is the default.** `dedup resolve` with no action flag prints
+   the full plan and touches neither disk nor the plan itself. `--dry-run`
+   forces the same behaviour when an action flag is present.
+2. **Move is the recommended action.** `--move-to DIR` relocates each losing
+   copy to `DIR` + its original path (`/a/b/c.jpg` → `DIR/a/b/c.jpg`), records
+   where it went, and marks the group resolved. `pyimgtag dedup undo` puts
+   every file back and un-resolves the group.
+3. **Trash is opt-in twice.** `--delete` needs `--yes` and uses `send2trash`
+   (the OS trash) — pyimgtag never calls `os.remove` on your photos. Undo can
+   clear the DB record but cannot un-trash files; restore those from the trash.
+4. **Apple Photos originals are never touched on disk.** Any path inside a
+   `.photoslibrary` bundle is recorded with the `tag` action instead; with
+   `--write-back` on macOS the keyword `pyimgtag:duplicate` is added to the
+   photo so you can collect them in a smart album and delete them from Photos.
+
+**Best-pick ranking** is deterministic and documented, applied in this order:
+
+| # | Criterion | Rule |
+|---|---|---|
+| 1 | `score` | judge score, highest first (a missing score ranks as -1) |
+| 2 | `resolution` | width × height, largest first |
+| 3 | `size` | file size in bytes, largest first |
+| 4 | `format` | RAW (`cr2 nef arw dng raf orf rw2`) > HEIC/HEIF > JPEG > TIFF > PNG |
+| 5 | `mtime` | oldest modification time first |
+| 6 | path | final tie-break, so the choice never depends on row order |
+
+`--prefer` reorders it: `--prefer resolution,score` puts resolution first and
+keeps the remaining criteria in their default relative order. An unknown name
+is a parser error. **Run `pyimgtag judge` before `dedup`** — without scores the
+ranking falls back to pixels and bytes, which is a materially worse signal.
+
+Groups are stored in the DB, so rescans are incremental: a group you already
+resolved is frozen (never rewritten, and its photos never reappear in a new
+plan), while unresolved groups are rebuilt on every scan and keep their id, so
+a newly imported photo joins the group it matches. Groups whose members are all
+within distance 5 are labelled `duplicate`; looser ones are `burst`.
+
+The same workflow lives in the webapp at `/dedup`.
 
 #### `pyimgtag faces` — face detection, clustering, naming
 
@@ -1048,6 +1115,9 @@ hosts a single top-nav with these pages:
 - `/judge` — judge-score grid with rating filter / sort / pager.
 - `/insights` — library report (totals, time, places, content, people,
   quality, housekeeping) with an Export HTML button for the standalone file.
+- `/dedup` — duplicate/burst groups with side-by-side thumbnails, the best
+  pick highlighted with reason badges, per-photo keep toggles, and a gated
+  "apply plan" that moves the losers into a quarantine folder (never deletes).
 - `/edit` — bulk-delete files marked `cleanup_class='delete'` from
   Apple Photos (macOS only; gated behind an explicit confirm).
 - `/about` — installed version, latest PyPI release, update check, wiki links.

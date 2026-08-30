@@ -212,11 +212,16 @@ function render(doc) {
   const hk = doc.housekeeping;
   if (hk) {
     root.appendChild(el('h2', null, 'Housekeeping'));
-    root.appendChild(cards([
+    const hkCards = [
       [hk.delete_candidates.count.toLocaleString(), 'delete candidates · ' + fmtBytes(hk.delete_candidates.bytes)],
       [hk.review_candidates.count.toLocaleString(), 'review candidates · ' + fmtBytes(hk.review_candidates.bytes)],
       [hk.untagged.toLocaleString(), 'tagged ok but no tags'], [hk.errors.toLocaleString(), 'processing errors'],
-    ]));
+    ];
+    if (hk.duplicate_groups) {
+      hkCards.push([hk.duplicate_groups.toLocaleString(),
+                    'duplicate groups · ' + fmtBytes(hk.duplicates_reclaimable_bytes || 0) + ' reclaimable']);
+    }
+    root.appendChild(cards(hkCards));
   }
 }
 
