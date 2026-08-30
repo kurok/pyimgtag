@@ -48,6 +48,11 @@ def test_lock_acquire_release_and_contention(tmp_path):
     assert not path.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows recycles PIDs fast enough that the dead pid above can already "
+    "belong to a new live process, making _pid_alive() flaky",
+)
 def test_lock_reclaims_stale_and_garbage(tmp_path):
     path = tmp_path / "x.lock"
     proc = subprocess.Popen([sys.executable, "-c", "pass"])  # nosec B603

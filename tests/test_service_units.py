@@ -35,12 +35,15 @@ def test_unit_paths():
 
 def test_render_launchd_plist_is_valid_and_embeds_argv():
     argv = ["/py", "-m", "pyimgtag", "watch", "--input-dir", "/Pics/a&b <c>"]
-    text = su.render_launchd_plist(argv, Path("/logs/w.log"))
+    log_path = Path("/logs/w.log")
+    text = su.render_launchd_plist(argv, log_path)
     data = plistlib.loads(text.encode("utf-8"))
     assert data["Label"] == su.LAUNCHD_LABEL
     assert data["ProgramArguments"] == argv  # XML-escaped on the way out, intact on the way in
     assert data["RunAtLoad"] is True and data["KeepAlive"] is True
-    assert data["StandardOutPath"] == "/logs/w.log"
+    # launchd only exists on macOS; compare against str(Path(...)) rather than a
+    # hardcoded POSIX literal so this golden test also runs on Windows CI.
+    assert data["StandardOutPath"] == str(log_path)
     assert data["EnvironmentVariables"] == {
         "PYIMGTAG_NO_WEB": "1",
         "PYIMGTAG_NO_UPDATE_CHECK": "1",
