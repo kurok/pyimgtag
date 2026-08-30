@@ -70,10 +70,17 @@ def fixture_db(tmp_path):
             cleanup_class="delete",
         ),
     )
+    # Use the same OS-normalized string everywhere a given path is referenced
+    # (mark_done stores str(Path(...)), which uses native separators on
+    # Windows) so faces/judge rows join against processed_images correctly.
+    c_path = str(Path("/lib/c.jpg"))
+    d_path = str(Path("/lib/d.jpg"))
+    e_path = str(Path("/lib/e.jpg"))
+    err_path = str(Path("/lib/err.jpg"))
     db.mark_done(
-        Path("/lib/c.jpg"),
+        Path(c_path),
         _img(
-            "/lib/c.jpg",
+            c_path,
             tags=["family", "indoor"],
             image_date="2023-01-15T09:00:00",
             nearest_country="Spain",
@@ -85,16 +92,16 @@ def fixture_db(tmp_path):
         ),
     )
     db.mark_done(
-        Path("/lib/d.jpg"),
-        _img("/lib/d.jpg", tags=[], image_date=None, scene_category="screenshot"),
+        Path(d_path),
+        _img(d_path, tags=[], image_date=None, scene_category="screenshot"),
     )
-    db.mark_done(Path("/lib/e.jpg"), _img("/lib/e.jpg", tags=["sunset"], image_date="2024-08-01"))
+    db.mark_done(Path(e_path), _img(e_path, tags=["sunset"], image_date="2024-08-01"))
     db.mark_done(
-        Path("/lib/err.jpg"),
-        _img("/lib/err.jpg", tags=[], processing_status="error", error_message="boom"),
+        Path(err_path),
+        _img(err_path, tags=[], processing_status="error", error_message="boom"),
     )
 
-    for path, score in ((str(big), 9), (str(small), 4), ("/lib/c.jpg", 7)):
+    for path, score in ((str(big), 9), (str(small), 4), (c_path, 7)):
         db.save_judge_result(
             JudgeResult(
                 file_path=path,
@@ -113,14 +120,14 @@ def fixture_db(tmp_path):
     rows = [
         (str(big), alice),
         (str(small), alice),
-        ("/lib/c.jpg", alice),
-        ("/lib/c.jpg", bob),
-        ("/lib/d.jpg", unnamed),
+        (c_path, alice),
+        (c_path, bob),
+        (d_path, unnamed),
     ]
     conn.executemany("INSERT INTO faces (image_path, person_id, ignored) VALUES (?, ?, 0)", rows)
     # An ignored face must not count towards Bob.
     conn.execute(
-        "INSERT INTO faces (image_path, person_id, ignored) VALUES (?, ?, 1)", ("/lib/e.jpg", bob)
+        "INSERT INTO faces (image_path, person_id, ignored) VALUES (?, ?, 1)", (e_path, bob)
     )
     conn.commit()
     yield db

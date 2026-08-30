@@ -135,7 +135,9 @@ def test_export_with_thumbnails_uses_review_pipeline(tmp_path, monkeypatch):
     client = _client(_seeded_db(tmp_path))
     r = client.get("/export")
     assert r.status_code == 200
-    assert seen == ["/img/2.jpg", "/img/1.jpg", "/img/0.jpg"]
+    # mark_done stores str(Path(...)), so compare against the same
+    # OS-normalized form rather than a hardcoded forward-slash literal.
+    assert seen == [str(Path("/img/2.jpg")), str(Path("/img/1.jpg")), str(Path("/img/0.jpg"))]
     assert r.text.count("data:image/jpeg;base64,") == 3
 
 

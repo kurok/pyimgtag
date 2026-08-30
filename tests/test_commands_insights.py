@@ -178,7 +178,10 @@ def test_main_html_with_thumbnails_reads_only_db_known_files(tmp_path, monkeypat
     monkeypatch.setattr("pyimgtag.commands.insights._thumb_loader", fake_loader)
     out = tmp_path / "r.html"
     assert main(["insights", "--db", str(db), "-o", str(out), "--max-thumbnails", "2"]) == 0
-    assert seen == ["/lib/2.jpg", "/lib/1.jpg"]  # top-2 by score, DB paths only
+    # top-2 by score, DB paths only (mark_done stores str(Path(...)), so
+    # compare against the same OS-normalized form rather than a hardcoded
+    # forward-slash literal).
+    assert seen == [str(Path("/lib/2.jpg")), str(Path("/lib/1.jpg"))]
     html = out.read_text()
     assert html.count("data:image/jpeg;base64,") == 2
     assert "0.jpg" in html  # third photo still listed, with a placeholder
