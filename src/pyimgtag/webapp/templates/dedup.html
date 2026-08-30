@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pyimgtag Dedup</title>
+  <style>
+    {{ nav_styles }}
+    .toolbar{display:flex;align-items:center;gap:12px;padding:16px 32px 0;flex-wrap:wrap}
+    .toolbar .ctrl-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;
+                         color:var(--muted)}
+    .toolbar select{padding:4px 8px;border-radius:6px;border:1px solid var(--border);
+                    background:var(--surface);color:var(--text);font-size:12px;
+                    font-family:inherit}
+    #content{padding:8px 32px 40px}
+    .grp{background:var(--surface);border-radius:var(--radius-md);box-shadow:var(--shadow-sm);
+         padding:14px 16px;margin-bottom:16px}
+    .grp-hdr{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+    .grp-id{font-size:13px;font-weight:600}
+    .grp-meta{font-size:12px;color:var(--muted)}
+    .grp-actions{margin-left:auto;display:flex;gap:6px;align-items:center}
+    .kind{padding:2px 8px;border-radius:5px;font-size:10px;font-weight:700}
+    .kind-duplicate{background:rgba(0,113,227,.1);color:var(--accent)}
+    .kind-burst{background:rgba(255,159,10,.12);color:#b45309}
+    .copies{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+    .copy{border:2px solid transparent;border-radius:var(--radius-sm);overflow:hidden;
+          background:var(--bg)}
+    .copy.best{border-color:var(--ok);box-shadow:0 0 0 3px rgba(52,199,89,.12)}
+    .copy img{width:100%;aspect-ratio:4/3;object-fit:cover;background:#e5e5ea;display:block}
+    .copy .cbody{padding:8px 10px 10px;font-size:11px}
+    .copy .cname{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .copy .cfacts{color:var(--muted);margin-top:2px}
+    .badges{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+    .badge{padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;
+           background:rgba(52,199,89,.12);color:#1a7f50}
+    .badge-photos{background:rgba(255,159,10,.14);color:#b45309}
+    .keep-lbl{display:flex;align-items:center;gap:5px;margin-top:7px;font-size:11px;
+              color:var(--muted);cursor:pointer}
+    .empty{background:var(--surface);border-radius:var(--radius-md);padding:48px;
+           text-align:center;color:var(--muted);box-shadow:var(--shadow-sm)}
+    .empty p:first-child{font-size:17px;color:var(--text);margin-bottom:8px}
+    code{font-family:ui-monospace,'SF Mono',monospace;font-size:12px;background:var(--bg);
+         padding:2px 6px;border-radius:4px}
+    .note{font-size:12px;color:var(--muted);padding:4px 32px 0;line-height:1.5}
+  </style>
+</head>
+<body>
+{{ nav }}
+<div class="page-hdr">
+  <span class="page-title">Dedup</span>
+  <span class="page-meta" id="meta">Loading…</span>
+</div>
+<div class="toolbar">
+  <label class="ctrl-label">Keep by
+    <select id="preferSel" onchange="load()">
+      <option value="">score, resolution, size, format, mtime (default)</option>
+      <option value="resolution">resolution first</option>
+      <option value="size">file size first</option>
+      <option value="format">format first</option>
+      <option value="mtime">oldest first</option>
+    </select>
+  </label>
+  <label class="ctrl-label">
+    <input type="checkbox" id="inclResolved" onchange="load()"> show resolved
+  </label>
+  <button class="btn btn-primary btn-sm" id="applyAllBtn" onclick="applyAll()">Apply plan to all groups</button>
+</div>
+<p class="note">Applying moves every non-kept copy into a quarantine folder — nothing is deleted and
+  every move is reversible with Undo. Photos inside an Apple Photos library are never touched on
+  disk; they are only recorded so <code>pyimgtag dedup resolve --write-back</code> can tag them.</p>
+<div id="content"></div>
+{{ modal_html }}
+{{ modal_js }}
+<script>
+const DEFAULT_QUARANTINE = {{ default_quarantine | tojson }};
+let GROUPS = [];
+
+function fmtBytes(n) {
+  n = n || 0;
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + units[i];
+}
+
+function baseName(p) {
+  const parts = String(p).replace(/\\/g, '/').split('/');
+  return parts[parts.length - 1] || p;
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+}
+
+function keptPath(group) {
+  const chosen = document.querySelector('input[name="keep-' + group.id + '"]:checked');
+  return chosen ? chosen.value : group.best_path;
+}
+
+function copyCard(group, m) {
+  const facts = [];
+  if (m.width && m.height) facts.push(m.width + '×' + m.height);
+  if (m.file_size) facts.push(fmtBytes(m.file_size));
+  if (m.judge_score != null) facts.push('score ' + m.judge_score);
+  const badges = [];
+  if (m.is_best) {
+    badges.push('<span class="badge">keep</span>');
+    (group.best_reasons || []).forEach(r => badges.push('<span class="badge">' + esc(r) + '</span>'));
+  }
+  if (m.photos_library) badges.push('<span class="badge badge-photos">Photos original</span>');
+  if (m.action) badges.push('<span class="badge badge-photos">' + esc(m.action) + '</span>');
+  const checked = m.is_best ? ' checked' : '';
+  const disabled = group.resolved_at ? ' disabled' : '';
+  return '<div class="copy' + (m.is_best ? ' best' : '') + '">' +
+    '<img loading="lazy" alt="' + esc(baseName(m.file_path)) + '" ' +
+    'src="/review/thumbnail?size=240&path=' + encodeURIComponent(m.file_path) + '">' +
+    '<div class="cbody"><div class="cname" title="' + esc(m.file_path) + '">' +
+    esc(baseName(m.file_path)) + '</div>' +
+    '<div class="cfacts">' + esc(facts.join(' · ') || '—') + '</div>' +
+    '<div class="badges">' + badges.join('') + '</div>' +
+    '<label class="keep-lbl"><input type="radio" name="keep-' + group.id + '" value="' +
+    esc(m.file_path) + '"' + checked + disabled + '> keep this one</label>' +
+    '</div></div>';
+}
+
+function groupCard(group) {
+  const resolved = !!group.resolved_at;
+  const actions = resolved
+    ? '<button class="btn btn-secondary btn-sm" onclick="undoGroup(' + group.id + ')">Undo</button>'
+    : '<button class="btn btn-primary btn-sm" onclick="applyGroup(' + group.id + ')">Apply plan</button>';
+  return '<div class="grp" id="grp-' + group.id + '">' +
+    '<div class="grp-hdr"><span class="grp-id">Group ' + group.id + '</span>' +
+    '<span class="kind kind-' + esc(group.kind) + '">' + esc(group.kind) + '</span>' +
+    '<span class="grp-meta">' + group.count + ' copies · ' +
+    fmtBytes(group.reclaimable_bytes) + ' reclaimable' +
+    (resolved ? ' · resolved' : '') + '</span>' +
+    '<span class="grp-actions">' + actions + '</span></div>' +
+    '<div class="copies">' + group.members.map(m => copyCard(group, m)).join('') + '</div></div>';
+}
+
+function render(doc) {
+  GROUPS = doc.groups || [];
+  const root = document.getElementById('content');
+  const meta = document.getElementById('meta');
+  document.getElementById('applyAllBtn').style.display = GROUPS.length ? '' : 'none';
+  if (!GROUPS.length) {
+    meta.textContent = 'no duplicate groups';
+    root.innerHTML = '<div class="empty"><p>No duplicates found</p>' +
+      '<p>Run <code>pyimgtag dedup scan</code> to hash your library and build the plan. ' +
+      'Run <code>pyimgtag judge</code> first for better best-pick choices.</p></div>';
+    return;
+  }
+  meta.textContent = GROUPS.length + ' group(s) · ' +
+    fmtBytes(doc.reclaimable_bytes) + ' reclaimable';
+  root.innerHTML = GROUPS.map(groupCard).join('');
+}
+
+function askQuarantine(title, sub, onDir) {
+  const field = '<input class="inp" id="modal-dir" value="' + esc(DEFAULT_QUARANTINE) + '">';
+  openModal(title, sub, field, 'Move copies', 'btn-primary', () => {
+    const dir = (document.getElementById('modal-dir').value || '').trim();
+    if (!dir) return;
+    closeModal();
+    onDir(dir);
+  });
+}
+
+async function postJSON(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
+async function applyIds(ids, dir) {
+  const keep = {};
+  ids.forEach(id => {
+    const group = GROUPS.find(g => g.id === id);
+    if (group) keep[String(id)] = keptPath(group);
+  });
+  const res = await postJSON('{{ api_base }}/api/apply', {group_ids: ids, move_to: dir, keep: keep});
+  if (res.errors && res.errors.length) window.alert(res.errors.join('\n'));
+  load();
+}
+
+function applyGroup(id) {
+  askQuarantine('Move duplicate copies?',
+    'Every copy except the one marked "keep" is moved into this folder. Nothing is deleted.',
+    dir => applyIds([id], dir));
+}
+
+function applyAll() {
+  const ids = GROUPS.filter(g => !g.resolved_at).map(g => g.id);
+  if (!ids.length) return;
+  askQuarantine('Move duplicates from ' + ids.length + ' group(s)?',
+    'Every copy except the keeper of each group is moved into this folder. Nothing is deleted.',
+    dir => applyIds(ids, dir));
+}
+
+async function undoGroup(id) {
+  const res = await postJSON('{{ api_base }}/api/undo', {group_id: id});
+  if (res.errors && res.errors.length) window.alert(res.errors.join('\n'));
+  load();
+}
+
+async function load() {
+  const prefer = document.getElementById('preferSel').value;
+  const incl = document.getElementById('inclResolved').checked ? 1 : 0;
+  const r = await fetch('{{ api_base }}/api/groups?include_resolved=' + incl + '&prefer=' + encodeURIComponent(prefer));
+  render(await r.json());
+}
+load();
+</script>
+</body>
+</html>

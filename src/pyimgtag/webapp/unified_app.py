@@ -17,6 +17,7 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     - Query at ``/query``
     - Judge at ``/judge``
     - Insights at ``/insights``
+    - Dedup at ``/dedup``
     - Edit at ``/edit``
 
     Raises:
@@ -33,6 +34,7 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     from pyimgtag.progress_db import ProgressDB
     from pyimgtag.webapp.dashboard_server import build_dashboard_router
     from pyimgtag.webapp.routes_about import build_about_router
+    from pyimgtag.webapp.routes_dedup import build_dedup_router
     from pyimgtag.webapp.routes_edit import build_edit_router
     from pyimgtag.webapp.routes_faces import build_faces_router
     from pyimgtag.webapp.routes_insights import build_insights_router
@@ -64,6 +66,7 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     app.include_router(build_query_router(db, api_base="/query"), prefix="/query")
     app.include_router(build_judge_router(db, api_base="/judge"), prefix="/judge")
     app.include_router(build_insights_router(db, api_base="/insights"), prefix="/insights")
+    app.include_router(build_dedup_router(db, api_base="/dedup"), prefix="/dedup")
     app.include_router(build_edit_router(db, api_base="/edit"), prefix="/edit")
     app.include_router(build_about_router(), prefix="/about")
 

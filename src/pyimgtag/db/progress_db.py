@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pyimgtag.db.dedup_db import DedupDB
 from pyimgtag.db.face_db import FaceDB
 from pyimgtag.db.image_db import _DEFAULT_PATH_BATCH_SIZE, ImageDB
 from pyimgtag.db.insights_db import InsightsDB
@@ -13,7 +14,7 @@ from pyimgtag.db.judge_db import _DEFAULT_JUDGE_RESULTS_LIMIT, JudgeDB
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
     import numpy as np
 
@@ -113,6 +114,36 @@ class ProgressDB:
         # rows because all 13 per-criterion fields were set to the same value).
         (12, "ALTER TABLE judge_scores ADD COLUMN score REAL"),
         (12, "UPDATE judge_scores SET score = weighted_score WHERE score IS NULL"),
+        # 0.30.0: duplicate & burst resolution workflow. The perceptual hash
+        # and pixel dimensions live on the image row (one hash per photo);
+        # group membership and what was done to each copy live in their own
+        # tables so a rescan can rebuild the plan without losing history.
+        (13, "ALTER TABLE processed_images ADD COLUMN phash TEXT"),
+        (13, "ALTER TABLE processed_images ADD COLUMN width INTEGER"),
+        (13, "ALTER TABLE processed_images ADD COLUMN height INTEGER"),
+        (
+            13,
+            """CREATE TABLE IF NOT EXISTS dedup_groups (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                threshold   INTEGER NOT NULL,
+                kind        TEXT NOT NULL DEFAULT 'duplicate',
+                created_at  TEXT NOT NULL,
+                resolved_at TEXT,
+                keep_path   TEXT
+            )""",
+        ),
+        (
+            13,
+            """CREATE TABLE IF NOT EXISTS dedup_members (
+                group_id  INTEGER NOT NULL REFERENCES dedup_groups(id),
+                file_path TEXT NOT NULL PRIMARY KEY,
+                action    TEXT,
+                moved_to  TEXT,
+                acted_at  TEXT
+            )""",
+        ),
+        (13, "CREATE INDEX IF NOT EXISTS idx_dedup_members_group ON dedup_members(group_id)"),
+        (13, "CREATE INDEX IF NOT EXISTS idx_pi_phash ON processed_images(phash)"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -169,6 +200,11 @@ class ProgressDB:
     def _insights(self) -> InsightsDB:
         """Library-aggregation helper bound to the current connection."""
         return InsightsDB(self._conn)
+
+    @property
+    def _dedup(self) -> DedupDB:
+        """Duplicate-group helper bound to the current connection."""
+        return DedupDB(self._conn)
 
     def get_insights(self, top_n: int = 10) -> dict:
         """Delegate to :meth:`InsightsDB.compute`."""
@@ -536,6 +572,64 @@ class ProgressDB:
     def update_missing_fields(self, file_path: Path, result: ImageResult) -> None:
         """Delegate to :meth:`ImageDB.update_missing_fields`."""
         self._images.update_missing_fields(file_path, result)
+
+    # --- duplicate groups (delegated to DedupDB) ---
+
+    def iter_paths_missing_phash(self, include_hashed: bool = False) -> "Iterator[str]":
+        """Delegate to :meth:`DedupDB.iter_paths_missing_phash`."""
+        return self._dedup.iter_paths_missing_phash(include_hashed)
+
+    def set_phash(
+        self,
+        file_path: str,
+        phash: str | None,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> None:
+        """Delegate to :meth:`DedupDB.set_phash`."""
+        self._dedup.set_phash(file_path, phash, width, height)
+
+    def all_phashes(self) -> list[tuple[str, str]]:
+        """Delegate to :meth:`DedupDB.all_phashes`."""
+        return self._dedup.all_phashes()
+
+    def replace_unresolved_dedup_groups(
+        self,
+        groups: "Sequence[tuple[str, Sequence[str]]]",
+        threshold: int,
+    ) -> int:
+        """Delegate to :meth:`DedupDB.replace_unresolved_groups`."""
+        return self._dedup.replace_unresolved_groups(groups, threshold)
+
+    def list_dedup_groups(self, include_resolved: bool = False) -> list[dict]:
+        """Delegate to :meth:`DedupDB.list_groups`."""
+        return self._dedup.list_groups(include_resolved)
+
+    def get_dedup_group(self, group_id: int) -> dict | None:
+        """Delegate to :meth:`DedupDB.get_group`."""
+        return self._dedup.get_group(group_id)
+
+    def record_dedup_action(
+        self,
+        group_id: int,
+        file_path: str,
+        action: str,
+        moved_to: str | None = None,
+    ) -> None:
+        """Delegate to :meth:`DedupDB.record_action`."""
+        self._dedup.record_action(group_id, file_path, action, moved_to)
+
+    def mark_dedup_resolved(self, group_id: int, keep_path: str) -> None:
+        """Delegate to :meth:`DedupDB.mark_resolved`."""
+        self._dedup.mark_resolved(group_id, keep_path)
+
+    def undo_dedup_group(self, group_id: int) -> int:
+        """Delegate to :meth:`DedupDB.undo_group`."""
+        return self._dedup.undo_group(group_id)
+
+    def get_dedup_totals(self) -> dict[str, int]:
+        """Delegate to :meth:`DedupDB.totals`."""
+        return self._dedup.totals()
 
     def __enter__(self) -> "ProgressDB":
         """Enter the context manager, returning this instance."""

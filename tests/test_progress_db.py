@@ -275,7 +275,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 12
+            assert self._user_version(db._conn) == LATEST_SCHEMA_VERSION
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db._conn))
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
@@ -300,7 +300,7 @@ class TestSchemaVersioning:
         conn.close()
 
         with ProgressDB(db_path=db_path) as db:
-            assert self._user_version(db._conn) == 12
+            assert self._user_version(db._conn) == LATEST_SCHEMA_VERSION
             assert self._table_exists(db._conn, "faces")
             assert self._table_exists(db._conn, "persons")
 
@@ -342,7 +342,7 @@ class TestSchemaVersioning:
             pass
 
         with ProgressDB(db_path=db_path) as db2:
-            assert self._user_version(db2._conn) == 12
+            assert self._user_version(db2._conn) == LATEST_SCHEMA_VERSION
             assert _NEW_COLUMN_NAMES.issubset(self._column_names(db2._conn))
             assert self._table_exists(db2._conn, "faces")
             assert self._table_exists(db2._conn, "persons")
@@ -879,7 +879,7 @@ class TestMigrationV4:
 
         with ProgressDB(db_path=db_path) as db:
             ver = db._conn.execute("PRAGMA user_version").fetchone()[0]
-            assert ver == 12
+            assert ver == LATEST_SCHEMA_VERSION
             cols = {
                 row[1] for row in db._conn.execute("PRAGMA table_info(processed_images)").fetchall()
             }
@@ -1982,7 +1982,7 @@ class TestMigrationErrorBranches:
 
         # Must open without raising despite the duplicate scene_category column.
         with ProgressDB(db_path=db_path) as db:
-            assert db._conn.execute("PRAGMA user_version").fetchone()[0] == 12
+            assert db._conn.execute("PRAGMA user_version").fetchone()[0] == LATEST_SCHEMA_VERSION
 
     def test_migration_failure_rolls_back_and_reraises(self, tmp_path):
         """A non-duplicate OperationalError propagates after savepoint rollback."""

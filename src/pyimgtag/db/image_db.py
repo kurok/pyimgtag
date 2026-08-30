@@ -81,8 +81,9 @@ class ImageDB:
                  processed_at, status, error_message,
                  scene_category, emotional_tone, cleanup_class, has_text,
                  text_summary, event_hint, significance,
-                 nearest_city, nearest_region, nearest_country, image_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 nearest_city, nearest_region, nearest_country, image_date,
+                 phash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(file_path),
@@ -104,6 +105,9 @@ class ImageDB:
                 result.nearest_region,
                 result.nearest_country,
                 result.image_date,
+                # ``run --dedup`` computes this; persisting it here means
+                # ``dedup scan`` has nothing left to hash for those photos.
+                result.phash,
             ),
         )
         self._conn.commit()

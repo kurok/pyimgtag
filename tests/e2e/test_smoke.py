@@ -147,6 +147,7 @@ def test_each_nav_link_clicks_and_renders(page, base_url: str) -> None:
         "/query/",
         "/judge/",
         "/insights/",
+        "/dedup/",
         "/about/",
     ],
 )

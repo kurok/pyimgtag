@@ -177,6 +177,11 @@ def render_terminal(doc: dict) -> str:
         lines.append(f"  Cleanup: review   {rc['count']:>7}  ({format_bytes(rc['bytes'])})")
         lines.append(f"  Untagged (ok)     {hk['untagged']:>7}")
         lines.append(f"  Errors            {hk['errors']:>7}")
+        if hk.get("duplicate_groups"):
+            reclaimable = format_bytes(hk.get("duplicates_reclaimable_bytes", 0))
+            lines.append(
+                f"  Duplicate groups  {hk['duplicate_groups']:>7}  ({reclaimable} reclaimable)"
+            )
 
     return "\n".join(line[:TERMINAL_WIDTH] for line in lines) + "\n"
 
@@ -437,6 +442,13 @@ def render_html(
         parts.append(_card(f"{rc['count']:,}", f"review candidates · {format_bytes(rc['bytes'])}"))
         parts.append(_card(f"{hk['untagged']:,}", "tagged ok but no tags"))
         parts.append(_card(f"{hk['errors']:,}", "processing errors"))
+        if hk.get("duplicate_groups"):
+            reclaimable = format_bytes(hk.get("duplicates_reclaimable_bytes", 0))
+            parts.append(
+                _card(
+                    f"{hk['duplicate_groups']:,}", f"duplicate groups · {reclaimable} reclaimable"
+                )
+            )
         parts.append("</div>")
 
     parts.append(f"<footer>pyimgtag insights · schema v{doc['schema_version']}</footer>")
