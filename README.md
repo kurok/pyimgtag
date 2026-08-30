@@ -62,7 +62,7 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `watch`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `dedup`, `faces`, `review`, `insights`, `prompt`
+- Subcommands: `run`, `watch`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `dedup`, `faces`, `review`, `insights`, `mcp`, `prompt`
 - Continuous tagging: `watch` polls the source and tags new/changed photos as they land, with a one-command launchd/systemd service install
 - Controlled vocabulary, custom prompt templates, and output language: constrain tags to *your* taxonomy with synonyms and a hierarchy, deterministic across backends (`--vocabulary`, `--prompt-template`, `--tag-language`)
 - Library insights report: one command summarises the whole tagged library as a terminal table, a self-contained HTML page, or JSON (`insights` subcommand)
@@ -167,7 +167,7 @@ brew install ollama exiftool
 ollama pull gemma4:e4b
 
 # Install
-pip install "pyimgtag[all]"   # pillow-heif, photoscript, osxphotos, rawpy, face-recognition, fastapi, uvicorn, Vision OCR
+pip install "pyimgtag[all]"   # pillow-heif, photoscript, osxphotos, rawpy, face-recognition, fastapi, uvicorn, Vision OCR, MCP server
 # face naming add-ons: [photos-db] (osxphotos), [ocr] (Vision screen OCR, macOS)
 # or from source
 git clone https://github.com/kurok/pyimgtag.git
@@ -807,6 +807,19 @@ different default port. See [Local webapp](#local-webapp) below for the
 full page list. Requires the `[review]` extra (`pip install
 'pyimgtag[review]'`).
 
+#### `pyimgtag mcp` — serve the library to AI assistants
+
+```bash
+# Read-only stdio MCP server over the default DB
+pyimgtag mcp
+
+# A specific database, with the gated write tools and an export folder
+pyimgtag mcp --db ~/photos.db --enable-writes --export-root ~/photo-exports
+```
+
+Requires the `[mcp]` extra (`pip install 'pyimgtag[mcp]'`). See
+[MCP server](#mcp-server) below for client config and the tool reference.
+
 #### `pyimgtag tags` — manage tags
 
 ```bash
@@ -980,6 +993,7 @@ src/pyimgtag/
   filters.py           Date filter logic
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       SQLite progress DB with versioned migrations
+  mcp_server.py        MCP tool surface over the DB (read-only by default, gated writes)
   applescript_writer.py  Apple Photos keyword/description write-back
   _face_dep_check.py   Preflight for face_recognition; auto-downloads model files via _face_model_cache
   face_ocr.py          Screen-OCR naming: Vision OCR of a People-view screenshot → cluster names
@@ -997,6 +1011,7 @@ src/pyimgtag/
     faces.py           `pyimgtag faces` (scan [--jobs] / cluster / review / apply / import-photos / match-references / capture-names / ui)
     preflight_cmd.py   `pyimgtag preflight` handler
     review_cmd.py      `pyimgtag review` handler
+    mcp_cmd.py         `pyimgtag mcp` handler (stdio MCP server)
   webapp/
     __main__.py        `python -m pyimgtag.webapp` standalone uvicorn launcher
     unified_app.py     FastAPI app composition + `/health` endpoint
@@ -1205,6 +1220,103 @@ used `http://localhost:8765/api/stats` should be updated to
 
 **Security note:** The review server has no authentication. It is designed for single-user, localhost use only. The default `--host 127.0.0.1` / `--web-host 127.0.0.1` binding is safe. Do **not** change the host to `0.0.0.0` on a shared or networked machine — anyone who can reach the port can delete your photos. There is no CSRF protection. The `/edit` page performs irreversible operations on your Photos library.
 
+## MCP server
+
+`pyimgtag mcp` speaks the [Model Context Protocol](https://modelcontextprotocol.io)
+over stdio, so Claude Desktop, Claude Code, and any other MCP client can query
+the tagged library in natural language. Everything runs locally: the assistant
+sees metadata and small thumbnails, never your full-resolution originals.
+
+```bash
+pip install 'pyimgtag[mcp]'
+pyimgtag mcp                      # read-only, default DB
+pyimgtag mcp --db ~/photos.db     # a specific library
+```
+
+### Client configuration
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "pyimgtag": {
+      "command": "pyimgtag",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Claude Code (`.mcp.json` in the project, or `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "pyimgtag": {
+      "command": "pyimgtag",
+      "args": ["mcp", "--db", "/Users/me/.cache/pyimgtag/progress.db"]
+    }
+  }
+}
+```
+
+### Example prompts
+
+- *"Which photos from Portugal are tagged `sunset`? Show me thumbnails of the best three."*
+- *"Summarise my library: how many photos, which places, which tags dominate?"*
+- *"List every photo the judge scored 9 or 10 and copy them into an `album` folder."*
+  (the last step needs write mode — see below)
+
+### Read tools (always available)
+
+| Tool | Returns |
+|---|---|
+| `query_photos` | Metadata search with `pyimgtag query` semantics: `tag`, `tags_any`, `city`, `country`, `scene_category`, `cleanup_class`, `status`, `has_text`, `min_score`, `max_score`, `judged`, `sort`, `limit` (max 500), `offset` |
+| `get_photo` | Full metadata row for one path |
+| `get_thumbnail` | MCP image content — a JPEG thumbnail, `size` capped at 512 px |
+| `list_tags` | Tag vocabulary with per-tag photo counts |
+| `list_people` | Named face clusters with face counts |
+| `list_events` | Roadmap placeholder — always empty, with a note |
+| `judge_ranking` | Best-of ranking over judged photos (`min_score`, `max_score`, `sort`, `limit`, `offset`) |
+| `library_stats` | The `pyimgtag insights` aggregates as JSON |
+| `search_photos` | Semantic search — not implemented yet; returns an actionable error pointing at `query_photos` |
+
+### Write tools (opt-in)
+
+Write tools are **not registered** unless you start the server with
+`--enable-writes` or set `PYIMGTAG_MCP_ENABLE_WRITES=1`. An assistant talking to
+a default server cannot see them at all. No tool deletes anything.
+
+| Tool | Effect |
+|---|---|
+| `set_tags` | Replace one photo's tag list (normalised: lowercase, de-duplicated) |
+| `set_cleanup_class` | Set `keep` / `review` / `delete`, or `null` to clear |
+| `rename_person` | Rename (and confirm) a face cluster |
+| `export_photos` | **Copy** database-known photos into `--export-root` |
+
+```json
+{
+  "mcpServers": {
+    "pyimgtag": {
+      "command": "pyimgtag",
+      "args": ["mcp", "--enable-writes", "--export-root", "/Users/me/photo-exports"],
+      "env": {"PYIMGTAG_MCP_ENABLE_WRITES": "1"}
+    }
+  }
+}
+```
+
+### Path safety
+
+- A client-supplied path is only ever a **lookup key**. `get_thumbnail` reads
+  the path the database stored for it, so a path the library does not know is
+  rejected without ever touching the filesystem.
+- `export_photos` refuses to run at all without `--export-root`, resolves the
+  destination, and copies only when it stays inside that root — `../` escapes
+  and absolute destinations are rejected.
+- Originals are never moved, modified, or deleted; exports are copies.
+
 ## Environment variables
 
 | Variable | Used by | Effect |
@@ -1219,6 +1331,7 @@ used `http://localhost:8765/api/stats` should be updated to
 
 > **API key security:** Prefer env vars over `--api-key`. The `--api-key` argument is
 > visible to other users in `ps aux` process listings on shared machines.
+| `PYIMGTAG_MCP_ENABLE_WRITES` | `pyimgtag mcp` | `1` / `true` / `yes` / `on` registers the write tools (same as `--enable-writes`). Unset = read-only. |
 | `PYIMGTAG_NO_WEB` | All commands that start the dashboard | `1` / `true` / `yes` disables the dashboard by default (same as `--no-web`). |
 | `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |
