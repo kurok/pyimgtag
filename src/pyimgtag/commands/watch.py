@@ -79,7 +79,7 @@ class WatchLock:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         for _attempt in range(2):
             try:
-                fd = os.open(str(self.path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                fd = os.open(str(self.path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             except FileExistsError:
                 holder = self._read_pid()
                 if holder is not None and holder != os.getpid() and _pid_alive(holder):
@@ -88,7 +88,7 @@ class WatchLock:
                 try:
                     self.path.unlink()
                 except FileNotFoundError:
-                    pass
+                    pass  # already removed by another racing watch process
                 continue
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(str(os.getpid()))
@@ -110,7 +110,7 @@ class WatchLock:
             try:
                 self.path.unlink()
             except FileNotFoundError:
-                pass
+                pass  # already removed (e.g. by an external cleanup)
 
     def __enter__(self) -> WatchLock:
         self.acquire()
@@ -355,7 +355,7 @@ def cmd_watch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             try:
                 signal.signal(signum, handler)
             except (ValueError, OSError):
-                pass
+                pass  # not on the main thread / unsupported; nothing to restore
         if dashboard is not None:
             dashboard.stop()
         run_registry.set_current(None)
