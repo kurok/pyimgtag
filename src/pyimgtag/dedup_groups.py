@@ -7,11 +7,12 @@ they can be unit-tested without touching SQLite or the filesystem:
 into connected components of visually similar photos. A naive pairwise
 sweep is O(n²) — 100 k rows would be five billion comparisons — so
 candidates are found with *multi-index hashing* instead: the 64-bit hash is
-split into four 16-bit bands, each indexed in its own bucket table. Pigeonhole
-guarantees recall: a pair within ``threshold`` bits differs in at most
-``threshold`` bit positions spread over four bands, so at least one band
-differs by at most ``threshold // 4`` bits — and every bucket within that
-radius of each band value is probed. Every candidate pair is still verified
+split into ``b`` bands (chosen per library size and threshold by a small cost
+model), each indexed in its own bucket table. Pigeonhole guarantees recall: a
+pair within ``threshold`` bits differs in at most ``threshold`` bit positions
+spread over ``b`` bands, so at least one band differs by at most
+``threshold // b`` bits — and every bucket within that radius of each band
+value is probed. Every candidate pair is still verified
 with a real Hamming distance, so there are no false positives either.
 Matches are merged with union-find, which gives the transitive closure for
 free.
@@ -26,6 +27,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
+from math import comb
 from pathlib import Path, PurePath
 
 #: Default Hamming distance for ``pyimgtag dedup scan`` (matches ``run --dedup-threshold``).
@@ -227,8 +229,10 @@ def quarantine_destination(file_path: str, dest_dir: str) -> Path:
     inside *dest_dir*.
     """
     src = Path(file_path)
-    parts = src.parts[1:] if src.is_absolute() and len(src.parts) > 1 else src.parts
-    return Path(dest_dir).expanduser().joinpath(*parts)
+    # ``anchor`` covers "/" on POSIX and "C:\\", "\\" or "\\\\server\\share\\" on
+    # Windows; dropping it is what keeps the result inside *dest_dir*.
+    rel = src.relative_to(src.anchor) if src.anchor else src
+    return Path(dest_dir).expanduser().joinpath(*rel.parts)
 
 
 def candidates_from_members(members: Sequence[dict]) -> list[PhotoCandidate]:
@@ -300,28 +304,53 @@ class _UnionFind:
         self._size[ra] += self._size[rb]
 
 
-#: Number of bands the bit string is split into for the multi-index lookup.
-#: Four 16-bit bands keep buckets tiny (≤ 65 536 per band) while the
-#: per-band search radius ``threshold // 4`` stays 0–2 for every supported
-#: threshold, so 100 k hashes group in seconds.
-_BANDS = 4
+# Largest per-band search radius we are willing to enumerate (C(w, 3) probes).
+_MAX_RADIUS = 3
 
 
-def _variants(value: int, width: int, radius: int) -> Iterable[int]:
-    """Yield every ``width``-bit value within ``radius`` bit flips of ``value``."""
-    yield value
+def _plan_bands(bits: int, threshold: int, count: int) -> tuple[int, int]:
+    """Pick ``(bands, radius)`` minimising the expected probe + candidate work.
+
+    With ``b`` bands of ``w = bits // b`` bits, pigeonhole means two hashes
+    within ``threshold`` bits agree on some band to within ``r = threshold // b``
+    bits. Fewer, wider bands mean sparser buckets (fewer false candidates) but
+    more probes per band (``sum C(w, k) for k <= r``); the cost model below
+    balances the two for the library size at hand.
+    """
+    best: tuple[float, int, int] | None = None
+    for bands in range(1, min(8, bits) + 1):
+        width = bits // bands
+        radius = threshold // bands
+        if radius > _MAX_RADIUS:
+            continue
+        probes = sum(comb(width, k) for k in range(radius + 1))
+        density = count / float(1 << width)
+        cost = bands * probes * (1.0 + density)
+        if best is None or cost < best[0]:
+            best = (cost, bands, radius)
+    if best is None:  # pragma: no cover - bands=8 always has radius <= 3 for threshold <= 31
+        raise ValueError(f"threshold {threshold} too large for {bits}-bit hashes")
+    return best[1], best[2]
+
+
+def _flip_masks(width: int, radius: int) -> list[list[int]]:
+    """Return XOR masks for exactly 1, 2, … ``radius`` bit flips in ``width`` bits."""
+    singles = [1 << i for i in range(width)]
+    out: list[list[int]] = []
     if radius >= 1:
-        for i in range(width):
-            yield value ^ (1 << i)
+        out.append(singles)
     if radius >= 2:
-        for i in range(width):
-            for j in range(i + 1, width):
-                yield value ^ (1 << i) ^ (1 << j)
-    if radius >= 3:  # pragma: no cover - thresholds above 11 are not exposed by the CLI
-        for i in range(width):
-            for j in range(i + 1, width):
-                for k in range(j + 1, width):
-                    yield value ^ (1 << i) ^ (1 << j) ^ (1 << k)
+        out.append([singles[i] | singles[j] for i in range(width) for j in range(i + 1, width)])
+    if radius >= 3:
+        out.append(
+            [
+                singles[i] | singles[j] | singles[k]
+                for i in range(width)
+                for j in range(i + 1, width)
+                for k in range(j + 1, width)
+            ]
+        )
+    return out
 
 
 def _candidate_pairs(
@@ -332,35 +361,39 @@ def _candidate_pairs(
 ) -> Iterable[tuple[int, int]]:
     """Yield candidate index pairs via multi-index hashing.
 
-    The ``bits``-wide value is split into :data:`_BANDS` bands. Two hashes
-    within ``threshold`` bits of each other must, by pigeonhole, agree on at
-    least one band to within ``threshold // _BANDS`` bits, so probing each
-    band's bucket for every value within that radius finds every true pair.
-    Callers verify each candidate with the exact Hamming distance.
+    The ``bits``-wide value is split into bands (see :func:`_plan_bands`),
+    each indexed in its own bucket table. Hashes are inserted in order and
+    each one is first probed against everything inserted before it — every
+    band value within the per-band radius is looked up — so each true pair is
+    found at least once and the caller verifies it with the exact Hamming
+    distance.
     """
-    bands = min(_BANDS, bits)
-    radius = threshold // bands
+    bands, radius = _plan_bands(bits, threshold, len(indices))
     widths = [(bits // bands) + (1 if b < bits % bands else 0) for b in range(bands)]
     shifts = [sum(widths[:b]) for b in range(bands)]
     masks = [(1 << w) - 1 for w in widths]
-
+    flips = [_flip_masks(widths[b], radius) for b in range(bands)]
     buckets: list[dict[int, list[int]]] = [{} for _ in range(bands)]
-    band_values: list[list[int]] = []
+
     for idx in indices:
         value = values[idx]
-        per_band = [(value >> shifts[b]) & masks[b] for b in range(bands)]
-        band_values.append(per_band)
-        for b in range(bands):
-            buckets[b].setdefault(per_band[b], []).append(idx)
-
-    for pos, idx in enumerate(indices):
-        per_band = band_values[pos]
+        band_vals = [(value >> shifts[b]) & masks[b] for b in range(bands)]
         for b in range(bands):
             bucket = buckets[b]
-            for probe in _variants(per_band[b], widths[b], radius):
-                for other in bucket.get(probe, ()):
-                    if other > idx:
-                        yield idx, other
+            band_value = band_vals[b]
+            get = bucket.get
+            hits = get(band_value)
+            if hits:
+                for other in hits:
+                    yield other, idx
+            for level in flips[b]:
+                for mask in level:
+                    hits = get(band_value ^ mask)
+                    if hits:
+                        for other in hits:
+                            yield other, idx
+        for b in range(bands):
+            buckets[b].setdefault(band_vals[b], []).append(idx)
 
 
 def _kind_for(values: Sequence[int], threshold: int) -> str:
