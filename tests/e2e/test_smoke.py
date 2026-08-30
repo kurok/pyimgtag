@@ -17,6 +17,7 @@ automatically covered without touching the smoke.
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -147,6 +148,8 @@ def test_each_nav_link_clicks_and_renders(page, base_url: str) -> None:
         "/query/",
         "/judge/",
         "/insights/",
+        "/map/",
+        "/timeline/",
         "/dedup/",
         "/about/",
     ],
@@ -163,3 +166,67 @@ def test_known_routes_render_cleanly(page, base_url: str, path: str) -> None:
     page.wait_for_load_state("networkidle")
     _assert_no_errors(page, path)
     _assert_page_has_content(page, path)
+
+
+def _tile_hostname() -> str:
+    """Hostname of the configured map tile server.
+
+    The map page is allowed exactly one off-host dependency: raster tiles.
+    Read the same env var the app reads so a self-hosted tile server in CI
+    is skipped by the assertion below instead of failing it.
+    """
+    from pyimgtag.webapp.routes_map import tile_config
+
+    # The template placeholders ({z}/{x}/{y}) are not valid URL characters
+    # for urlsplit's port parsing, so strip them before parsing the host.
+    url = tile_config()["url"].replace("{z}", "0").replace("{x}", "0").replace("{y}", "0")
+    return (urlsplit(url).hostname or "").lower()
+
+
+def test_map_makes_no_external_requests_except_tiles(page, base_url: str) -> None:
+    """No CDN: every request the map page makes is to us, or is a map tile.
+
+    Leaflet is vendored into the package, so a request to unpkg/jsdelivr
+    (or anywhere else that is neither the app nor the tile host) means a
+    CDN reference crept back into the template.
+    """
+    app_host = (urlsplit(base_url).hostname or "").lower()
+    tile_host = _tile_hostname()
+    seen: list[str] = []
+
+    def _on_request(request) -> None:
+        host = (urlsplit(request.url).hostname or "").lower()
+        # data:/blob: URLs have no hostname and never leave the browser.
+        if not host or host == app_host or host == tile_host:
+            return
+        seen.append(request.url)
+
+    page.on("request", _on_request)
+    page.goto(base_url + "/map/")
+    page.wait_for_load_state("networkidle")
+    _assert_no_errors(page, "/map/")
+    _assert_page_has_content(page, "/map/")
+    assert not seen, f"/map/ requested non-app, non-tile hosts: {seen}"
+
+
+def test_map_serves_vendored_leaflet(page, base_url: str) -> None:
+    """The vendored assets are actually reachable and are Leaflet."""
+    import requests
+
+    js = requests.get(base_url + "/static/leaflet/leaflet.js", timeout=5)
+    assert js.status_code == 200
+    assert js.headers["content-type"].startswith("text/javascript")
+    assert "Leaflet" in js.text
+    css = requests.get(base_url + "/static/leaflet/leaflet.css", timeout=5)
+    assert css.status_code == 200
+    assert css.headers["content-type"].startswith("text/css")
+
+
+def test_timeline_renders_and_loads_its_data(page, base_url: str) -> None:
+    """The timeline page reaches a settled state with no console errors."""
+    page.goto(base_url + "/timeline/")
+    page.wait_for_load_state("networkidle")
+    _assert_no_errors(page, "/timeline/")
+    _assert_page_has_content(page, "/timeline/")
+    # Either the histogram or the friendly empty state must be present.
+    assert page.locator("#content .panel, #content .empty").count() > 0

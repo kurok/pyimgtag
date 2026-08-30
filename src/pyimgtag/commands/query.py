@@ -54,6 +54,10 @@ def cmd_query(args: argparse.Namespace) -> int:
             status=args.status,
             limit=args.limit,
             tags_any=tags_any,
+            bbox=getattr(args, "bbox", None),
+            # --year and --month are mutually exclusive, so at most one of
+            # these is set; both are already validated ISO prefixes.
+            date_prefix=getattr(args, "month", None) or getattr(args, "year", None),
         )
 
     if tags_any is not None:

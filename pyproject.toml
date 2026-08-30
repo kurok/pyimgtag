@@ -109,9 +109,16 @@ pyimgtag = "pyimgtag.main:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-# Jinja2 page templates contain no Python, so packages.find alone would
-# leave them out of the wheel.
-"pyimgtag.webapp" = ["templates/*.html"]
+# Jinja2 page templates and the vendored front-end assets (Leaflet, served
+# by webapp/routes_static.py — the webapp never touches a CDN) contain no
+# Python, so packages.find alone would leave them out of the wheel.
+"pyimgtag.webapp" = [
+    "templates/*.html",
+    "static/leaflet/*.js",
+    "static/leaflet/*.css",
+    "static/leaflet/*.txt",
+    "static/leaflet/images/*.png",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

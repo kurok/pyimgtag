@@ -140,13 +140,24 @@ Run 'pyimgtag faces <action> -h' for action-specific options.
     "query": (
         "Query images with advanced filters",
         "Query tagged images with filters (tag, city, country, scene category,\n"
-        "text presence, cleanup class, status) and print them as a table, JSON,\n"
-        "or bare file paths.",
+        "text presence, cleanup class, status, geographic box, capture year or\n"
+        "month) and print them as a table, JSON, or bare file paths.",
         """\
 Examples:
   pyimgtag query --tag sunset --country US
   pyimgtag query --scene-category outdoor_travel --format paths
   pyimgtag query --status error --format json
+
+  # Photos taken inside a geographic box (same slice the /map page shows)
+  pyimgtag query --bbox 39.30,-9.30,39.42,-9.10 --format paths
+
+  # A box crossing the antimeridian (lon1 > lon2). Use --bbox=... when the
+  # first value is negative, so argparse does not read it as a flag.
+  pyimgtag query --bbox=-20,170,-10,-170
+
+  # Time slices, composable with every other filter
+  pyimgtag query --year 2024 --tag beach
+  pyimgtag query --month 2024-03 --city Lisbon --format json
 """,
     ),
     "judge": (
@@ -890,7 +901,27 @@ def _add_faces_subcommand(subparsers: Any) -> None:
     faces_recluster.add_argument("--yes", action="store_true", help=_RESET_YES_HELP)
 
 
+def _arg_type(parser: Any) -> Any:
+    """Adapt a ``filters`` parse function into an argparse ``type=`` callable.
+
+    argparse swallows the message of a plain :class:`ValueError` ("invalid
+    <fn> value"), so the wrapper re-raises it as
+    :class:`argparse.ArgumentTypeError`, which argparse prints verbatim.
+    """
+
+    def convert(value: str) -> Any:
+        try:
+            return parser(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(str(exc)) from exc
+
+    convert.__name__ = getattr(parser, "__name__", "convert")
+    return convert
+
+
 def _add_query_subcommand(subparsers: Any) -> None:
+    from pyimgtag.filters import parse_bbox, parse_month, parse_year
+
     query_p = _sub(subparsers, "query")
     query_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     query_p.add_argument("--tag", help="Filter by tag (case-insensitive substring match)")
@@ -908,6 +939,26 @@ def _add_query_subcommand(subparsers: Any) -> None:
     query_p.add_argument("--city", help="Filter by nearest_city (case-insensitive substring)")
     query_p.add_argument("--country", help="Filter by nearest_country (case-insensitive substring)")
     query_p.add_argument("--status", choices=["ok", "error"], help="Filter by processing status")
+    query_p.add_argument(
+        "--bbox",
+        metavar="LAT1,LON1,LAT2,LON2",
+        type=_arg_type(parse_bbox),
+        help=(
+            "Only photos whose EXIF coordinates fall inside this box (inclusive). "
+            "Pass lon1 > lon2 for a box crossing the antimeridian. Requires "
+            "coordinates in the DB — see 'run --resume-from-db'."
+        ),
+    )
+    query_date_grp = query_p.add_mutually_exclusive_group()
+    query_date_grp.add_argument(
+        "--year", metavar="YYYY", type=_arg_type(parse_year), help="Only photos taken in this year"
+    )
+    query_date_grp.add_argument(
+        "--month",
+        metavar="YYYY-MM",
+        type=_arg_type(parse_month),
+        help="Only photos taken in this month",
+    )
     query_p.add_argument(
         "--format",
         choices=["table", "json", "paths"],

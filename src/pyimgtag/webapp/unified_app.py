@@ -17,8 +17,11 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     - Query at ``/query``
     - Judge at ``/judge``
     - Insights at ``/insights``
+    - Map at ``/map``
+    - Timeline at ``/timeline``
     - Dedup at ``/dedup``
     - Edit at ``/edit``
+    - Vendored front-end assets (Leaflet) at ``/static``
 
     Raises:
         ImportError: If ``fastapi`` is not installed.
@@ -39,9 +42,12 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     from pyimgtag.webapp.routes_faces import build_faces_router
     from pyimgtag.webapp.routes_insights import build_insights_router
     from pyimgtag.webapp.routes_judge import build_judge_router
+    from pyimgtag.webapp.routes_map import build_map_router
     from pyimgtag.webapp.routes_query import build_query_router
     from pyimgtag.webapp.routes_review import build_review_router
+    from pyimgtag.webapp.routes_static import build_static_router
     from pyimgtag.webapp.routes_tags import build_tags_router
+    from pyimgtag.webapp.routes_timeline import build_timeline_router
 
     db = ProgressDB(db_path=db_path)
     app = FastAPI(title="pyimgtag", docs_url=None, redoc_url=None, openapi_url=None)
@@ -66,8 +72,12 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     app.include_router(build_query_router(db, api_base="/query"), prefix="/query")
     app.include_router(build_judge_router(db, api_base="/judge"), prefix="/judge")
     app.include_router(build_insights_router(db, api_base="/insights"), prefix="/insights")
+    app.include_router(build_map_router(db, api_base="/map"), prefix="/map")
+    app.include_router(build_timeline_router(db, api_base="/timeline"), prefix="/timeline")
     app.include_router(build_dedup_router(db, api_base="/dedup"), prefix="/dedup")
     app.include_router(build_edit_router(db, api_base="/edit"), prefix="/edit")
     app.include_router(build_about_router(), prefix="/about")
+    # Last: its catch-all path parameter must not shadow a real page.
+    app.include_router(build_static_router(), prefix="/static")
 
     return app

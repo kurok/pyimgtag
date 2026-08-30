@@ -95,6 +95,15 @@ __NAV__
         <option value="ok">ok</option>
         <option value="error">error</option>
       </select></div>
+    <div class="field"><label>Bbox</label>
+      <input id="f_bbox" type="text" size="26" placeholder="lat1,lon1,lat2,lon2"
+             title="Geographic box; handed over by the Map page's Show as grid"></div>
+    <div class="field"><label>Year</label>
+      <input id="f_year" type="text" size="6" placeholder="2024"></div>
+    <div class="field"><label>Month</label>
+      <input id="f_month" type="text" size="8" placeholder="2024-03"></div>
+    <div class="field"><label>Day</label>
+      <input id="f_day" type="text" size="11" placeholder="2024-03-17"></div>
     <div class="field"><label>Judge ≥</label>
       <input id="f_min_judge" type="number" min="1" max="10" placeholder="1-10"></div>
     <div class="field"><label>Judge ≤</label>
@@ -138,6 +147,10 @@ async function search() {
   add('f_city', 'city');
   add('f_country', 'country');
   add('f_status', 'status');
+  add('f_bbox', 'bbox');
+  add('f_year', 'year');
+  add('f_month', 'month');
+  add('f_day', 'day');
   add('f_min_judge', 'min_judge_score');
   add('f_max_judge', 'max_judge_score');
   add('f_judged', 'judged');
@@ -328,6 +341,12 @@ function hideHoverThumb() {
     ['city', 'f_city'],
     ['country', 'f_country'],
     ['status', 'f_status'],
+    // The Map page's "Show as grid" lands here with ?bbox=…, and the
+    // Timeline page's day link with ?day=…; both must pre-fill and run.
+    ['bbox', 'f_bbox'],
+    ['year', 'f_year'],
+    ['month', 'f_month'],
+    ['day', 'f_day'],
     ['min_judge_score', 'f_min_judge'],
     ['max_judge_score', 'f_max_judge'],
     ['judged', 'f_judged'],
@@ -377,12 +396,23 @@ def build_query_router(db: "ProgressDB", api_base: str = "") -> Any:
         ImportError: If fastapi is not installed.
     """
     try:
-        from fastapi import APIRouter
+        from fastapi import APIRouter, HTTPException
         from fastapi.responses import HTMLResponse
     except ImportError as exc:
         raise ImportError(
             "fastapi is required for the query UI. Install with: pip install 'pyimgtag[review]'"
         ) from exc
+
+    from pyimgtag.filters import parse_bbox, parse_day, parse_month, parse_year
+
+    def _parsed(parser: Any, raw: str | None) -> Any:
+        """Run a ``filters`` parser, turning a bad value into a 400."""
+        if not raw:
+            return None
+        try:
+            return parser(raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     router = APIRouter()
 
@@ -404,7 +434,16 @@ def build_query_router(db: "ProgressDB", api_base: str = "") -> Any:
         max_judge_score: int | None = None,
         judged: str | None = None,
         sort: str = "path_asc",
+        bbox: str | None = None,
+        year: str | None = None,
+        month: str | None = None,
+        day: str | None = None,
     ) -> list[dict]:
+        box = _parsed(parse_bbox, bbox)
+        # Most specific date wins so ?month=…&day=… cannot contradict itself.
+        date_prefix = (
+            _parsed(parse_day, day) or _parsed(parse_month, month) or _parsed(parse_year, year)
+        )
         has_text_bool: bool | None = None
         if has_text == "true":
             has_text_bool = True
@@ -428,6 +467,8 @@ def build_query_router(db: "ProgressDB", api_base: str = "") -> Any:
             max_judge_score=max_judge_score,
             judged=judged_bool,
             sort=sort,
+            bbox=box,
+            date_prefix=date_prefix,
         )
 
     return router
