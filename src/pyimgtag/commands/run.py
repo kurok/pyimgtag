@@ -9,6 +9,7 @@ import shutil
 import subprocess  # nosec B404
 import sys
 import threading as _threading
+from collections.abc import Iterator
 from pathlib import Path
 from platform import system as get_platform_name
 from typing import Any
@@ -16,6 +17,12 @@ from typing import Any
 from pyimgtag import run_registry
 from pyimgtag.applescript_writer import read_keywords_from_photos
 from pyimgtag.cloud_clients import CloudClientError, ImageClient, make_image_client
+from pyimgtag.concurrent_pipeline import (
+    resolve_jobs,
+    resolve_max_rps,
+    run_pipeline,
+    set_global_rate_limit,
+)
 from pyimgtag.exif_reader import read_exif
 from pyimgtag.filters import passes_date_filter
 from pyimgtag.geocoder import ReverseGeocoder
@@ -339,6 +346,84 @@ def _create_image_client(
     return client
 
 
+def _backend_name(args: argparse.Namespace) -> str:
+    backend = getattr(args, "backend", "ollama")
+    return backend if isinstance(backend, str) else "ollama"
+
+
+def _concurrent_tagging(
+    files: list[Path],
+    source_type: str,
+    args: argparse.Namespace,
+    ollama: ImageClient,
+    geocoder: ReverseGeocoder,
+    progress_db: ProgressDB | None,
+    phash_map: dict,
+    skipped_dedup: set[str],
+    results: list[ImageResult],
+    stats: dict,
+    session: Any,
+    jobs: int,
+) -> bool:
+    """Tag with ``jobs`` concurrent model calls. Returns True if interrupted.
+
+    Worker threads run :func:`_prepare_one` only; this thread keeps every
+    SQLite write, output row, and progress line to itself and receives results
+    in scan order from the pipeline's reorder buffer. The DB skip/hydrate gate
+    also runs here, which is why ``--resume-threaded`` has no extra effect at
+    ``-j > 1``: cached rows are hydrated inline, in order, by this thread.
+    """
+    stats_lock = _threading.Lock()
+
+    def _items() -> Iterator[tuple[Path, ImageResult | None]]:
+        for file_path in files:
+            if str(file_path) in skipped_dedup:
+                stats["skipped_dedup"] += 1
+                continue
+            proceed, cached = _pre_submit_decision(
+                file_path, source_type, args, geocoder, stats, progress_db
+            )
+            if proceed:
+                yield file_path, None
+            elif cached is not None:
+                yield file_path, cached
+
+    def _prepare(item: tuple[Path, ImageResult | None]) -> ImageResult | None:
+        file_path, cached = item
+        if cached is not None:
+            return cached  # hydrated on the main thread; nothing left to compute
+        return _prepare_one(file_path, source_type, args, ollama, geocoder, stats, stats_lock)
+
+    def _finalize(_seq: int, item: tuple[Path, ImageResult | None], result: ImageResult) -> None:
+        file_path = item[0]
+        _finalize_result(result, file_path, args, progress_db, phash_map, results, stats)
+        if session is not None:
+            status = "ok" if result.processing_status == "ok" else "error"
+            tags = ", ".join(result.tags) if result.tags else None
+            session.record_item(str(file_path), status, error=result.error_message, detail=tags)
+            for key, value in stats.items():
+                session.set_counter(key, value)
+
+    def _should_stop() -> bool:
+        return bool(args.limit and stats["processed"] >= args.limit)
+
+    def _on_interrupt() -> None:
+        if session is not None:
+            session.mark_interrupted()
+        print("\nInterrupted.", file=sys.stderr)
+
+    return run_pipeline(
+        _items(),
+        _prepare,
+        _finalize,
+        jobs=jobs,
+        session=session,
+        on_interrupt=_on_interrupt,
+        should_stop=_should_stop,
+        describe=lambda item: str(item[0]),
+    )
+
+
 def _run_tagging(
     files: list[Path],
     source_type: str,
@@ -353,7 +438,38 @@ def _run_tagging(
     session: Any,
     use_threaded: bool,
 ) -> bool:
-    """Run the tagging loop (threaded or linear). Returns True if interrupted."""
+    """Run the tagging loop (concurrent, threaded-resume, or linear).
+
+    ``-j/--jobs`` (read off ``args``, so ``watch`` inherits it) selects the
+    path: anything above 1 goes through :func:`_concurrent_tagging`, while the
+    default ``-j 1`` keeps the original serial loops untouched.
+
+    Returns True if interrupted.
+    """
+    set_global_rate_limit(resolve_max_rps(getattr(args, "max_rps", None)))
+    jobs = resolve_jobs(getattr(args, "jobs", 1), _backend_name(args))
+    if jobs > 1:
+        try:
+            return _concurrent_tagging(
+                files,
+                source_type,
+                args,
+                ollama,
+                geocoder,
+                progress_db,
+                phash_map,
+                skipped_dedup,
+                results,
+                stats,
+                session,
+                jobs,
+            )
+        finally:
+            ollama.close()
+            geocoder.close()
+            if progress_db is not None:
+                progress_db.close()
+
     interrupted = False
     try:
         if use_threaded and progress_db is not None:
@@ -503,8 +619,12 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     from pyimgtag.webapp.bootstrap import start_dashboard_for
 
     session, dashboard = start_dashboard_for(args, command="run")
+    jobs = resolve_jobs(getattr(args, "jobs", 1), backend)
+    if jobs > 1:
+        print(f"Concurrency: {jobs} in-flight model requests", file=sys.stderr)
     if session is not None:
         session.set_counter("scanned", stats["scanned"])
+        session.set_counter("jobs", jobs)
         session.mark_running()
 
     use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
@@ -553,14 +673,46 @@ def _process_one(
     stats: dict,
     progress_db: ProgressDB | None = None,
 ) -> ImageResult | None:
-    """Process one image.  Returns ``None`` when filtered out."""
+    """Process one image, serially.  Returns ``None`` when filtered out.
+
+    This is the ``-j 1`` path and stays a straight-line composition of the two
+    halves the concurrent pipeline drives separately: the DB-touching gate
+    (:func:`_pre_submit_decision`) and the worker-safe body
+    (:func:`_prepare_one`).
+    """
+    proceed, cached = _pre_submit_decision(
+        file_path, source_type, args, geocoder, stats, progress_db
+    )
+    if not proceed:
+        return cached
+    return _prepare_one(file_path, source_type, args, ollama, geocoder, stats)
+
+
+def _pre_submit_decision(
+    file_path: Path,
+    source_type: str,
+    args: argparse.Namespace,
+    geocoder: ReverseGeocoder,
+    stats: dict,
+    progress_db: ProgressDB | None,
+) -> tuple[bool, ImageResult | None]:
+    """Decide, on the main thread, whether an image needs the model at all.
+
+    Everything here reads or writes SQLite, so it must never run in a worker.
+
+    Returns:
+        ``(True, None)`` when the image should be handed to
+        :func:`_prepare_one`; ``(False, result)`` when it was hydrated from the
+        DB (``result`` is ready to finalize); ``(False, None)`` when it is
+        skipped outright.
+    """
     try:
         if not file_path.exists() or file_path.stat().st_size == 0:
             stats["skipped_no_local"] += 1
-            return None
+            return False, None
     except OSError:
         stats["skipped_no_local"] += 1
-        return None
+        return False, None
 
     # --skip-existing: fully skip unchanged photos already complete in the DB
     # (status ok + non-empty tags) before any EXIF read, geocoding, or
@@ -573,22 +725,52 @@ def _process_one(
         and progress_db.is_complete_cached(file_path)
     ):
         stats["skipped_existing"] += 1
-        return None
+        return False, None
 
     if progress_db is not None and progress_db.is_processed(file_path):
         if not getattr(args, "resume_from_db", False):
             stats["skipped_cached"] += 1
-            return None
+            return False, None
         # --resume-from-db: fall through to the resume check below
 
     resume = getattr(args, "resume_from_db", False) and not getattr(args, "no_cache", False)
     if resume and progress_db is not None and progress_db.has_usable_model_result(file_path):
-        return _hydrate_from_db(file_path, source_type, args, geocoder, stats, progress_db)
+        return False, _hydrate_from_db(file_path, source_type, args, geocoder, stats, progress_db)
+
+    return True, None
+
+
+def _prepare_one(
+    file_path: Path,
+    source_type: str,
+    args: argparse.Namespace,
+    ollama: Any,
+    geocoder: ReverseGeocoder,
+    stats: dict,
+    stats_lock: _threading.Lock | None = None,
+) -> ImageResult | None:
+    """Worker-safe half of processing: EXIF, filters, geocode, model call.
+
+    Touches no SQLite handle, writes no output file, and prints no progress, so
+    several copies can run in a thread pool while the main thread stays the
+    single writer. Returns ``None`` when the image is filtered out.
+
+    Args:
+        stats_lock: Held around every counter bump when the caller runs this in
+            more than one thread; ``None`` for the serial path.
+    """
+
+    def bump(key: str) -> None:
+        if stats_lock is None:
+            stats[key] += 1
+            return
+        with stats_lock:
+            stats[key] += 1
 
     if args.skip_if_tagged and source_type == "photos_library":
         existing = read_keywords_from_photos(str(file_path))
         if existing:
-            stats["skipped_tagged"] += 1
+            bump("skipped_tagged")
             return None
 
     result = ImageResult(
@@ -605,11 +787,11 @@ def _process_one(
     result.gps_lon = exif.gps_lon
 
     if not passes_date_filter(exif, file_path, args.date, args.date_from, args.date_to):
-        stats["skipped_date"] += 1
+        bump("skipped_date")
         return None
 
     if args.skip_no_gps and not exif.has_gps:
-        stats["skipped_no_gps"] += 1
+        bump("skipped_no_gps")
         return None
 
     # --- reverse geocode (before tagging so context is available) ---
@@ -617,7 +799,7 @@ def _process_one(
     if exif.has_gps:
         geo = geocoder.resolve(exif.gps_lat, exif.gps_lon)
         if geo.error:
-            stats["geocode_failures"] += 1
+            bump("geocode_failures")
         else:
             result.nearest_place = geo.nearest_place
             result.nearest_city = geo.nearest_city
@@ -644,14 +826,19 @@ def _process_one(
     if tag_result.error:
         result.processing_status = "error"
         result.error_message = tag_result.error
-        stats["model_failures"] += 1
+        bump("model_failures")
     else:
         vocabulary = getattr(args, "_vocabulary", None)
-        result.tags = (
-            vocabulary.canonicalize(tag_result.tags)
-            if isinstance(vocabulary, Vocabulary)
-            else tag_result.tags
-        )
+        if isinstance(vocabulary, Vocabulary):
+            # canonicalize() bumps the shared mapping Counters, so it shares
+            # the stats lock with the counter bumps above.
+            if stats_lock is None:
+                result.tags = vocabulary.canonicalize(tag_result.tags)
+            else:
+                with stats_lock:
+                    result.tags = vocabulary.canonicalize(tag_result.tags)
+        else:
+            result.tags = tag_result.tags
         result.scene_summary = tag_result.summary
         result.scene_category = tag_result.scene_category
         result.emotional_tone = tag_result.emotional_tone

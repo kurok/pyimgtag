@@ -425,6 +425,8 @@ identically for `pyimgtag judge`.
 | `--skip-existing` | Fully skip unchanged photos already complete in the DB (fastest resume; takes precedence over `--resume-from-db`) |
 | `--resume-from-db` | Reuse cached model results for unchanged files; only re-run local enrichment (EXIF, geocoding) |
 | `--resume-threaded` | With `--resume-from-db`: enrich cached items in a background thread |
+| `--jobs N` / `-j N` | Concurrent model requests (default `1` = serial; `0` = auto). See [Parallel tagging](#parallel-tagging--j) |
+| `--max-rps RPS` | Cap model requests per second across all workers (default: unlimited) |
 
 #### `pyimgtag status` — check progress
 
@@ -889,6 +891,8 @@ pyimgtag judge --input-dir ~/Pictures/exported \
 | `--timeout N` | `120` | Request timeout (seconds) |
 | `--db PATH` | `~/.cache/pyimgtag/progress.db` | Progress DB path; judge scores share the same DB as `run` |
 | `--skip-judged` | false | Skip images that already have a row in `judge_scores` |
+| `--jobs N` / `-j N` | `1` | Concurrent model requests; `0` = auto. See [Parallel tagging](#parallel-tagging--j) |
+| `--max-rps RPS` | unlimited | Cap model requests per second across all workers |
 | `--write-back` | false | Write the score keyword back to Apple Photos *(macOS + `--photos-library` only)* |
 | `--write-back-mode overwrite\|append` | `overwrite` | Whether write-back replaces or merges keywords |
 | `--web` / `--no-web` / `--web-host` / `--web-port` / `--no-browser` | — | Same dashboard flags as `pyimgtag run` (default port `8770`) |
@@ -1100,6 +1104,56 @@ pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
 
 Use `pyimgtag reprocess --db ~/my-progress.db --yes` to force a full re-run for all files,
 or `pyimgtag reprocess --db ~/my-progress.db --status error` to retry only failed files.
+
+## Parallel tagging (`-j`)
+
+`run` and `judge` send one model request at a time by default. `-j/--jobs N`
+raises that to `N` in-flight requests — the single biggest wall-clock win on a
+large library, because the model call dominates every other cost.
+
+```bash
+# 4 concurrent model calls against a local Ollama
+pyimgtag run --input-dir ~/Pictures/exported -j 4
+
+# Cloud backends parallelise further; --max-rps is the safety valve
+pyimgtag run --photos-library ~/Pictures/Photos\ Library.photoslibrary \
+             --backend anthropic -j 8 --max-rps 4
+
+# Same flag on judge (and on watch, which inherits every run flag)
+pyimgtag judge --input-dir ~/Pictures/exported -j 4
+```
+
+### Guidance
+
+| Setup | Suggested `-j` | Also set | Notes |
+|---|---|---|---|
+| Local Ollama (laptop / Mac mini) | `2`–`4` | `OLLAMA_NUM_PARALLEL=<-j>` | One model instance shares the GPU; beyond `OLLAMA_NUM_PARALLEL` extra requests just queue on the server. Watch VRAM — Ollama may unload/reload the model if it cannot fit the parallel KV cache. |
+| Remote Ollama on a GPU host | `4`–`8` | `OLLAMA_NUM_PARALLEL=<-j>`, `OLLAMA_MAX_LOADED_MODELS=1` | Network latency overlaps well; raise until images/sec stops improving. Add `--max-rps` if the host is shared. |
+| Cloud API (Anthropic / OpenAI / Gemini) | `4`–`8` (`-j 0` = `min(8, CPUs)`) | `--max-rps` at ~80% of your account's limit | 429/503 responses are retried automatically with `Retry-After` or capped exponential backoff (5 attempts, then the image is failed with a clear error — never a hang). |
+| Anything, unsure | `-j 0` | — | Auto: `2` for Ollama, `min(8, CPUs)` for cloud backends. |
+
+`--max-rps` is a process-wide token bucket shared by every worker, so it holds
+regardless of `-j`. It applies to both cloud and Ollama requests.
+
+### Guarantees at any `-j`
+
+- **Single writer.** Worker threads only compute (EXIF, HEIC/resize, geocode,
+  model call). Every SQLite write, output row, progress line, and write-back
+  happens on the main thread.
+- **Scan order.** JSON, CSV, `--jsonl-stdout`, and EXIF write-back stay in scan
+  order via a reorder buffer, so runs are deterministic and diffable.
+- **Ctrl-C is safe.** Queued work is cancelled, in-flight requests are drained
+  and committed, then the run exits. Resume with `--skip-existing` (or
+  `--resume-from-db`) picks up exactly the remainder.
+- **Nominatim stays at 1 req/s.** Reverse geocoding is serialised process-wide
+  by a shared gate no matter how many workers ask for a lookup; the disk cache
+  absorbs repeats and cache hits never wait.
+- **Pause still works.** Pausing from the dashboard stops new submissions;
+  in-flight calls finish.
+
+Two caveats: `--limit` is honoured to within the in-flight batch (already
+submitted images still complete), and `--resume-threaded` has no extra effect
+at `-j > 1` — cached rows are hydrated inline, in order, by the main thread.
 
 ## Local webapp
 

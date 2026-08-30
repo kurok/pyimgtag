@@ -17,6 +17,7 @@ from typing import Any
 import requests
 from PIL import Image
 
+from pyimgtag.concurrent_pipeline import acquire_global_rate_limit
 from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic, sips_available
 from pyimgtag.models import JudgeScores, TagResult, normalize_tags
 from pyimgtag.raw_converter import (
@@ -188,7 +189,12 @@ class OllamaClient:
         """Send a single chat request to Ollama and return the raw Response.
 
         Raises :class:`requests.RequestException` on network/HTTP failure.
+
+        Honours the process-wide ``--max-rps`` bucket (a no-op when unset) so a
+        remote Ollama host can be protected the same way a cloud API is; the
+        in-flight cap itself is just ``-j``.
         """
+        acquire_global_rate_limit()
         resp = self._session.post(
             f"{self.base_url}/api/chat",
             json={
