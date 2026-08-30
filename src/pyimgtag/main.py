@@ -159,6 +159,20 @@ Examples:
   pyimgtag judge --photos-library LIB --sort-by score --verbose
 """,
     ),
+    "insights": (
+        "Summarise the tagged library (terminal, HTML, or JSON report)",
+        "Aggregate everything already in the progress DB — totals, dates, places,\n"
+        "tags, people, judge scores, cleanup candidates — into one report.\n"
+        "Pure SQL aggregation: no model calls, no image reads except the\n"
+        "thumbnails inlined into the HTML report.",
+        """\
+Examples:
+  pyimgtag insights                          # terminal summary
+  pyimgtag insights --output report.html     # self-contained HTML report
+  pyimgtag insights --format json            # machine-readable
+  pyimgtag insights --top 25 --output report.html --no-thumbnails
+""",
+    ),
     "tags": (
         "Manage tags across the image database",
         "List, rename, delete, or merge tags across all images in the database.",
@@ -820,6 +834,41 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     add_web_flags(judge_p)
 
 
+def _add_insights_subcommand(subparsers: Any) -> None:
+    from pyimgtag.insights_report import DEFAULT_MAX_THUMBS
+
+    insights_p = _sub(subparsers, "insights")
+    insights_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    insights_p.add_argument(
+        "--format",
+        choices=["terminal", "json", "html"],
+        default="terminal",
+        help="Output format (default: terminal; inferred from --output extension)",
+    )
+    insights_p.add_argument(
+        "--output",
+        "-o",
+        help="Write the report to this file instead of stdout (.html/.json pick the format)",
+    )
+    insights_p.add_argument(
+        "--top",
+        type=int,
+        default=10,
+        help="Length of every top-N list: tags, places, people, photos (default: 10)",
+    )
+    insights_p.add_argument(
+        "--max-thumbnails",
+        type=int,
+        default=DEFAULT_MAX_THUMBS,
+        help=f"Cap on thumbnails inlined into the HTML report (default: {DEFAULT_MAX_THUMBS})",
+    )
+    insights_p.add_argument(
+        "--no-thumbnails",
+        action="store_true",
+        help="Skip thumbnails in the HTML report (no image files are read at all)",
+    )
+
+
 def _add_tags_subcommand(subparsers: Any) -> None:
     tags_p = _sub(subparsers, "tags")
     tags_sub = tags_p.add_subparsers(dest="tags_action")
@@ -865,6 +914,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_query_subcommand(subparsers)
     _add_judge_subcommand(subparsers)
     _add_tags_subcommand(subparsers)
+    _add_insights_subcommand(subparsers)
 
     return p
 
@@ -922,6 +972,7 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.cleanup_drift import cmd_cleanup_drift
     from pyimgtag.commands.db import cmd_cleanup, cmd_reprocess, cmd_status
     from pyimgtag.commands.faces import cmd_faces
+    from pyimgtag.commands.insights import cmd_insights
     from pyimgtag.commands.judge import cmd_judge
     from pyimgtag.commands.preflight_cmd import cmd_preflight
     from pyimgtag.commands.query import cmd_query
@@ -952,6 +1003,7 @@ def main(argv: list[str] | None = None) -> int:
         "query": lambda: cmd_query(args),
         "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
+        "insights": lambda: cmd_insights(args),
     }
 
     handler = dispatch.get(args.subcommand)

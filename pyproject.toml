@@ -107,6 +107,7 @@ testpaths = ["tests"]
 #                  locally or .github/workflows/pr-tests.yml in CI).
 # Invoke either explicitly with `--override-ini='addopts='`.
 addopts = "-n auto --dist=worksteal --ignore=tests/local --ignore=tests/e2e"
+markers = ["slow: long-running benchmark tests (deselect with `-m 'not slow'`)"]
 
 [tool.coverage.run]
 branch = true

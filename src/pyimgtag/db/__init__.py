@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pyimgtag.db.face_db import FaceDB
 from pyimgtag.db.image_db import _DEFAULT_PATH_BATCH_SIZE, ImageDB
+from pyimgtag.db.insights_db import InsightsDB
 from pyimgtag.db.judge_db import _DEFAULT_JUDGE_RESULTS_LIMIT, JudgeDB
 from pyimgtag.db.progress_db import ProgressDB
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
@@ -20,6 +21,7 @@ __all__ = [
     "FaceDetection",
     "ImageDB",
     "ImageResult",
+    "InsightsDB",
     "JudgeDB",
     "PersonCluster",
     "ProgressDB",

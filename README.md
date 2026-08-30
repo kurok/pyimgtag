@@ -62,7 +62,8 @@ Works on **macOS, Linux, and Windows**. Apple Photos integration (write-back) is
 - Open reverse geocoding via Nominatim (sends GPS coords to OpenStreetMap; cached locally)
 - Supports exported folders and Apple Photos library originals (macOS only)
 - Apple Photos write-back: push AI tags and descriptions back as keywords/captions (macOS only)
-- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`
+- Subcommands: `run`, `judge`, `status`, `reprocess`, `cleanup`, `cleanup-drift`, `preflight`, `query`, `tags`, `faces`, `review`, `insights`
+- Library insights report: one command summarises the whole tagged library as a terminal table, a self-contained HTML page, or JSON (`insights` subcommand)
 - Photo quality scoring: a single 1–10 score plus a model-written reason (`judge` subcommand)
 - Dry-run mode, date/limit filters, JSON/CSV export
 - SQLite progress DB with schema versioning for incremental re-runs
@@ -498,6 +499,42 @@ pyimgtag query --tag beach --format json
 pyimgtag query --tag beach --format paths --limit 50
 ```
 
+#### `pyimgtag insights` — library report
+
+Answers "so… what's in my library?" after a run. Pure SQL aggregation over
+the progress DB — no model calls, runs in well under a second even on a
+100k-photo database.
+
+```bash
+# Compact terminal summary (fits in 100 columns)
+pyimgtag insights
+
+# Self-contained HTML report: inline CSS, base64 thumbnails of the top
+# judged photos, zero external requests — one file you can archive or share
+pyimgtag insights --output report.html
+
+# Machine-readable (schema_version is bumped on incompatible changes)
+pyimgtag insights --format json
+
+# Longer top-N lists, no thumbnails (no image files are read at all)
+pyimgtag insights --top 25 --output report.html --no-thumbnails
+```
+
+Sections appear only when the DB has data for them:
+
+| Section | What it shows |
+|---|---|
+| Overview | totals by status, size on disk, oldest/newest capture date |
+| Time | photos per year / month, busiest month and day |
+| Places | top countries / regions / cities, location coverage % |
+| Content | top tags, scene categories, emotional tones, event hints, has-text share |
+| People | named people by photo count with a per-year breakdown (needs named faces) |
+| Quality | judge score histogram, average, coverage %, top photos (needs `judge` scores) |
+| Housekeeping | delete/review candidates with reclaimable bytes, untagged remainder, errors |
+
+The same report lives in the webapp at `/insights`, with an **Export HTML**
+button that downloads the identical standalone file.
+
 #### `pyimgtag faces` — face detection, clustering, naming
 
 The face workflow chains a handful of sub-actions. Detection, clustering,
@@ -897,6 +934,8 @@ hosts a single top-nav with these pages:
 - `/tags` — list, rename, merge, delete tags across the DB.
 - `/query` — full-text/tag/scene/judge filters with hover thumbnails.
 - `/judge` — judge-score grid with rating filter / sort / pager.
+- `/insights` — library report (totals, time, places, content, people,
+  quality, housekeeping) with an Export HTML button for the standalone file.
 - `/edit` — bulk-delete files marked `cleanup_class='delete'` from
   Apple Photos (macOS only; gated behind an explicit confirm).
 - `/about` — installed version, latest PyPI release, update check, wiki links.

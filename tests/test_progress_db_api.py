@@ -42,6 +42,7 @@ EXPECTED_PUBLIC_API = [
     "get_ignored_faces",
     "get_image",
     "get_images",
+    "get_insights",
     "get_judge_result",
     "get_known_file_path",
     "get_person_embeddings",
