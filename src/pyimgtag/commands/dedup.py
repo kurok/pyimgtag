@@ -24,6 +24,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from pyimgtag.db.dedup_db import ACTION_MOVE, ACTION_TAG, ACTION_TRASH
 from pyimgtag.dedup_groups import (
@@ -168,15 +169,22 @@ def _handle_list(args: argparse.Namespace) -> int:
 # --- resolve ---------------------------------------------------------------
 
 
+def _photos_writer() -> Any:
+    """Return the Apple Photos keyword writer (seam for tests)."""
+    from pyimgtag.applescript_writer import write_to_photos
+
+    return write_to_photos
+
+
 def _apply_photos_tag(file_path: str, write_back: bool) -> str | None:
     """Add the duplicate keyword in Apple Photos. Returns an error string or None."""
     if not write_back:
         return None
     if sys.platform != "darwin":
         return "write-back is macOS only"
-    from pyimgtag.applescript_writer import write_to_photos
-
-    return write_to_photos(file_path, [DUPLICATE_KEYWORD], None, mode="append")
+    writer = _photos_writer()
+    result: str | None = writer(file_path, [DUPLICATE_KEYWORD], None, mode="append")
+    return result
 
 
 def _move_loser(file_path: str, move_to: str) -> tuple[str | None, str | None]:

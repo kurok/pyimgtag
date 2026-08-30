@@ -6,14 +6,15 @@ they can be unit-tested without touching SQLite or the filesystem:
 **Grouping** (:func:`group_by_phash`) turns ``(file_path, phash)`` records
 into connected components of visually similar photos. A naive pairwise
 sweep is O(n²) — 100 k rows would be five billion comparisons — so
-candidates are found with a *banding index* instead: the hex hash is split
-into ``threshold + 1`` disjoint bands and two hashes only become candidates
-when at least one band matches exactly. Pigeonhole guarantees recall: a pair
-within ``threshold`` bits differs in at most ``threshold`` bit positions, and
-those cannot cover all ``threshold + 1`` bands, so at least one band is
-identical. Every candidate pair is still verified with a real Hamming
-distance, so there are no false positives either. Matches are merged with
-union-find, which gives the transitive closure for free.
+candidates are found with *multi-index hashing* instead: the 64-bit hash is
+split into four 16-bit bands, each indexed in its own bucket table. Pigeonhole
+guarantees recall: a pair within ``threshold`` bits differs in at most
+``threshold`` bit positions spread over four bands, so at least one band
+differs by at most ``threshold // 4`` bits — and every bucket within that
+radius of each band value is probed. Every candidate pair is still verified
+with a real Hamming distance, so there are no false positives either.
+Matches are merged with union-find, which gives the transitive closure for
+free.
 
 **Ranking** (:func:`rank_candidates`) orders the members of a group so the
 first one is the copy worth keeping. The default order is documented in
@@ -299,31 +300,67 @@ class _UnionFind:
         self._size[ra] += self._size[rb]
 
 
-def _band_edges(length: int, bands: int) -> list[int]:
-    """Return ``bands + 1`` cut points splitting ``length`` chars near-evenly."""
-    return [(i * length) // bands for i in range(bands + 1)]
+#: Number of bands the bit string is split into for the multi-index lookup.
+#: Four 16-bit bands keep buckets tiny (≤ 65 536 per band) while the
+#: per-band search radius ``threshold // 4`` stays 0–2 for every supported
+#: threshold, so 100 k hashes group in seconds.
+_BANDS = 4
+
+
+def _variants(value: int, width: int, radius: int) -> Iterable[int]:
+    """Yield every ``width``-bit value within ``radius`` bit flips of ``value``."""
+    yield value
+    if radius >= 1:
+        for i in range(width):
+            yield value ^ (1 << i)
+    if radius >= 2:
+        for i in range(width):
+            for j in range(i + 1, width):
+                yield value ^ (1 << i) ^ (1 << j)
+    if radius >= 3:  # pragma: no cover - thresholds above 11 are not exposed by the CLI
+        for i in range(width):
+            for j in range(i + 1, width):
+                for k in range(j + 1, width):
+                    yield value ^ (1 << i) ^ (1 << j) ^ (1 << k)
 
 
 def _candidate_pairs(
-    hashes: Sequence[str],
+    values: Sequence[int],
+    bits: int,
     indices: Sequence[int],
     threshold: int,
 ) -> Iterable[tuple[int, int]]:
-    """Yield index pairs that share at least one band (pigeonhole candidates)."""
-    length = len(hashes[indices[0]])
-    bands = min(threshold + 1, length)
-    edges = _band_edges(length, bands)
-    buckets: dict[tuple[int, str], list[int]] = {}
+    """Yield candidate index pairs via multi-index hashing.
+
+    The ``bits``-wide value is split into :data:`_BANDS` bands. Two hashes
+    within ``threshold`` bits of each other must, by pigeonhole, agree on at
+    least one band to within ``threshold // _BANDS`` bits, so probing each
+    band's bucket for every value within that radius finds every true pair.
+    Callers verify each candidate with the exact Hamming distance.
+    """
+    bands = min(_BANDS, bits)
+    radius = threshold // bands
+    widths = [(bits // bands) + (1 if b < bits % bands else 0) for b in range(bands)]
+    shifts = [sum(widths[:b]) for b in range(bands)]
+    masks = [(1 << w) - 1 for w in widths]
+
+    buckets: list[dict[int, list[int]]] = [{} for _ in range(bands)]
+    band_values: list[list[int]] = []
     for idx in indices:
-        value = hashes[idx]
-        for band in range(bands):
-            buckets.setdefault((band, value[edges[band] : edges[band + 1]]), []).append(idx)
-    for members in buckets.values():
-        if len(members) < 2:
-            continue
-        for i in range(len(members)):
-            for j in range(i + 1, len(members)):
-                yield members[i], members[j]
+        value = values[idx]
+        per_band = [(value >> shifts[b]) & masks[b] for b in range(bands)]
+        band_values.append(per_band)
+        for b in range(bands):
+            buckets[b].setdefault(per_band[b], []).append(idx)
+
+    for pos, idx in enumerate(indices):
+        per_band = band_values[pos]
+        for b in range(bands):
+            bucket = buckets[b]
+            for probe in _variants(per_band[b], widths[b], radius):
+                for other in bucket.get(probe, ()):
+                    if other > idx:
+                        yield idx, other
 
 
 def _kind_for(values: Sequence[int], threshold: int) -> str:
@@ -382,10 +419,10 @@ def group_by_phash(
     for idx, value in enumerate(hashes):
         by_width.setdefault(len(value), []).append(idx)
 
-    for indices in by_width.values():
+    for hex_width, indices in by_width.items():
         if len(indices) < 2:
             continue
-        for a, b in _candidate_pairs(hashes, indices, threshold):
+        for a, b in _candidate_pairs(values, hex_width * 4, indices, threshold):
             if uf.find(a) == uf.find(b):
                 continue
             if (values[a] ^ values[b]).bit_count() <= threshold:

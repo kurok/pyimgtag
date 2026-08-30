@@ -465,7 +465,9 @@ def test_resolve_write_back_calls_applescript(tmp_path, monkeypatch, capsys):
         calls.append((file_path, tuple(tags), mode))
         return None
 
-    monkeypatch.setattr("pyimgtag.applescript_writer.write_to_photos", fake_write)
+    # Patch the consumer-side seam rather than the applescript_writer module
+    # attribute: CI showed the real function still being resolved on Linux.
+    monkeypatch.setattr("pyimgtag.commands.dedup._photos_writer", lambda: fake_write)
     monkeypatch.setattr(sys, "platform", "darwin")
 
     args = _args("resolve", "--move-to", str(tmp_path / "q"), "--write-back")
