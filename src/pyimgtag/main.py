@@ -228,6 +228,44 @@ Ranking order for the keeper (reorder with --prefer):
   -> oldest mtime -> path
 """,
     ),
+    "mcp": (
+        "Serve the library to AI assistants over MCP (stdio)",
+        "Expose the tagged library to any MCP client (Claude Desktop, Claude Code,\n"
+        "...) as structured tools: query photos, read one photo's metadata, fetch a\n"
+        "thumbnail, list tags/people, rank judged photos, summarise the library.\n"
+        "Read-only by default; images never leave the machine except as thumbnails.\n"
+        "Write tools (set_tags, set_cleanup_class, rename_person, export_photos) are\n"
+        "registered only with --enable-writes or PYIMGTAG_MCP_ENABLE_WRITES=1, and\n"
+        "export_photos copies only into the directory given by --export-root.\n"
+        "Needs the [mcp] extra: pip install 'pyimgtag[mcp]'.",
+        """\
+Examples:
+  pyimgtag mcp                                  # read-only stdio server, default DB
+  pyimgtag mcp --db ~/photos.db                 # serve a specific database
+  pyimgtag mcp --enable-writes --export-root ~/Desktop/pyimgtag-export
+
+Claude Desktop (claude_desktop_config.json) / Claude Code (.mcp.json):
+  {
+    "mcpServers": {
+      "pyimgtag": {
+        "command": "pyimgtag",
+        "args": ["mcp"]
+      }
+    }
+  }
+
+With writes enabled:
+  {
+    "mcpServers": {
+      "pyimgtag": {
+        "command": "pyimgtag",
+        "args": ["mcp", "--enable-writes", "--export-root", "/Users/me/photo-exports"],
+        "env": {"PYIMGTAG_MCP_ENABLE_WRITES": "1"}
+      }
+    }
+  }
+""",
+    ),
     "tags": (
         "Manage tags across the image database",
         "List, rename, delete, or merge tags across all images in the database.",
@@ -1002,6 +1040,23 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     add_web_flags(judge_p)
 
 
+def _add_mcp_subcommand(subparsers: Any) -> None:
+    mcp_p = _sub(subparsers, "mcp")
+    mcp_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    mcp_p.add_argument(
+        "--enable-writes",
+        action="store_true",
+        help=(
+            "Register the write tools (set_tags, set_cleanup_class, rename_person, "
+            "export_photos). Same effect as PYIMGTAG_MCP_ENABLE_WRITES=1"
+        ),
+    )
+    mcp_p.add_argument(
+        "--export-root",
+        help="Directory export_photos may copy into; without it exports are refused",
+    )
+
+
 def _add_prompt_subcommand(subparsers: Any) -> None:
     prompt_p = _sub(subparsers, "prompt")
     prompt_sub = prompt_p.add_subparsers(dest="prompt_action")
@@ -1179,6 +1234,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_tags_subcommand(subparsers)
     _add_dedup_subcommand(subparsers)
     _add_insights_subcommand(subparsers)
+    _add_mcp_subcommand(subparsers)
     _add_prompt_subcommand(subparsers)
 
     return p
@@ -1254,6 +1310,7 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.faces import cmd_faces
     from pyimgtag.commands.insights import cmd_insights
     from pyimgtag.commands.judge import cmd_judge
+    from pyimgtag.commands.mcp_cmd import cmd_mcp
     from pyimgtag.commands.preflight_cmd import cmd_preflight
     from pyimgtag.commands.prompt_cmd import cmd_prompt
     from pyimgtag.commands.query import cmd_query
@@ -1288,6 +1345,7 @@ def main(argv: list[str] | None = None) -> int:
         "tags": lambda: cmd_tags(args),
         "dedup": lambda: cmd_dedup(args),
         "insights": lambda: cmd_insights(args),
+        "mcp": lambda: cmd_mcp(args),
         "prompt": lambda: cmd_prompt(args),
     }
 

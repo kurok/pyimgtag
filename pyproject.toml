@@ -57,6 +57,10 @@ vocab = ["pyyaml>=6.0"]
 # universal lock. The Vision API used (VNRecognizeTextRequest) is stable across
 # these pyobjc releases.
 ocr = ["pyobjc-framework-Vision>=9.0; sys_platform == 'darwin'", "pyobjc-framework-Quartz>=9.0; sys_platform == 'darwin'"]
+# Official MCP Python SDK for `pyimgtag mcp`. Floor at 2.0: the 2.x line renamed
+# FastMCP to MCPServer and moved to snake_case model fields, which is the API
+# src/pyimgtag/mcp_server.py targets — a 1.x install would not import.
+mcp = ["mcp>=2.0"]
 all = [
     "pillow-heif>=1.3",
     "photoscript>=0.5.3",
@@ -70,6 +74,7 @@ all = [
     "rawpy>=0.27",
     "pyyaml>=6.0",
     "send2trash>=1.8",
+    "mcp>=2.0",
     # Screen OCR (macOS only; markers make these no-ops elsewhere). Floor at 9.0
     # to stay compatible with osxphotos' pyobjc-framework-quartz<10.0 pin.
     "pyobjc-framework-Vision>=9.0; sys_platform == 'darwin'",
@@ -79,7 +84,9 @@ all = [
 # web app — keep it in the dev/test extra so installing the runtime [review] /
 # [all] extras does not drag in httpx2/h11 0.16 and clobber an environment's
 # classic httpx/httpcore (which pins h11<0.15).
-dev = ["pytest>=9.0", "pytest-xdist>=3.8", "pytest-cov>=7.0", "httpx2>=2.2"]
+# mcp is included so tests/test_mcp_server.py runs in CI (the workflow installs
+# `.[dev,lint,review]`); the runtime extra for users remains `[mcp]`.
+dev = ["pytest>=9.0", "pytest-xdist>=3.8", "pytest-cov>=7.0", "httpx2>=2.2", "mcp>=2.0"]
 lint = ["mypy>=2.1", "ruff>=0.15", "types-requests>=2.31"]
 security = ["bandit>=1.9", "pip-audit>=2.10"]
 # Optional: install Playwright + Pillow for the local screenshot smoke
@@ -175,3 +182,4 @@ select = ["E", "F", "W", "I"]
 "tests/test_face_clustering.py" = ["E402"]
 "tests/test_routes_query.py" = ["E402"]
 "tests/test_routes_review.py" = ["E402"]
+"tests/test_mcp_server.py" = ["E402"]
