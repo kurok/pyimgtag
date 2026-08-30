@@ -159,6 +159,18 @@ Examples:
   pyimgtag judge --photos-library LIB --sort-by score --verbose
 """,
     ),
+    "prompt": (
+        "Inspect the tagging prompt template",
+        "Print the default tagging prompt template so you can copy it, edit the\n"
+        "domain wording, and pass it back with 'pyimgtag run --prompt-template'.\n"
+        "Placeholders: {context} {vocabulary} {language} {max_tags} {fields}.",
+        """\
+Examples:
+  pyimgtag prompt show > my-prompt.txt      # default template with placeholders
+  pyimgtag prompt show --rendered           # fully expanded prompt, no placeholders
+  pyimgtag run --input-dir ~/Pictures --prompt-template my-prompt.txt
+""",
+    ),
     "insights": (
         "Summarise the tagged library (terminal, HTML, or JSON report)",
         "Aggregate everything already in the progress DB — totals, dates, places,\n"
@@ -310,6 +322,33 @@ def _add_run_subcommand(subparsers: Any) -> None:
         help=(
             "Comma-separated file extensions to scan (default: jpg,jpeg,heic,png). "
             "Add RAW formats as needed, e.g. jpg,jpeg,cr2,nef,arw,dng,raf,orf,rw2"
+        ),
+    )
+    run_p.add_argument(
+        "--vocabulary",
+        default=None,
+        help=(
+            "Controlled tag vocabulary file (.json, or .yaml with the [vocab] extra). "
+            "Embedded in the prompt and used to canonicalize model tags via synonyms; "
+            "'strict: true' drops off-vocabulary tags. Env: PYIMGTAG_VOCABULARY."
+        ),
+    )
+    run_p.add_argument(
+        "--prompt-template",
+        default=None,
+        help=(
+            "Custom tagging prompt template file (see 'pyimgtag prompt show'). "
+            "The JSON-schema block is validated or injected automatically. "
+            "Env: PYIMGTAG_PROMPT_TEMPLATE."
+        ),
+    )
+    run_p.add_argument(
+        "--tag-language",
+        default=None,
+        metavar="LANG",
+        help=(
+            "Ask the model to write tags and summaries in this language (e.g. 'ru', "
+            "'Portuguese'). With --vocabulary only the summary is localized. Model-dependent."
         ),
     )
     run_p.add_argument("--skip-no-gps", action="store_true", help="Skip images without GPS data")
@@ -724,6 +763,20 @@ def _add_query_subcommand(subparsers: Any) -> None:
         help="Output format (default: table)",
     )
     query_p.add_argument("--limit", type=int, help="Max results to return")
+    query_p.add_argument(
+        "--include-children",
+        action="store_true",
+        help=(
+            "Hierarchy roll-up: match --tag and every descendant tag from the "
+            "vocabulary (exact tag match instead of substring). Requires --vocabulary "
+            "or PYIMGTAG_VOCABULARY."
+        ),
+    )
+    query_p.add_argument(
+        "--vocabulary",
+        default=None,
+        help="Vocabulary file used by --include-children (env: PYIMGTAG_VOCABULARY)",
+    )
 
 
 def _add_judge_subcommand(subparsers: Any) -> None:
@@ -834,6 +887,17 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     add_web_flags(judge_p)
 
 
+def _add_prompt_subcommand(subparsers: Any) -> None:
+    prompt_p = _sub(subparsers, "prompt")
+    prompt_sub = prompt_p.add_subparsers(dest="prompt_action")
+    show_p = prompt_sub.add_parser("show", help="Print the default tagging prompt template")
+    show_p.add_argument(
+        "--rendered",
+        action="store_true",
+        help="Print the fully expanded default prompt instead of the template",
+    )
+
+
 def _add_insights_subcommand(subparsers: Any) -> None:
     from pyimgtag.insights_report import DEFAULT_MAX_THUMBS
 
@@ -915,6 +979,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_judge_subcommand(subparsers)
     _add_tags_subcommand(subparsers)
     _add_insights_subcommand(subparsers)
+    _add_prompt_subcommand(subparsers)
 
     return p
 
@@ -966,6 +1031,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--date cannot be combined with --date-from/--date-to")
     if args.subcommand == "cleanup-drift" and args.dry_run and args.prune_photos_missing:
         parser.error("--dry-run cannot be combined with --prune-photos-missing")
+    if args.subcommand == "query" and args.include_children:
+        if not args.tag:
+            parser.error("--include-children requires --tag")
+        if not (args.vocabulary or os.environ.get("PYIMGTAG_VOCABULARY")):
+            parser.error("--include-children requires --vocabulary (or PYIMGTAG_VOCABULARY)")
 
     _check_for_update()
 
@@ -975,6 +1045,7 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.insights import cmd_insights
     from pyimgtag.commands.judge import cmd_judge
     from pyimgtag.commands.preflight_cmd import cmd_preflight
+    from pyimgtag.commands.prompt_cmd import cmd_prompt
     from pyimgtag.commands.query import cmd_query
     from pyimgtag.commands.review_cmd import cmd_review
     from pyimgtag.commands.run import cmd_run
@@ -1004,6 +1075,7 @@ def main(argv: list[str] | None = None) -> int:
         "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
         "insights": lambda: cmd_insights(args),
+        "prompt": lambda: cmd_prompt(args),
     }
 
     handler = dispatch.get(args.subcommand)

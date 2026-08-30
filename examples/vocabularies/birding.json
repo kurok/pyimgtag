@@ -1,0 +1,28 @@
+{
+  "tags": [
+    {"bird": {
+      "synonyms": ["birds", "avian"],
+      "children": [
+        {"raptor": {"synonyms": ["bird of prey", "hawk", "eagle", "falcon", "owl"]}},
+        {"waterfowl": {"synonyms": ["duck", "goose", "swan", "heron", "egret"]}},
+        {"songbird": {"synonyms": ["passerine", "finch", "sparrow", "warbler", "robin"]}},
+        {"seabird": {"synonyms": ["gull", "seagull", "tern", "puffin", "cormorant"]}}
+      ]
+    }},
+    {"nest": {"synonyms": ["nesting", "eggs"]}},
+    {"flight": {"synonyms": ["flying", "in flight", "soaring", "wingspan"]}},
+    {"perched": {"synonyms": ["perching", "on a branch"]}},
+    {"feeding": {"synonyms": ["eating", "foraging", "catching fish"]}},
+    {"habitat": {
+      "children": [
+        {"wetland": {"synonyms": ["marsh", "swamp", "lake", "pond"]}},
+        {"forest": {"synonyms": ["woodland", "woods", "trees"]}},
+        {"coast": {"synonyms": ["beach", "shore", "seaside", "cliffs"]}},
+        {"garden": {"synonyms": ["backyard", "feeder", "bird feeder"]}}
+      ]
+    }},
+    "macro",
+    "silhouette"
+  ],
+  "strict": false
+}

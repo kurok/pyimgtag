@@ -160,6 +160,7 @@ class ImageDB:
         min_judge_score: int | None,
         max_judge_score: int | None,
         judged: bool | None,
+        tags_any: list[str] | None = None,
     ) -> tuple[list[str], list[object]]:
         """Translate filter arguments into ``(conditions, params)`` for query_images."""
         conditions: list[str] = []
@@ -170,6 +171,20 @@ class ImageDB:
                 "EXISTS (SELECT 1 FROM json_each(pi.tags) WHERE LOWER(value) LIKE LOWER(?))"
             )
             params.append(f"%{tag}%")
+        if tags_any is not None:
+            wanted = [t.lower() for t in tags_any]
+            if not wanted:
+                conditions.append("0")  # an empty set matches nothing
+            else:
+                # Placeholders are generated "?" markers; the values are bound.
+                placeholders = ", ".join("?" for _ in wanted)
+                clause = (
+                    "EXISTS (SELECT 1 FROM json_each(pi.tags) WHERE LOWER(value) IN ("
+                    + placeholders  # nosec B608
+                    + "))"
+                )
+                conditions.append(clause)
+                params.extend(wanted)
         if has_text is True:
             conditions.append("pi.has_text = 1")
         elif has_text is False:
@@ -233,11 +248,15 @@ class ImageDB:
         max_judge_score: int | None = None,
         judged: bool | None = None,
         sort: str = "path_asc",
+        tags_any: list[str] | None = None,
     ) -> list[dict]:
         """Query images with advanced filters.
 
         Args:
             tag: Case-insensitive substring match against any tag value.
+            tags_any: Case-insensitive *exact* match against any of these tag
+                values (used for vocabulary hierarchy roll-up). Combinable with
+                ``tag``; an empty list matches nothing.
             has_text: True = only images with text; False = only without; None = any.
             cleanup_class: Exact match against cleanup_class ('delete', 'review', etc.).
             scene_category: Exact match against scene_category.
@@ -267,6 +286,7 @@ class ImageDB:
             min_judge_score,
             max_judge_score,
             judged,
+            tags_any,
         )
         order_clause = self._QUERY_SORTS.get(sort, self._QUERY_SORTS["path_asc"])
         query = self._build_images_query(conditions, order_clause, limit)

@@ -17,6 +17,7 @@ Runnable shell scripts covering every major use case. Each script uses `--dry-ru
 | `09_raw_heic.sh` | RAW (CR2/NEF/ARW/DNG) + HEIC tagging | [Advanced Topics](https://github.com/kurok/pyimgtag/wiki/Advanced-Topics) |
 | `10_dedup_and_reprocess.sh` | Perceptual dedup + reprocess after model change | [Managing Your Library](https://github.com/kurok/pyimgtag/wiki/Managing-Your-Library) |
 | `11_judge_subcommand.sh` | Score photos with the 13-criterion quality rubric | [Scoring Photos](https://github.com/kurok/pyimgtag/wiki/Scoring-Photos) |
+| `12_controlled_vocabulary.sh` | Controlled vocabulary (`vocabularies/birding.{yaml,json}`), hierarchy roll-up, custom prompt template, output language | [Advanced Topics](https://github.com/kurok/pyimgtag/wiki/Advanced-Topics) |
 
 ## Mock Ollama
 

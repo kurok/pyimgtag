@@ -259,6 +259,7 @@ class ProgressDB:
         max_judge_score: int | None = None,
         judged: bool | None = None,
         sort: str = "path_asc",
+        tags_any: list[str] | None = None,
     ) -> list[dict]:
         """Delegate to :meth:`ImageDB.query_images`."""
         return self._images.query_images(
@@ -274,6 +275,7 @@ class ProgressDB:
             max_judge_score,
             judged,
             sort,
+            tags_any,
         )
 
     def get_tag_counts(self) -> list[tuple[str, int]]:
