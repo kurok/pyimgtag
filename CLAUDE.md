@@ -43,7 +43,7 @@ pre-commit run --all-files
 ```
 src/pyimgtag/
   main.py              CLI entry point, subcommand dispatch (run/status/reprocess/preflight/cleanup/
-                       cleanup-drift/review/faces/query/judge/tags)
+                       cleanup-drift/review/faces/query/judge/tags/insights)
   models.py            Data classes (ExifData, TagResult, GeoResult, ImageResult)
   scanner.py           Directory and Photos library scanning
   exif_reader.py       EXIF GPS + date (exiftool primary, Pillow fallback)
@@ -56,7 +56,9 @@ src/pyimgtag/
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
   db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
                        versioned migrations via PRAGMA user_version), image_db (ImageDB),
-                       face_db (FaceDB), judge_db (JudgeDB)
+                       face_db (FaceDB), judge_db (JudgeDB), insights_db (InsightsDB —
+                       SQL-side library aggregation for `insights`)
+  insights_report.py   Terminal + self-contained HTML renderers for the insights document
   applescript_writer.py  Apple Photos keyword/description write-back via osascript
   dedup.py             Perceptual hash duplicate detection
   heic_converter.py    HEIC to JPEG conversion (macOS sips)
@@ -218,7 +220,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 
 ## Important Notes
 
-- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag preflight`, `pyimgtag cleanup`, `pyimgtag cleanup-drift`, `pyimgtag review`, `pyimgtag faces`, `pyimgtag query`, `pyimgtag judge`, `pyimgtag tags`
+- CLI uses subcommands: `pyimgtag run`, `pyimgtag status`, `pyimgtag reprocess`, `pyimgtag preflight`, `pyimgtag cleanup`, `pyimgtag cleanup-drift`, `pyimgtag review`, `pyimgtag faces`, `pyimgtag query`, `pyimgtag judge`, `pyimgtag tags`, `pyimgtag insights`
 - `--write-back` flag enables writing tags/description back to Apple Photos via AppleScript
 - One Ollama call per image with structured JSON prompt (rich metadata)
 - EXIF GPS is source of truth for location — model does not guess location

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from pyimgtag.db.face_db import FaceDB
 from pyimgtag.db.image_db import _DEFAULT_PATH_BATCH_SIZE, ImageDB
+from pyimgtag.db.insights_db import InsightsDB
 from pyimgtag.db.judge_db import _DEFAULT_JUDGE_RESULTS_LIMIT, JudgeDB
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
 
@@ -163,6 +164,15 @@ class ProgressDB:
     def _judge(self) -> JudgeDB:
         """Judge-score domain helper bound to the current connection."""
         return JudgeDB(self._conn)
+
+    @property
+    def _insights(self) -> InsightsDB:
+        """Library-aggregation helper bound to the current connection."""
+        return InsightsDB(self._conn)
+
+    def get_insights(self, top_n: int = 10) -> dict:
+        """Delegate to :meth:`InsightsDB.compute`."""
+        return self._insights.compute(top_n=top_n)
 
     def _create_table(self) -> None:
         self._conn.execute(

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pyimgtag Insights</title>
+  <style>
+    {{ nav_styles }}
+    .toolbar{display:flex;align-items:center;gap:12px;padding:16px 32px 0}
+    .toolbar .ctrl-label{display:inline-flex;align-items:center;gap:6px;font-size:12px;
+                         color:var(--muted)}
+    .toolbar select{padding:4px 8px;border-radius:6px;border:1px solid var(--border);
+                    background:var(--surface);color:var(--text);font-size:12px;
+                    font-family:inherit}
+    #content{padding:8px 32px 40px}
+    h2{font-size:18px;margin:28px 0 12px;letter-spacing:-.3px}
+    .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+    .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+    .sec-title{font-size:13px;color:var(--muted);margin:0 0 6px}
+    .tbl td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .bar{height:6px;background:rgba(0,0,0,.06);border-radius:3px;overflow:hidden;min-width:80px}
+    .bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+    .hist{display:flex;align-items:flex-end;gap:6px;height:120px;padding:8px 0;
+          margin-bottom:20px}
+    .hist div{flex:1;background:var(--accent);border-radius:4px 4px 0 0;position:relative;
+              min-height:2px}
+    .hist div span{position:absolute;bottom:-18px;left:0;right:0;text-align:center;
+                   font-size:11px;color:var(--muted)}
+    .hist div b{position:absolute;top:-16px;left:0;right:0;text-align:center;font-size:10px;
+                color:var(--muted);font-weight:500}
+    .photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+    .photo .body{padding:8px 10px 10px;font-size:12px}
+    .photo .score{font-weight:700;color:var(--accent)}
+    .photo .name{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .empty{background:var(--surface);border-radius:var(--radius-md);padding:48px;
+           text-align:center;color:var(--muted);box-shadow:var(--shadow-sm)}
+    .empty p:first-child{font-size:17px;color:var(--text);margin-bottom:8px}
+    code{font-family:ui-monospace,'SF Mono',monospace;font-size:12px;background:var(--bg);
+         padding:2px 6px;border-radius:4px}
+  </style>
+</head>
+<body>
+{{ nav }}
+<div class="page-hdr">
+  <span class="page-title">Insights</span>
+  <span class="page-meta" id="meta">Loading…</span>
+</div>
+<div class="toolbar">
+  <label class="ctrl-label">Top N
+    <select id="topSel" onchange="load()">
+      <option value="5">5</option>
+      <option value="10" selected>10</option>
+      <option value="25">25</option>
+      <option value="50">50</option>
+    </select>
+  </label>
+  <a id="exportBtn" class="btn btn-primary btn-sm" href="{{ api_base }}/export?top=10"
+     download="pyimgtag-insights.html">Export HTML</a>
+</div>
+<div id="content"></div>
+<script>
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function fmtBytes(n) {
+  let s = Number(n || 0); const units = ['B','KB','MB','GB','TB'];
+  for (const u of units) { if (s < 1024 || u === 'TB') return (u === 'B' ? s.toFixed(0) : s.toFixed(1)) + ' ' + u; s /= 1024; }
+}
+function pct(v) { return v == null ? '–' : v.toFixed(1) + '%'; }
+function date(v) { return v ? String(v).slice(0, 10) : '–'; }
+
+function card(val, label) {
+  const c = el('div', 'stat-card');
+  c.appendChild(el('div', 'stat-val', String(val)));
+  c.appendChild(el('div', 'stat-label', label));
+  return c;
+}
+function cards(items) {
+  const wrap = el('div', 'cards');
+  for (const [v, l] of items) wrap.appendChild(card(v, l));
+  return wrap;
+}
+function table(title, rows, labelKey) {
+  labelKey = labelKey || 'value';
+  if (!rows || !rows.length) return null;
+  const top = Math.max(...rows.map(r => r.count)) || 1;
+  const box = el('div');
+  box.appendChild(el('h3', 'sec-title', title));
+  const t = el('table', 'tbl'); const tb = el('tbody');
+  for (const r of rows) {
+    const tr = el('tr');
+    tr.appendChild(el('td', null, String(r[labelKey])));
+    tr.appendChild(el('td', 'n', String(r.count)));
+    const td = el('td'); const bar = el('div', 'bar'); const fill = el('i');
+    fill.style.width = Math.round(100 * r.count / top) + '%';
+    bar.appendChild(fill); td.appendChild(bar); tr.appendChild(td);
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb); box.appendChild(t);
+  return box;
+}
+function grid(children) {
+  const g = el('div', 'grid2');
+  g.style.marginTop = '16px';
+  for (const c of children) if (c) g.appendChild(c);
+  return g;
+}
+function histogram(hist) {
+  const top = Math.max(...Object.values(hist)) || 1;
+  const h = el('div', 'hist');
+  for (const [k, v] of Object.entries(hist)) {
+    const d = el('div');
+    d.style.height = Math.round(100 * v / top) + '%';
+    d.appendChild(el('b', null, String(v)));
+    d.appendChild(el('span', null, k));
+    h.appendChild(d);
+  }
+  return h;
+}
+
+function render(doc) {
+  const root = document.getElementById('content');
+  root.innerHTML = '';
+  const ov = doc.overview;
+  document.getElementById('meta').textContent =
+    doc.empty ? 'nothing tagged yet' : ov.total.toLocaleString() + ' photos in database';
+
+  if (doc.empty) {
+    const e = el('div', 'empty');
+    e.appendChild(el('p', null, 'Nothing tagged yet'));
+    const p = el('p'); p.append('Run '); p.appendChild(el('code', null, 'pyimgtag run --input-dir <folder>'));
+    p.append(' and come back for the report.');
+    e.appendChild(p); root.appendChild(e);
+    return;
+  }
+
+  root.appendChild(el('h2', null, 'Overview'));
+  root.appendChild(cards([
+    [ov.total.toLocaleString(), 'photos in database'], [ov.ok.toLocaleString(), 'tagged ok'],
+    [ov.error.toLocaleString(), 'errors'], [fmtBytes(ov.size_bytes), 'size on disk'],
+    [date(ov.oldest), 'oldest photo'], [date(ov.newest), 'newest photo'],
+  ]));
+
+  const t = doc.time;
+  if (t) {
+    root.appendChild(el('h2', null, 'Time'));
+    const items = [[t.dated.toLocaleString(), 'photos with a capture date']];
+    if (t.busiest_month) items.push([t.busiest_month.period, 'busiest month (' + t.busiest_month.count + ' photos)']);
+    if (t.busiest_day) items.push([t.busiest_day.period, 'busiest day (' + t.busiest_day.count + ' photos)']);
+    root.appendChild(cards(items));
+    root.appendChild(grid([
+      table('Photos per year', t.per_year.map(r => ({value: r.period, count: r.count}))),
+      table('Photos per month (last 24)', t.per_month.slice(-24).map(r => ({value: r.period, count: r.count}))),
+    ]));
+  }
+
+  const pl = doc.places;
+  if (pl) {
+    root.appendChild(el('h2', null, 'Places'));
+    root.appendChild(cards([[pct(pl.coverage_pct), 'location coverage'], [pl.located.toLocaleString(), 'photos with a place']]));
+    root.appendChild(grid([table('Top countries', pl.countries), table('Top regions', pl.regions), table('Top cities', pl.cities)]));
+  }
+
+  const c = doc.content;
+  if (c) {
+    root.appendChild(el('h2', null, 'Content'));
+    root.appendChild(cards([[c.unique_tags.toLocaleString(), 'unique tags'], [pct(c.has_text_pct), 'photos containing text']]));
+    root.appendChild(grid([
+      table('Top tags', c.top_tags), table('Scene categories', c.scene_categories),
+      table('Emotional tones', c.emotional_tones), table('Event hints', c.event_hints),
+    ]));
+  }
+
+  const pe = doc.people;
+  if (pe) {
+    root.appendChild(el('h2', null, 'People'));
+    root.appendChild(cards([[pe.named_persons.toLocaleString(), 'named people'], [pe.faces.toLocaleString(), 'faces detected']]));
+    root.appendChild(grid([table('Top people by photo count', pe.top_people.map(p => ({value: p.label, count: p.photos})))]));
+  }
+
+  const q = doc.quality;
+  if (q) {
+    root.appendChild(el('h2', null, 'Quality'));
+    const items = [[q.judged.toLocaleString(), 'judged photos'], [pct(q.coverage_pct), 'judge coverage']];
+    if (q.average != null) items.push([q.average.toFixed(2), 'average score / 10']);
+    root.appendChild(cards(items));
+    root.appendChild(el('h3', 'sec-title', 'Score distribution'));
+    root.appendChild(histogram(q.histogram));
+    root.appendChild(el('h3', 'sec-title', 'Top photos'));
+    const ph = el('div', 'photos');
+    for (const p of q.top_photos) {
+      const name = String(p.file_path).split(/[\\/]/).pop();
+      const cardEl = el('div', 'img-card photo');
+      const img = el('img', 'img-thumb');
+      img.loading = 'lazy'; img.alt = name;
+      // Re-use /review/thumbnail — path-injection-safe (DB lookup, not the raw value).
+      img.src = '/review/thumbnail?path=' + encodeURIComponent(p.file_path) + '&size=400';
+      img.onerror = () => { img.replaceWith(el('div', 'img-thumb-fallback', name)); };
+      cardEl.appendChild(img);
+      const body = el('div', 'body');
+      body.appendChild(el('span', 'score', Number(p.score).toString() + '/10 '));
+      const nm = el('span', 'name', name); nm.title = p.file_path; body.appendChild(nm);
+      if (p.reason) body.appendChild(el('div', null, p.reason));
+      cardEl.appendChild(body); ph.appendChild(cardEl);
+    }
+    root.appendChild(ph);
+  }
+
+  const hk = doc.housekeeping;
+  if (hk) {
+    root.appendChild(el('h2', null, 'Housekeeping'));
+    root.appendChild(cards([
+      [hk.delete_candidates.count.toLocaleString(), 'delete candidates · ' + fmtBytes(hk.delete_candidates.bytes)],
+      [hk.review_candidates.count.toLocaleString(), 'review candidates · ' + fmtBytes(hk.review_candidates.bytes)],
+      [hk.untagged.toLocaleString(), 'tagged ok but no tags'], [hk.errors.toLocaleString(), 'processing errors'],
+    ]));
+  }
+}
+
+async function load() {
+  const top = document.getElementById('topSel').value;
+  document.getElementById('exportBtn').href = '{{ api_base }}/export?top=' + top;
+  const r = await fetch('{{ api_base }}/api/insights?top=' + top);
+  render(await r.json());
+}
+load();
+</script>
+</body>
+</html>
