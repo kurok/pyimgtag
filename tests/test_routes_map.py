@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -90,6 +91,16 @@ def test_page_references_only_vendored_assets():
     assert not external, external
 
 
+def _tile_hosts(html: str) -> set[str]:
+    """Exact hostnames of every absolute URL embedded in the page.
+
+    Uses ``urlparse().hostname`` rather than substring containment so a
+    lookalike host (e.g. ``evil-tile.openstreetmap.org.example.com``)
+    cannot be mistaken for the real tile host.
+    """
+    return {urlparse(u).hostname for u in re.findall(r"""https?://[^\s"'<>]+""", html)}
+
+
 def test_tile_url_comes_from_the_environment(monkeypatch):
     monkeypatch.setenv("PYIMGTAG_MAP_TILES", "http://tiles.lan/{z}/{x}/{y}.png")
     monkeypatch.setenv("PYIMGTAG_MAP_TILES_ATTRIBUTION", "local tiles")
@@ -98,8 +109,9 @@ def test_tile_url_comes_from_the_environment(monkeypatch):
         "attribution": "local tiles",
     }
     html = render_map_html("/map")
-    assert "tiles.lan" in html
-    assert "tile.openstreetmap.org" not in html
+    hosts = _tile_hosts(html)
+    assert "tiles.lan" in hosts
+    assert "tile.openstreetmap.org" not in hosts
 
 
 def test_tile_url_defaults_to_openstreetmap(monkeypatch):
@@ -107,7 +119,7 @@ def test_tile_url_defaults_to_openstreetmap(monkeypatch):
     monkeypatch.delenv("PYIMGTAG_MAP_TILES_ATTRIBUTION", raising=False)
     assert tile_config() == {"url": DEFAULT_TILE_URL, "attribution": DEFAULT_TILE_ATTRIBUTION}
     html = render_map_html("/map")
-    assert "tile.openstreetmap.org" in html
+    assert "tile.openstreetmap.org" in _tile_hosts(html)
     assert "OpenStreetMap" in html
 
 
