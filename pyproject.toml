@@ -190,3 +190,8 @@ select = ["E", "F", "W", "I"]
 "tests/test_routes_query.py" = ["E402"]
 "tests/test_routes_review.py" = ["E402"]
 "tests/test_mcp_server.py" = ["E402"]
+
+[tool.uv]
+# Transitive via pip-audit (the `security` extra). Floor for GHSA-qwm4-qh6w-59xr /
+# CVE-2026-13346 (doubly-encoded index URLs), fixed in pip 26.2.0.
+constraint-dependencies = ["pip>=26.2.0"]
