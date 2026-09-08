@@ -38,11 +38,13 @@ _DEFAULT_CACHE_TTL_DAYS = 365  # days before a cached result is re-fetched
 # cache-write sequence so the 1 req/s policy (and the not-thread-safe
 # DiskCache) survive any number of geocoder objects and worker threads.
 _REQUEST_LOCK = threading.Lock()
-_LAST_REQUEST_TS: float = 0.0
 
 
 class ReverseGeocoder:
     """Reverse geocoder backed by Nominatim with a JSON disk cache."""
+
+    #: monotonic time of the last Nominatim request, process-wide (see _rate_limit).
+    _last_request_ts: float = 0.0
 
     def __init__(
         self,
@@ -150,14 +152,13 @@ class ReverseGeocoder:
     def _rate_limit(self) -> None:
         """Sleep until at least ``_MIN_INTERVAL`` has passed since the last request.
 
-        The schedule is a module global, so the spacing is process-wide. Call
-        only while holding ``_REQUEST_LOCK``.
+        The schedule is a class attribute, so the spacing is process-wide
+        across every instance. Call only while holding ``_REQUEST_LOCK``.
         """
-        global _LAST_REQUEST_TS
-        elapsed = time.monotonic() - _LAST_REQUEST_TS
+        elapsed = time.monotonic() - ReverseGeocoder._last_request_ts
         if elapsed < _MIN_INTERVAL:
             time.sleep(_MIN_INTERVAL - elapsed)
-        _LAST_REQUEST_TS = time.monotonic()
+        ReverseGeocoder._last_request_ts = time.monotonic()
 
     def close(self) -> None:
         self._session.close()

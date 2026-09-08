@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pyimgtag import geocoder as geo_mod
 from pyimgtag.geocoder import ReverseGeocoder
 
 
@@ -156,8 +157,8 @@ class TestRateLimit:
 
         geo = ReverseGeocoder(cache_dir=tmp_path)
         # Pretend the last request was just now so the next call must wait.
-        # The schedule is process-wide (module global), not per instance.
-        monkeypatch.setattr("pyimgtag.geocoder._LAST_REQUEST_TS", _time.monotonic())
+        # The schedule is process-wide (class attribute), not per instance.
+        monkeypatch.setattr(ReverseGeocoder, "_last_request_ts", _time.monotonic())
         with patch("pyimgtag.geocoder.time.sleep") as mock_sleep:
             geo._rate_limit()
         mock_sleep.assert_called_once()
@@ -218,11 +219,9 @@ class TestConcurrentRateLimit:
     def test_requests_stay_one_second_apart_under_j8(self, tmp_path, monkeypatch):
         import threading
 
-        import pyimgtag.geocoder as geo_mod
-
         clock = self._FakeClock()
         monkeypatch.setattr(geo_mod, "time", clock)
-        monkeypatch.setattr(geo_mod, "_LAST_REQUEST_TS", 0.0)
+        monkeypatch.setattr(ReverseGeocoder, "_last_request_ts", 0.0)
 
         stamps: list[float] = []
         geo = ReverseGeocoder(cache_dir=tmp_path)
@@ -253,11 +252,9 @@ class TestConcurrentRateLimit:
     def test_cache_hits_do_not_wait_for_the_gate(self, tmp_path, monkeypatch):
         import threading
 
-        import pyimgtag.geocoder as geo_mod
-
         clock = self._FakeClock()
         monkeypatch.setattr(geo_mod, "time", clock)
-        monkeypatch.setattr(geo_mod, "_LAST_REQUEST_TS", 0.0)
+        monkeypatch.setattr(ReverseGeocoder, "_last_request_ts", 0.0)
 
         calls: list[float] = []
         geo = ReverseGeocoder(cache_dir=tmp_path)

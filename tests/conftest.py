@@ -27,5 +27,5 @@ def _reset_shared_throttles(monkeypatch):
     """
     from pyimgtag import concurrent_pipeline
 
-    monkeypatch.setattr("pyimgtag.geocoder._LAST_REQUEST_TS", 0.0)
+    monkeypatch.setattr("pyimgtag.geocoder.ReverseGeocoder._last_request_ts", 0.0)
     monkeypatch.setattr(concurrent_pipeline, "_global_limiter", None)

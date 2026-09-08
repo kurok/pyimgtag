@@ -314,7 +314,11 @@ def test_quality_falls_back_to_weighted_score_when_score_null(tmp_path):
 @pytest.mark.slow
 def test_insights_100k_rows_under_10_seconds(tmp_path):
     """Aggregation is SQL-side, so a 100k-row synthetic DB stays fast."""
-    db = ProgressDB(db_path=tmp_path / "big.db")
+    with ProgressDB(db_path=tmp_path / "big.db") as db:
+        _assert_insights_fast(db)
+
+
+def _assert_insights_fast(db: ProgressDB) -> None:
     conn: sqlite3.Connection = db._conn
     n = 100_000
     countries = ["Portugal", "Spain", "France", "Italy", None]
@@ -349,12 +353,9 @@ def test_insights_100k_rows_under_10_seconds(tmp_path):
         ],
     )
     conn.commit()
-    try:
-        start = time.perf_counter()
-        doc = db.get_insights(top_n=25)
-        elapsed = time.perf_counter() - start
-    finally:
-        db.close()
+    start = time.perf_counter()
+    doc = db.get_insights(top_n=25)
+    elapsed = time.perf_counter() - start
     assert doc["overview"]["total"] == n
     assert doc["quality"]["judged"] == n // 2
     assert elapsed < 10, f"insights took {elapsed:.1f}s on {n} rows"

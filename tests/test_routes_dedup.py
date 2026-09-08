@@ -116,7 +116,12 @@ def test_api_groups_rejects_a_bad_prefer(tmp_path):
     db = ProgressDB(db_path=tmp_path / "p.db")
     r = _client(db).get("/dedup/api/groups?prefer=nope")
     assert r.status_code == 400
-    assert "unknown ranking criterion" in r.json()["error"]
+    error = r.json()["error"]
+    # A fixed message: the exception text (and so the caller's input) is not
+    # echoed, but the valid criteria are.
+    assert "nope" not in error
+    assert "invalid prefer order" in error
+    assert "score" in error and "mtime" in error
     db.close()
 
 
