@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 
 from pyimgtag.db.dedup_db import ACTION_MOVE, ACTION_TAG
 from pyimgtag.dedup_groups import (
+    CRITERIA,
     is_photos_library_path,
     parse_prefer,
     quarantine_destination,
@@ -165,7 +166,18 @@ def build_dedup_router(db: ProgressDB, api_base: str = "") -> Any:
         try:
             order = parse_prefer(prefer or None)
         except ValueError as exc:
-            return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
+            # A fixed message rather than str(exc): the exception text is not sent
+            # to the client (CodeQL py/stack-trace-exposure); the valid names are
+            # all the caller needs to correct the request.
+            del exc
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error": "invalid prefer order; use a comma list of distinct criteria from: "
+                    + ", ".join(CRITERIA),
+                },
+            )
 
         def _load() -> dict:
             groups = [

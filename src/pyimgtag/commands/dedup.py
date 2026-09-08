@@ -75,6 +75,8 @@ def _measure(path: Path) -> tuple[str | None, int | None, int | None]:
         with Image.open(path) as img:
             width, height = img.size
     except (OSError, ValueError, TypeError):
+        # Dimensions are optional metadata for ranking; an undecodable or
+        # truncated image still gets its phash and is reported without them.
         pass
     return phash, width, height
 
