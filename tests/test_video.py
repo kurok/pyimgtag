@@ -547,9 +547,12 @@ class TestJudgeVideo(unittest.TestCase):
                 return "scored"
 
         args = argparse.Namespace(include_video=True, video_extensions=None)
-        result = _judge_path(_Client(), Path("/photos/a.jpg"), args)
+        still = Path("/photos/a.jpg")
+        result = _judge_path(_Client(), still, args)
         self.assertEqual(result, "scored")
-        self.assertEqual(seen, ["/photos/a.jpg"])
+        # Compared through str(Path(...)): Windows renders the same path with
+        # backslashes, and the claim here is "the file itself was scored".
+        self.assertEqual(seen, [str(still)])
 
     def test_without_the_flag_a_clip_is_passed_through_unchanged(self):
         """No ffmpeg is invoked when the flag is absent."""
@@ -563,10 +566,11 @@ class TestJudgeVideo(unittest.TestCase):
                 return path
 
         args = argparse.Namespace(include_video=False, video_extensions=None)
+        clip = Path("/v/clip.mp4")
         with mock.patch(
             "pyimgtag.video.extract_frames", side_effect=AssertionError("extracted a frame")
         ):
-            self.assertEqual(_judge_path(_Client(), Path("/v/clip.mp4"), args), "/v/clip.mp4")
+            self.assertEqual(_judge_path(_Client(), clip, args), str(clip))
 
     def test_a_clip_is_scored_on_an_extracted_frame(self):
         import argparse
