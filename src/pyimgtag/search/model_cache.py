@@ -21,7 +21,18 @@ from pathlib import Path
 
 
 class ModelDownloadError(RuntimeError):
-    """A model file could not be fetched or did not match its checksum."""
+    """A model file could not be fetched or did not match its checksum.
+
+    Carries *reason* and *command* as separate fields rather than one blob of
+    text. The web UI shows them to a browser, and building that reply out of
+    named parts keeps exception text from flowing into a response by accident.
+    """
+
+    def __init__(self, reason: str, command: str | None = None) -> None:
+        """Record a human-readable *reason* and, when there is one, a fix *command*."""
+        super().__init__(f"{reason}\n{command}" if command else reason)
+        self.reason = reason
+        self.command = command
 
 
 @dataclass(frozen=True)
@@ -68,12 +79,12 @@ _REMOTE_SUBDIR = {VISION_MODEL.name: "onnx", TEXT_MODEL.name: "onnx"}
 
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "pyimgtag" / "search_models"
 
-_MANUAL_HINT = (
-    "Place the file yourself to use pyimgtag search offline:\n"
-    "  mkdir -p {cache}\n"
-    "  curl -L -o {dest} {url}\n"
-    "Or point PYIMGTAG_SEARCH_MODEL_DIR at a directory that already has it."
+_MANUAL_REASON = (
+    "Could not download {name}: {error}. Place the file yourself to use "
+    "pyimgtag search offline, or point PYIMGTAG_SEARCH_MODEL_DIR at a "
+    "directory that already has it."
 )
+_MANUAL_COMMAND = "mkdir -p {cache} && curl -L -o {dest} {url}"
 
 
 def cache_dir() -> Path:
@@ -106,8 +117,8 @@ def _download(model: ModelFile, dest: Path, *, progress: bool = True) -> None:
     except (urllib.error.URLError, OSError) as exc:
         tmp.unlink(missing_ok=True)
         raise ModelDownloadError(
-            f"Could not download {model.name}: {exc}\n"
-            + _MANUAL_HINT.format(cache=dest.parent, dest=dest, url=url)
+            _MANUAL_REASON.format(name=model.name, error=exc),
+            _MANUAL_COMMAND.format(cache=dest.parent, dest=dest, url=url),
         ) from exc
 
     actual = _sha256(tmp)

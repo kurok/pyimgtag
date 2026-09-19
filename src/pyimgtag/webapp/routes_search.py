@@ -250,14 +250,25 @@ def build_search_router(db: ProgressDB, api_base: str = "") -> Any:
                 "command": "pyimgtag index --input-dir <DIR>",
             }
 
+        # Nothing derived from an exception is returned. The two recoverable
+        # setup failures are answered with strings this module owns, so no
+        # exception text can reach a browser by accident (py/stack-trace-exposure).
         try:
             embedder = _embedder()
-        except (ImportError, ModelDownloadError) as exc:
-            # Only these two carry text written to be read by a person: the
-            # missing-extra hint and the manual-download instructions. Anything
-            # else could put internal detail in front of a browser, so it is
-            # logged here and summarised there.
-            return {"available": False, "message": str(exc)}
+        except ImportError:
+            logger.warning("Semantic search is unavailable: the [search] extra is missing")
+            return {
+                "available": False,
+                "message": "Semantic search needs the [search] extra. Install it with:",
+                "command": "pip install 'pyimgtag[search]'",
+            }
+        except ModelDownloadError as exc:
+            logger.warning("Semantic search could not fetch a model: %s", exc.reason)
+            return {
+                "available": False,
+                "message": "The search model is not available on this machine.",
+                "command": exc.command,
+            }
         except Exception:
             logger.exception("Semantic search could not load its model")
             return {

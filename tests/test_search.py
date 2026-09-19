@@ -324,7 +324,7 @@ class TestSearchWebapp(unittest.TestCase):
         self.assertIn("server log", payload["message"])
 
     def test_a_missing_extra_still_tells_the_user_what_to_install(self):
-        """The two exception types that do carry user-facing text still do."""
+        """A recoverable setup failure stays actionable without echoing the exception."""
         import unittest.mock as mock
 
         (image,) = _make_images(self.tmp, "beach.jpg")
@@ -332,11 +332,30 @@ class TestSearchWebapp(unittest.TestCase):
 
         with mock.patch(
             "pyimgtag.search.embedder.load_embedder",
-            side_effect=ImportError("Install it with:\n    pip install 'pyimgtag[search]'"),
+            side_effect=ImportError("internal detail nobody should see"),
         ):
             payload = self._client().get("/search/api/search", params={"q": "a beach"}).json()
 
-        self.assertIn("pyimgtag[search]", payload["message"])
+        self.assertIn("[search] extra", payload["message"])
+        self.assertIn("pip install", payload["command"])
+        # The reply is built from strings the route owns, never from the exception.
+        self.assertNotIn("internal detail", payload["message"])
+
+    def test_a_failed_download_hands_back_the_fix_command(self):
+        import unittest.mock as mock
+
+        from pyimgtag.search.model_cache import ModelDownloadError
+
+        (image,) = _make_images(self.tmp, "beach.jpg")
+        self.db.upsert_embedding(image, "stub-v1", np.ones(4, dtype=np.float32))
+
+        error = ModelDownloadError("network unreachable", "curl -L -o /models/x.onnx https://h/x")
+        with mock.patch("pyimgtag.search.embedder.load_embedder", side_effect=error):
+            payload = self._client().get("/search/api/search", params={"q": "a beach"}).json()
+
+        self.assertFalse(payload["available"])
+        self.assertIn("curl -L -o", payload["command"])
+        self.assertNotIn("network unreachable", payload["message"])
 
     def test_results_come_back_ranked(self):
         embedder = StubEmbedder()
