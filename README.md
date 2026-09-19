@@ -661,6 +661,24 @@ Videos are first-class everywhere downstream: `events` groups them with the
 photos around them, `query --type` separates them when you want that, and
 `dedup`/`insights` count them like any other row.
 
+**In the webapp**, a clip carries its length as a badge in the grids and plays
+in the lightbox. The player is served by `/review/video`, which follows the
+same rule as the thumbnail and original endpoints: the request path is only a
+**database lookup key**, and the bytes come from the path pyimgtag itself
+stored — a path not in the DB is a 404, so it cannot read an arbitrary file.
+Range requests are answered, which is both what lets a long clip start playing
+before it has downloaded and what Safari requires of a `<video>` source at all.
+
+**Judging** takes the middle frame as the clip's representative:
+
+```bash
+pyimgtag judge --input-dir ~/Pictures/exported --include-video
+```
+
+That is a documented v1 heuristic. A photo judge scores composition and
+exposure, which one representative frame carries better than an average over
+three would — averaging three compositions describes none of them.
+
 #### `pyimgtag events` — events, trips, and albums
 
 The DB already knows *when* and *where* every photo was taken. `events` composes

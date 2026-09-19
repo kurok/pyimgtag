@@ -155,6 +155,64 @@ def _serve_original(safe_path: str) -> tuple[bytes, str] | None:
     return data, "image/jpeg"
 
 
+#: Media types for the clips `run --include-video` can put in the DB.
+_VIDEO_MIME_BY_SUFFIX = {
+    ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
+    ".mov": "video/quicktime",
+}
+
+
+def _read_video_range(safe_path: str, range_header: str | None) -> tuple | None:
+    """Return ``(chunk, media_type, start, end, total)`` for a video read.
+
+    Range support is not a nicety here: Safari refuses to play a ``<video>``
+    source that answers a range request with the whole file, and a long clip
+    served whole would buffer entirely before playing anywhere.
+
+    ``safe_path`` must already be the DB-stored path -- see the caller.
+    """
+    from pathlib import Path as _P
+
+    try:
+        path = _P(safe_path)
+        if not path.is_file():
+            return None
+        media_type = _VIDEO_MIME_BY_SUFFIX.get(path.suffix.lower())
+        if media_type is None:
+            return None
+        total = path.stat().st_size
+    except OSError:
+        return None
+
+    start, end = 0, total - 1
+    if range_header and range_header.startswith("bytes="):
+        spec = range_header.removeprefix("bytes=").split(",")[0].strip()
+        first, _, last = spec.partition("-")
+        try:
+            if first:
+                start = int(first)
+                if last:
+                    end = int(last)
+            elif last:
+                # A suffix range ("bytes=-500") asks for the final N bytes.
+                start = max(0, total - int(last))
+        except ValueError:
+            start, end = 0, total - 1
+    # Clamp rather than reject: a player asking past the end should get the
+    # tail, not an error it will not recover from.
+    start = max(0, min(start, max(0, total - 1)))
+    end = max(start, min(end, total - 1))
+
+    try:
+        with path.open("rb") as handle:
+            handle.seek(start)
+            chunk = handle.read(end - start + 1)
+    except OSError:
+        return None
+    return chunk, media_type, start, end, total
+
+
 def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
     """Build and return a FastAPI APIRouter with all review UI routes.
 
@@ -169,7 +227,7 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         ImportError: If fastapi is not installed.
     """
     try:
-        from fastapi import APIRouter, Body, Query, Response
+        from fastapi import APIRouter, Body, Header, Query, Response
         from fastapi.responses import HTMLResponse
     except ImportError as exc:
         raise ImportError(
@@ -236,6 +294,46 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         if data is None:
             return Response(status_code=404)
         return Response(content=data, media_type="image/jpeg")
+
+    @router.get("/video")
+    async def get_video(
+        # Taken as a header parameter rather than off a Request object:
+        # this module uses `from __future__ import annotations` and imports
+        # fastapi inside this factory, so a `request: Request` annotation is
+        # an unresolvable string and FastAPI reads it as a query field.
+        range_header: str | None = Header(default=None, alias="Range"),
+        path: str = Query(..., description="Absolute path to the video file"),
+    ):
+        """Stream a video clip for the lightbox player.
+
+        Exactly the rule the thumbnail and original endpoints follow: the query
+        parameter is only a DB lookup key, and every filesystem operation uses
+        the path pyimgtag itself stored. A path that is not in the DB is a 404,
+        so this cannot read an arbitrary file.
+        """
+        import asyncio
+
+        safe_path = db.get_known_file_path(path)
+        if safe_path is None:
+            return Response(status_code=404)
+
+        result = await asyncio.to_thread(_read_video_range, safe_path, range_header)
+        if result is None:
+            return Response(status_code=404)
+        chunk, media_type, start, end, total = result
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(len(chunk)),
+            "Content-Range": f"bytes {start}-{end}/{total}",
+        }
+        partial = not (start == 0 and end == total - 1)
+        return Response(
+            content=chunk,
+            media_type=media_type,
+            headers=headers,
+            status_code=206 if partial else 200,
+        )
 
     @router.get("/original")
     async def get_original(

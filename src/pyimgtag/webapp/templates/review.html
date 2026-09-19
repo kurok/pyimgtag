@@ -105,6 +105,8 @@
 
 <div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
   <img id="lightboxImg" alt="" />
+  <video id="lightboxVideo" controls playsinline style="display:none;max-width:95vw;max-height:95vh">
+  </video>
   <a id="lightboxSimilar" class="lightbox-similar" href="#">More like this</a>
   <span class="lightbox-close" onclick="closeLightbox(event)">&times;</span>
 </div>
@@ -182,9 +184,28 @@ function judgeClass(score) {
 function prevPage() { _offset = Math.max(0, _offset - PAGE); load(); }
 function nextPage() { _offset += PAGE; load(); }
 
+const _VIDEO_SUFFIXES = ['.mp4', '.mov', '.m4v'];
+
 function openLightbox(path) {
   const lb = document.getElementById('lightbox');
   const img = document.getElementById('lightboxImg');
+  const video = document.getElementById('lightboxVideo');
+  const lower = String(path).toLowerCase();
+  if (_VIDEO_SUFFIXES.some((s) => lower.endsWith(s))) {
+    // The video endpoint answers range requests, which is what lets a clip
+    // start playing before it has all downloaded.
+    img.style.display = 'none';
+    img.removeAttribute('src');
+    video.style.display = 'block';
+    video.src = '{{ api_base }}/video?path=' + encodeURIComponent(path);
+    document.getElementById('lightboxSimilar').href =
+      '/search?similar_to=' + encodeURIComponent(path);
+    lb.classList.add('open');
+    return;
+  }
+  video.style.display = 'none';
+  video.removeAttribute('src');
+  img.style.display = 'block';
   img.src = '{{ api_base }}/original?path=' + encodeURIComponent(path);
   // /review cannot rank anything itself; the Search page owns the index.
   document.getElementById('lightboxSimilar').href =
@@ -194,9 +215,15 @@ function openLightbox(path) {
 function closeLightbox(e) {
   // Only close on clicks on the backdrop or the close glyph, not on the image
   // and not on the "More like this" link, which needs its navigation.
-  if (e && e.target && (e.target.tagName === 'IMG' || e.target.tagName === 'A')) return;
+  if (e && e.target && ['IMG', 'A', 'VIDEO'].includes(e.target.tagName)) return;
   document.getElementById('lightbox').classList.remove('open');
   document.getElementById('lightboxImg').removeAttribute('src');
+  const video = document.getElementById('lightboxVideo');
+  // Pause before clearing: a removed src on a playing element keeps decoding
+  // in some browsers and the audio carries on behind a closed lightbox.
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
 }
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeLightbox();

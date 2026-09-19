@@ -415,3 +415,195 @@ class TestPreflightFfmpeg(unittest.TestCase):
             ok, message = check_ffmpeg()
         self.assertFalse(ok)
         self.assertIn("ffprobe", message)
+
+
+class TestVideoServing(unittest.TestCase):
+    """The /review/video endpoint: range-capable, and no arbitrary file reads."""
+
+    def setUp(self):
+        try:
+            from fastapi.testclient import TestClient  # noqa: F401
+        except ImportError:  # pragma: no cover - review extra absent
+            self.skipTest("fastapi not installed")
+        import tempfile
+
+        from pyimgtag.models import ImageResult
+        from pyimgtag.progress_db import ProgressDB
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.db = ProgressDB(db_path=self.tmp / "p.db")
+        self.clip = self.tmp / "clip.mp4"
+        self.payload = bytes(range(256)) * 8  # 2048 deterministic bytes
+        self.clip.write_bytes(self.payload)
+        self.db.mark_done(
+            self.clip,
+            ImageResult(
+                file_path=str(self.clip),
+                tags=["a"],
+                processing_status="ok",
+                media_type="video",
+                duration_sec=4.0,
+            ),
+        )
+
+    def tearDown(self):
+        self.db.close()
+
+    def _client(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from pyimgtag.webapp.routes_review import build_review_router
+
+        app = FastAPI()
+        app.include_router(build_review_router(self.db, api_base="/review"), prefix="/review")
+        return TestClient(app)
+
+    def test_a_known_clip_streams_whole(self):
+        response = self._client().get("/review/video", params={"path": str(self.clip)})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "video/mp4")
+        self.assertEqual(response.headers["accept-ranges"], "bytes")
+        self.assertEqual(response.content, self.payload)
+
+    def test_a_range_request_gets_exactly_that_range(self):
+        """Safari refuses a <video> source that answers a range with the whole file."""
+        response = self._client().get(
+            "/review/video", params={"path": str(self.clip)}, headers={"Range": "bytes=10-19"}
+        )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, self.payload[10:20])
+        self.assertEqual(response.headers["content-range"], f"bytes 10-19/{len(self.payload)}")
+
+    def test_an_open_ended_range_runs_to_the_end(self):
+        response = self._client().get(
+            "/review/video", params={"path": str(self.clip)}, headers={"Range": "bytes=2040-"}
+        )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, self.payload[2040:])
+
+    def test_a_suffix_range_returns_the_tail(self):
+        response = self._client().get(
+            "/review/video", params={"path": str(self.clip)}, headers={"Range": "bytes=-16"}
+        )
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, self.payload[-16:])
+
+    def test_a_range_past_the_end_is_clamped_not_rejected(self):
+        """A player asking past the end should get the tail, not an error."""
+        response = self._client().get(
+            "/review/video", params={"path": str(self.clip)}, headers={"Range": "bytes=9999-99999"}
+        )
+        self.assertIn(response.status_code, (200, 206))
+        self.assertTrue(response.content)
+
+    def test_a_malformed_range_falls_back_to_the_whole_file(self):
+        response = self._client().get(
+            "/review/video", params={"path": str(self.clip)}, headers={"Range": "bytes=abc-def"}
+        )
+        self.assertEqual(response.content, self.payload)
+
+    def test_a_path_not_in_the_db_is_refused(self):
+        """The request value is only a lookup key; this is the whole safety rule."""
+        outside = self.tmp / "secret.mp4"
+        outside.write_bytes(b"should never be served")
+        response = self._client().get("/review/video", params={"path": str(outside)})
+        self.assertEqual(response.status_code, 404)
+
+    def test_traversal_is_refused_because_it_is_not_in_the_db(self):
+        for attempt in ("/etc/passwd", "../../etc/passwd", str(self.tmp / ".." / "etc" / "passwd")):
+            with self.subTest(attempt=attempt):
+                self.assertEqual(
+                    self._client().get("/review/video", params={"path": attempt}).status_code,
+                    404,
+                )
+
+    def test_a_known_row_that_is_not_a_video_is_refused(self):
+        """The endpoint serves clips; a still belongs to /original."""
+        from pyimgtag.models import ImageResult
+
+        photo = self.tmp / "photo.jpg"
+        photo.write_bytes(b"jpegish")
+        self.db.mark_done(
+            photo, ImageResult(file_path=str(photo), tags=["a"], processing_status="ok")
+        )
+        response = self._client().get("/review/video", params={"path": str(photo)})
+        self.assertEqual(response.status_code, 404)
+
+
+class TestJudgeVideo(unittest.TestCase):
+    """judge --include-video scores one representative frame."""
+
+    def test_a_still_is_scored_directly(self):
+        import argparse
+
+        from pyimgtag.commands.judge import _judge_path
+
+        seen = []
+
+        class _Client:
+            def judge_image(self, path):
+                seen.append(path)
+                return "scored"
+
+        args = argparse.Namespace(include_video=True, video_extensions=None)
+        result = _judge_path(_Client(), Path("/photos/a.jpg"), args)
+        self.assertEqual(result, "scored")
+        self.assertEqual(seen, ["/photos/a.jpg"])
+
+    def test_without_the_flag_a_clip_is_passed_through_unchanged(self):
+        """No ffmpeg is invoked when the flag is absent."""
+        import argparse
+        import unittest.mock as mock
+
+        from pyimgtag.commands.judge import _judge_path
+
+        class _Client:
+            def judge_image(self, path):
+                return path
+
+        args = argparse.Namespace(include_video=False, video_extensions=None)
+        with mock.patch(
+            "pyimgtag.video.extract_frames", side_effect=AssertionError("extracted a frame")
+        ):
+            self.assertEqual(_judge_path(_Client(), Path("/v/clip.mp4"), args), "/v/clip.mp4")
+
+    def test_a_clip_is_scored_on_an_extracted_frame(self):
+        import argparse
+        import unittest.mock as mock
+
+        from pyimgtag.commands.judge import _judge_path
+
+        seen = []
+
+        class _Client:
+            def judge_image(self, path):
+                seen.append(path)
+                return "scored"
+
+        frame = Path(__import__("tempfile").mkdtemp()) / "frame00.jpg"
+        frame.write_bytes(b"x")
+        args = argparse.Namespace(include_video=True, video_extensions=None)
+        with mock.patch("pyimgtag.video.extract_frames", return_value=[frame]) as extract:
+            result = _judge_path(_Client(), Path("/v/clip.mp4"), args)
+
+        self.assertEqual(result, "scored")
+        self.assertEqual(seen, [str(frame)])
+        # One frame, not three: a photo judge scores a composition, and
+        # averaging three compositions describes none of them.
+        self.assertEqual(extract.call_args.kwargs.get("count"), 1)
+
+    def test_an_undecodable_clip_scores_as_a_failure_not_a_crash(self):
+        import argparse
+        import unittest.mock as mock
+
+        from pyimgtag.commands.judge import _judge_path
+        from pyimgtag.video import VideoToolError
+
+        class _Client:
+            def judge_image(self, path):
+                raise AssertionError("should not be reached")
+
+        args = argparse.Namespace(include_video=True, video_extensions=None)
+        with mock.patch("pyimgtag.video.extract_frames", side_effect=VideoToolError("no ffmpeg")):
+            self.assertIsNone(_judge_path(_Client(), Path("/v/clip.mp4"), args))

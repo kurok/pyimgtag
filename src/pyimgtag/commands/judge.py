@@ -83,6 +83,7 @@ def _judge_concurrent(
     skip_judged: bool,
     db: Any,
     finalize: Callable[[int, Path, JudgeScores | None], None],
+    args: Any = None,
 ) -> bool:
     """Score ``files`` with ``jobs`` in-flight model calls. True if interrupted.
 
@@ -101,7 +102,7 @@ def _judge_concurrent(
             yield idx, file_path
 
     def _prepare(item: _JudgeItem) -> tuple[int, Path, JudgeScores | None]:
-        return item[0], item[1], client.judge_image(str(item[1]))
+        return item[0], item[1], _judge_path(client, item[1], args)
 
     def _finalize(_seq: int, _item: _JudgeItem, done: tuple[int, Path, JudgeScores | None]) -> None:
         finalize(*done)
@@ -120,6 +121,45 @@ def _judge_concurrent(
         on_interrupt=_on_interrupt,
         describe=lambda item: str(item[1]),
     )
+
+
+def _judge_path(client: Any, file_path: Path, args: argparse.Namespace) -> Any:
+    """Score one file, sampling a frame first when it is a clip.
+
+    v1 heuristic, and documented as one: the middle frame stands for the clip.
+    A photo judge scores composition and exposure, which a single
+    representative frame carries far better than an average over three would --
+    averaging three compositions describes none of them.
+
+    A clip that cannot be decoded scores as a normal failure (None) rather
+    than taking the run down.
+    """
+    if not getattr(args, "include_video", False):
+        return client.judge_image(str(file_path))
+
+    from pyimgtag.video import DEFAULT_VIDEO_EXTENSIONS, VideoToolError, extract_frames
+
+    raw = getattr(args, "video_extensions", None)
+    exts = (
+        {e.strip().lstrip(".").lower() for e in raw.split(",") if e.strip()}
+        if raw
+        else DEFAULT_VIDEO_EXTENSIONS
+    )
+    if file_path.suffix.lstrip(".").lower() not in exts:
+        return client.judge_image(str(file_path))
+
+    import shutil as _shutil
+
+    temp_dir = None
+    try:
+        frames = extract_frames(file_path, count=1)
+        temp_dir = frames[0].parent
+        return client.judge_image(str(frames[0]))
+    except VideoToolError:
+        return None
+    finally:
+        if temp_dir is not None:
+            _shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
@@ -280,7 +320,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
 
         if jobs > 1:
             interrupted = _judge_concurrent(
-                files, ollama, jobs, session, skip_judged, _db, _finalize
+                files, ollama, jobs, session, skip_judged, _db, _finalize, args
             )
         else:
             try:
@@ -295,7 +335,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
                             session.set_current(None)
                         continue
 
-                    _finalize(idx, file_path, ollama.judge_image(str(file_path)))
+                    _finalize(idx, file_path, _judge_path(ollama, file_path, args))
                     if session is not None:
                         session.set_current(None)
             except KeyboardInterrupt:
