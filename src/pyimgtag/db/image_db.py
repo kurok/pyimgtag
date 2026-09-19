@@ -82,8 +82,8 @@ class ImageDB:
                  scene_category, emotional_tone, cleanup_class, has_text,
                  text_summary, event_hint, significance,
                  nearest_city, nearest_region, nearest_country, image_date,
-                 phash, gps_lat, gps_lon)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 phash, gps_lat, gps_lon, media_type, duration_sec)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(file_path),
@@ -112,6 +112,9 @@ class ImageDB:
                 # without GPS, which the map reports as "not on map".
                 result.gps_lat,
                 result.gps_lon,
+                # 'image' unless the pipeline aggregated keyframes for a clip.
+                getattr(result, "media_type", "image") or "image",
+                getattr(result, "duration_sec", None),
             ),
         )
         self._conn.commit()
@@ -196,6 +199,7 @@ class ImageDB:
         tags_any: list[str] | None = None,
         bbox: tuple[float, float, float, float] | None = None,
         date_prefix: str | None = None,
+        media_type: str | None = None,
     ) -> tuple[list[str], list[object]]:
         """Translate filter arguments into ``(conditions, params)`` for query_images."""
         conditions: list[str] = []
@@ -213,6 +217,11 @@ class ImageDB:
             # above ``prefix + U+FFFF`` while still starting with ``prefix``.
             conditions.append("(pi.image_date >= ? AND pi.image_date < ?)")
             params.extend([date_prefix, date_prefix + "\uffff"])
+        if media_type:
+            # COALESCE so a row written before the column existed, and never
+            # touched since, still reads as the image it is.
+            conditions.append("COALESCE(pi.media_type, 'image') = ?")
+            params.append(media_type)
 
         if tag is not None:
             conditions.append(
@@ -275,7 +284,7 @@ class ImageDB:
             "pi.cleanup_class, pi.scene_category, pi.emotional_tone, pi.event_hint, "
             "pi.significance, pi.nearest_city, pi.nearest_region, pi.nearest_country, "
             "pi.error_message, js.weighted_score, js.reason, js.verdict, pi.image_date, "
-            "pi.gps_lat, pi.gps_lon "
+            "pi.gps_lat, pi.gps_lon, COALESCE(pi.media_type, 'image'), pi.duration_sec "
             "FROM processed_images pi "
             "LEFT JOIN judge_scores js ON js.file_path = pi.file_path "
             + where  # nosec B608
@@ -300,6 +309,7 @@ class ImageDB:
         tags_any: list[str] | None = None,
         bbox: tuple[float, float, float, float] | None = None,
         date_prefix: str | None = None,
+        media_type: str | None = None,
     ) -> list[dict]:
         """Query images with advanced filters.
 
@@ -327,6 +337,9 @@ class ImageDB:
                 ``lon1 > lon2`` means the box crosses the antimeridian.
             date_prefix: ISO-8601 prefix matched against ``image_date`` —
                 ``"2024"`` (year), ``"2024-03"`` (month), ``"2024-03-17"`` (day).
+            media_type: ``"image"`` or ``"video"``. Rows written before video
+                support carry ``'image'`` from the migration default, so this
+                never hides an older library.
 
         Returns:
             List of image metadata dicts.
@@ -345,6 +358,7 @@ class ImageDB:
             tags_any,
             bbox,
             date_prefix,
+            media_type,
         )
         order_clause = self._QUERY_SORTS.get(sort, self._QUERY_SORTS["path_asc"])
         query = self._build_images_query(conditions, order_clause, limit)
@@ -389,6 +403,8 @@ class ImageDB:
             "image_date": row[17] if len(row) > 17 else None,
             "gps_lat": row[18] if len(row) > 18 else None,
             "gps_lon": row[19] if len(row) > 19 else None,
+            "media_type": (row[20] if len(row) > 20 else None) or "image",
+            "duration_sec": row[21] if len(row) > 21 else None,
         }
 
     def get_tag_counts(self) -> list[tuple[str, int]]:

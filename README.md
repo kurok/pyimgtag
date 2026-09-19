@@ -159,6 +159,7 @@ brew install exiftool
 | Semantic search (`index` / `search`) | ✅ | ✅ | ✅ |
 | Events & trips (`events detect` / `apply --export-dir`) | ✅ | ✅ | ✅ |
 | Events → Apple Photos albums (`apply --photos-albums`) | ✅ | ❌ | ❌ |
+| Video tagging (`run --include-video`, needs ffmpeg) | ✅ | ✅ | ✅ |
 
 **Note:** Most features work cross-platform. Apple Photos integration and face management are macOS-only — they require AppleScript via `osascript`. `faces capture-names` additionally uses Apple's Vision framework for OCR (the `[ocr]` extra).
 
@@ -614,6 +615,51 @@ scan, measured at **90 ms median** over 50,000 photos on CPU (best 79 ms, worst
 Embeddings are stored with the model that produced them. Vectors from different
 models are not comparable, so changing the model invalidates the index rather
 than silently mixing two spaces — `search` warns and tells you to `--rebuild`.
+
+#### Video (`run --include-video`)
+
+A modern photo library is 20–40% video, and until now every clip was invisible
+to `query`, `judge`, `cleanup`, `events` and search. `--include-video` brings
+them in:
+
+```bash
+pyimgtag run --input-dir ~/Pictures/exported --include-video
+pyimgtag run --photos-library ... --include-video --video-frames 5
+pyimgtag query --type video --format paths
+```
+
+**Requires ffmpeg and ffprobe on PATH** — an external tool, exactly like
+exiftool, never a Python dependency. `pyimgtag preflight` reports whether they
+are present. A run without them **skips clips with a counted warning and still
+tags every still image beside them**; it never crashes.
+
+**How a clip is tagged.** Three frames are sampled by default (at 10%, 50% and
+90% of the duration — never the very first or last frame, which on a phone
+video are usually a blur), each goes through the normal vision path, and the
+per-frame answers are folded into one row:
+
+| Field | Rule |
+|---|---|
+| Tags | Union, ordered by how many frames agreed, capped at 5. A tag repeated *within* one frame does not outvote one present in *every* frame. |
+| Scene, tone, event hint | Majority across frames; ties break alphabetically so two runs agree. |
+| `cleanup_class` | **Most conservative wins**, not the majority. A clip is only `delete` when every frame said so — one good frame is reason enough to keep somebody's memory. |
+| `has_text` | True if any frame had text; a title card is text in the clip. |
+| Summary | From the middle frame, the one most likely to show what the clip is about. |
+
+`--video-frames N` tunes the sample count; `--video-extensions` overrides the
+default `mp4,mov,m4v`.
+
+**Live Photos.** Apple writes `IMG_1234.HEIC` and `IMG_1234.MOV` for one
+capture. The `.MOV` is skipped when its still is in the same scan, so one
+moment does not land in the library twice — as a photo and as a three-second
+clip of it — and the model calls are not doubled for nothing.
+
+**Capture date and GPS** come from the QuickTime/MP4 metadata, so a clip sits
+correctly in `--year`/`--month` filters, the timeline and events.
+
+Videos are first-class everywhere downstream: `events` groups them with the
+photos around them, `query --type` separates them when you want that, and
+`dedup`/`insights` count them like any other row.
 
 #### `pyimgtag events` — events, trips, and albums
 

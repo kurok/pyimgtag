@@ -6,6 +6,33 @@ from pathlib import Path
 
 DEFAULT_EXTENSIONS = {"jpg", "jpeg", "heic", "png"}
 
+#: Video extensions, added to a scan only when ``--include-video`` is given.
+#: Off by default so an existing run's shape does not change under anyone.
+DEFAULT_VIDEO_EXTENSIONS = {"mp4", "mov", "m4v"}
+
+
+def partition_media(paths: list[Path], video_extensions: set[str] | None = None) -> tuple:
+    """Split a scan into ``(images, videos)``, dropping Live Photo sidecars.
+
+    Apple writes ``IMG_1234.HEIC`` and ``IMG_1234.MOV`` for a single capture.
+    Both would otherwise be tagged, putting one moment in the library twice --
+    as a photo and as a three-second clip of it -- and doubling the model calls
+    for nothing. The clip is dropped when a still with the same stem is in the
+    same scan.
+    """
+    from pyimgtag.video import is_live_photo_sidecar
+
+    exts = video_extensions or DEFAULT_VIDEO_EXTENSIONS
+    images = [p for p in paths if p.suffix.lstrip(".").lower() not in exts]
+    still_stems = {p.stem.lower() for p in images}
+    videos = [
+        p
+        for p in paths
+        if p.suffix.lstrip(".").lower() in exts and not is_live_photo_sidecar(p, still_stems)
+    ]
+    return images, videos
+
+
 _FDA_HINT = (
     "Grant Full Disk Access to Terminal in System Settings → Privacy & Security → Full Disk Access."
 )

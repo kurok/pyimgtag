@@ -566,6 +566,26 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if _validate_run_args(args, parser) is not None:
         return 1
     extensions = {e.strip().lstrip(".").lower() for e in args.extensions.split(",")}
+    video_extensions: set[str] = set()
+    if getattr(args, "include_video", False):
+        from pyimgtag.video import DEFAULT_VIDEO_EXTENSIONS, ffmpeg_available
+
+        raw = getattr(args, "video_extensions", None)
+        video_extensions = (
+            {e.strip().lstrip(".").lower() for e in raw.split(",") if e.strip()}
+            if raw
+            else set(DEFAULT_VIDEO_EXTENSIONS)
+        )
+        if not ffmpeg_available():
+            # Counted and reported, never fatal: the images in the same run
+            # are still worth tagging.
+            print(
+                "Warning: --include-video needs ffmpeg and ffprobe on PATH; "
+                "videos will be skipped. Install ffmpeg to tag them.",
+                file=sys.stderr,
+            )
+            video_extensions = set()
+        extensions |= video_extensions
     backend = getattr(args, "backend", "ollama")
     if not isinstance(backend, str):
         backend = "ollama"
@@ -578,6 +598,20 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if isinstance(scan, int):
         return scan
     source_type, files = scan
+
+    if video_extensions:
+        from pyimgtag.scanner import partition_media
+
+        images, videos = partition_media(files, video_extensions)
+        dropped = len(files) - len(images) - len(videos)
+        if dropped:
+            print(
+                f"Info: skipped {dropped} Live Photo sidecar clip(s) already "
+                f"covered by their still image.",
+                file=sys.stderr,
+            )
+        files = images + videos
+        print(f"Info: {len(videos)} video(s) in scope.", file=sys.stderr)
 
     if not files:
         print("No image files found.", file=sys.stderr)
@@ -662,6 +696,62 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             dashboard.stop()
         run_registry.set_current(None)
     return 1 if interrupted else 0
+
+
+def _is_video(file_path: Path, args: argparse.Namespace) -> bool:
+    """True when this file should be treated as a clip rather than a still."""
+    if not getattr(args, "include_video", False):
+        return False
+    from pyimgtag.video import DEFAULT_VIDEO_EXTENSIONS
+
+    raw = getattr(args, "video_extensions", None)
+    exts = (
+        {e.strip().lstrip(".").lower() for e in raw.split(",") if e.strip()}
+        if raw
+        else DEFAULT_VIDEO_EXTENSIONS
+    )
+    return file_path.suffix.lstrip(".").lower() in exts
+
+
+def _tag_video(
+    file_path: Path,
+    args: argparse.Namespace,
+    ollama: Any,
+    context: dict,
+    result: ImageResult,
+) -> Any:
+    """Sample keyframes, tag each, and fold them into one result for the clip.
+
+    A clip that cannot be decoded returns an errored TagResult rather than
+    raising: one unreadable video in a library of thousands is a counted
+    failure, not the end of the run.
+    """
+    import shutil as _shutil
+
+    from pyimgtag.models import TagResult
+    from pyimgtag.video import VideoToolError, aggregate_frames, extract_frames, probe
+
+    frame_count = int(getattr(args, "video_frames", 0) or 3)
+    temp_dir: Path | None = None
+    try:
+        info = probe(file_path)
+        result.media_type = "video"
+        result.duration_sec = info.duration_sec
+        # QuickTime keeps the capture time in format tags, which is what puts
+        # a clip on the timeline and inside the date filters.
+        if info.creation_time and not result.image_date:
+            result.image_date = info.creation_time
+        frames = extract_frames(file_path, count=frame_count)
+        temp_dir = frames[0].parent
+    except VideoToolError as exc:
+        return TagResult(error=str(exc))
+
+    try:
+        per_frame = [ollama.tag_image(str(frame), context=context) for frame in frames]
+        return aggregate_frames(per_frame)
+    finally:
+        if temp_dir is not None:
+            _shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def _process_one(
@@ -822,7 +912,10 @@ def _prepare_one(
             context["country"] = geo.nearest_country
 
     # --- tag with model ---
-    tag_result = ollama.tag_image(str(file_path), context=context)
+    if _is_video(file_path, args):
+        tag_result = _tag_video(file_path, args, ollama, context, result)
+    else:
+        tag_result = ollama.tag_image(str(file_path), context=context)
     if tag_result.error:
         result.processing_status = "error"
         result.error_message = tag_result.error

@@ -103,6 +103,39 @@ def check_exiftool() -> tuple[bool, str]:
         return (False, f"exiftool check failed: {e}")
 
 
+def check_ffmpeg() -> tuple[bool, str]:
+    """Check that ffmpeg and ffprobe are installed, for ``run --include-video``.
+
+    Absence is reported, never fatal: a run without ffmpeg skips clips with a
+    counted warning and still tags every still image beside them.
+
+    Returns:
+        Tuple of (success, message).
+    """
+    try:
+        result = subprocess.run(  # nosec B603 B607
+            ["ffmpeg", "-version"], capture_output=True, text=True, timeout=5
+        )
+        if result.returncode != 0:
+            detail = result.stderr.strip() or "no output"
+            return (False, f"ffmpeg check failed (exit {result.returncode}): {detail}")
+        probe = subprocess.run(  # nosec B603 B607
+            ["ffprobe", "-version"], capture_output=True, text=True, timeout=5
+        )
+        if probe.returncode != 0:
+            return (False, "ffmpeg is installed but ffprobe is not; both are needed")
+        first = (result.stdout.strip().splitlines() or ["ffmpeg"])[0]
+        return (True, first)
+    except FileNotFoundError:
+        return (
+            False,
+            "ffmpeg is not installed; 'run --include-video' will skip clips. "
+            "See https://ffmpeg.org/download.html",
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        return (False, f"ffmpeg check failed: {e}")
+
+
 def check_photos_library(library_path: str) -> tuple[bool, str]:
     """Check that an Apple Photos library is accessible.
 
@@ -184,6 +217,11 @@ def run_preflight(
 
     passed, msg = check_exiftool()
     results.append(("exiftool", passed, msg))
+
+    # Reported whether or not --include-video was asked for: knowing video is
+    # available is part of knowing what a run will cover.
+    passed, msg = check_ffmpeg()
+    results.append(("ffmpeg (video)", passed, msg))
 
     if source_path is not None:
         if source_type == "photos_library":
