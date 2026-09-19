@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import Any
 
 from pyimgtag.progress_db import ProgressDB
 
@@ -106,13 +107,50 @@ def _structured_filter(args: argparse.Namespace, db: ProgressDB) -> set[str] | N
     return paths
 
 
-def cmd_search(args: argparse.Namespace) -> int:
-    """Execute the search subcommand."""
-    import json as _json
+def _example_vector(args: argparse.Namespace, db: ProgressDB) -> tuple[Any, set[str]]:
+    """Resolve ``--similar-to`` to a query vector and the paths to exclude.
+
+    An already-indexed photo is answered from its stored row, which is the
+    whole point of the fast path: no model is loaded, so query-by-example on a
+    library photo costs a single row read. Anything else is embedded on the
+    fly, which does need the model.
+
+    Returns ``(vector, exclude)``; *vector* is None when the file could not be
+    resolved, and the caller has already printed why.
+    """
+    raw = Path(args.similar_to).expanduser()
+    # Both spellings are tried because the index stores whatever `index` was
+    # given, and a user typing a relative path here should still hit the row.
+    candidates = [str(raw)]
+    resolved = raw.resolve()
+    if str(resolved) not in candidates:
+        candidates.append(str(resolved))
+
+    for candidate in candidates:
+        stored = db.get_embedding(candidate)
+        if stored is not None:
+            return stored, set(candidates)
+
+    if not raw.is_file():
+        print(
+            f"Error: {raw} is neither an indexed photo nor a readable image file.",
+            file=sys.stderr,
+        )
+        return None, set()
 
     embedder = _load_embedder(args)
     if embedder is None:
-        return 1
+        return None, set()
+    try:
+        return embedder.embed_image(resolved), set(candidates)
+    except Exception as exc:  # noqa: BLE001 — the path is user input
+        print(f"Error: could not embed {raw}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return None, set()
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    """Execute the search subcommand."""
+    import json as _json
 
     with ProgressDB(db_path=args.db) as db:
         stats = db.embedding_stats()
@@ -123,17 +161,33 @@ def cmd_search(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        if stats["model"] and stats["model"] != embedder.model_id:
-            print(
-                f"Warning: the index was built with {stats['model']!r} but this "
-                f"install uses {embedder.model_id!r}. Re-run 'pyimgtag index --rebuild'.",
-                file=sys.stderr,
-            )
 
+        exclude: set[str] = set()
+        if args.similar_to:
+            vector, exclude = _example_vector(args, db)
+            if vector is None:
+                return 1
+        else:
+            embedder = _load_embedder(args)
+            if embedder is None:
+                return 1
+            if stats["model"] and stats["model"] != embedder.model_id:
+                print(
+                    f"Warning: the index was built with {stats['model']!r} but this "
+                    f"install uses {embedder.model_id!r}. Re-run 'pyimgtag index --rebuild'.",
+                    file=sys.stderr,
+                )
+            vector = embedder.embed_text(args.query)
+
+        # One ranking path for both modes: only the vector differs, so the
+        # structured filters cannot drift between text and example search.
         allowed = _structured_filter(args, db)
-        vector = embedder.embed_text(args.query)
         hits = db.search_similar(
-            vector, limit=args.top, allowed_paths=allowed, min_score=args.min_similarity
+            vector,
+            limit=args.top,
+            allowed_paths=allowed,
+            min_score=args.min_similarity,
+            exclude_paths=exclude,
         )
 
     if not hits:

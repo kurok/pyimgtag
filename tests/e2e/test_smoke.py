@@ -146,6 +146,7 @@ def test_each_nav_link_clicks_and_renders(page, base_url: str) -> None:
         "/faces/",
         "/tags/",
         "/query/",
+        "/search/",
         "/judge/",
         "/insights/",
         "/map/",
@@ -166,6 +167,37 @@ def test_known_routes_render_cleanly(page, base_url: str, path: str) -> None:
     page.wait_for_load_state("networkidle")
     _assert_no_errors(page, path)
     _assert_page_has_content(page, path)
+
+
+def test_more_like_this_reaches_a_populated_search_grid(page, base_url: str) -> None:
+    """Query by example is reachable from the browsing surfaces.
+
+    The button is the whole feature from a user's point of view: an index
+    nobody can invoke from the UI is an index nobody uses. This walks the
+    /query row link, because /query is the page most likely to be open when
+    someone thinks "more like that one".
+    """
+    page.goto(base_url + "/search/")
+    page.wait_for_load_state("networkidle")
+    _assert_no_errors(page, "/search/")
+    # The lightbox action exists even before a search has run.
+    assert page.locator("#lb-similar").count() == 1, "/search has no 'More like this' action"
+
+    page.goto(base_url + "/query/")
+    page.wait_for_load_state("networkidle")
+    links = page.locator("a.similar-link")
+    if links.count() == 0:
+        pytest.skip("no indexed photos in the smoke library to link from")
+
+    href = links.first.get_attribute("href") or ""
+    assert href.startswith("/search?similar_to="), f"unexpected similar link: {href}"
+
+    page.goto(base_url + href)
+    page.wait_for_load_state("networkidle")
+    _assert_no_errors(page, href)
+    # Either results or the "not indexed yet" explanation — both are the grid
+    # rendering rather than a blank page or a traceback.
+    assert page.locator("#grid").count() == 1, "the search grid did not render"
 
 
 def _tile_hostname() -> str:

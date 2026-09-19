@@ -48,6 +48,9 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .judge-high{color:#16a34a}
     .judge-mid{color:#d97706}
     .judge-low{color:var(--danger)}
+    .similar-link{font-size:11px;color:var(--accent);text-decoration:none;
+                  white-space:nowrap}
+    .similar-link:hover{text-decoration:underline}
     .judge-none{color:var(--muted);font-weight:400}
     /* Hover thumbnail floats next to the cursor without re-laying out the row. */
     #hover-thumb{position:fixed;display:none;z-index:1000;pointer-events:none;
@@ -167,7 +170,7 @@ async function search() {
   const tbl = document.createElement('table');
   tbl.className = 'tbl';
   const hdr = document.createElement('tr');
-  for (const h of ['File','Date','Status','Judge','Tags','Category','Cleanup','Location']) {
+  for (const h of ['File','Date','Status','Judge','Tags','Category','Cleanup','Location','']) {
     const th = document.createElement('th');
     th.textContent = h;
     hdr.appendChild(th);
@@ -260,7 +263,18 @@ async function search() {
     const tdLoc = document.createElement('td');
     tdLoc.textContent = [row.nearest_city, row.nearest_country].filter(Boolean).join(', ');
 
-    const cells = [tdFile, tdDate, tdStatus, tdJudge, tdTags, tdCat, tdClean, tdLoc];
+    // /query is a table with hover thumbnails rather than a grid with a
+    // lightbox, so "More like this" lives on the row. It links to /search,
+    // which owns the embedding index.
+    const tdSimilar = document.createElement('td');
+    const similar = document.createElement('a');
+    similar.className = 'similar-link';
+    similar.href = '/search?similar_to=' + encodeURIComponent(row.file_path);
+    similar.title = 'Find photos that look like this one';
+    similar.textContent = 'similar';
+    tdSimilar.appendChild(similar);
+
+    const cells = [tdFile, tdDate, tdStatus, tdJudge, tdTags, tdCat, tdClean, tdLoc, tdSimilar];
     for (const td of cells) tr.appendChild(td);
     tbl.appendChild(tr);
   }

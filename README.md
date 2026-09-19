@@ -532,7 +532,7 @@ pyimgtag query --tag beach --format paths --limit 50
 library was tagged before migration v14, backfill it first — see
 [Populating GPS for an existing library](#populating-gps-for-an-existing-library).
 
-#### `pyimgtag index` / `pyimgtag search` — semantic search
+#### `pyimgtag index` / `pyimgtag search` — semantic search and query by example
 
 Tags are lossy: if the model wrote `sunset` and you search for `golden hour`,
 the photo is unfindable. A local CLIP index makes every photo findable by
@@ -553,15 +553,40 @@ pyimgtag search "kids jumping into a pool" --top 25 --format paths
 pyimgtag search "beach sunset" --person Alice --year 2024 --min-score 7
 ```
 
-Structured filters **select the candidates; similarity orders them**. Anything
-`query` can filter on, `search` can rank inside: `--tag`, `--scene-category`,
-`--cleanup`, `--city`, `--country`, `--person`, `--min-score`, `--year`,
-`--month`.
+**Query by example.** The same index answers *"more like this one"* — which
+perceptual hashing cannot: `dedup` finds near-identical copies, embeddings find
+*other photos of the same waterfall*.
+
+```bash
+pyimgtag search --similar-to ~/Pictures/exported/IMG_4211.jpg --top 20
+pyimgtag search --similar-to IMG_4211.jpg --person Alice --format paths
+
+# Tighten it to the same scene rather than broad resemblance
+pyimgtag search --similar-to IMG_4211.jpg --min-similarity 0.95
+```
+
+A photo that is already indexed is answered **from its stored vector — no model
+is loaded at all**, so this costs one row read. Any other image file is embedded
+on the fly, which does need the `[search]` extra. The example photo is excluded
+from its own results, where it would otherwise always rank first at 1.0.
+
+In the webapp, **More like this** is in the `/search` and `/review` lightboxes
+and on every `/query` row; all three navigate to `/search?similar_to=<path>`.
+
+A text query and `--similar-to` are alternatives, not a pair: v1 does no vector
+arithmetic, so *"like this but at night"* has no defined meaning and is refused
+rather than half-honoured.
+
+Structured filters **select the candidates; similarity orders them** — for both
+modes, through one code path. Anything `query` can filter on, `search` can rank
+inside: `--tag`, `--scene-category`, `--cleanup`, `--city`, `--country`,
+`--person`, `--min-score`, `--year`, `--month`.
 
 | Flag | Applies to | Notes |
 |---|---|---|
+| `--similar-to IMAGE` | `search` | Rank by resemblance to this photo instead of to a description. Indexed photos skip the model entirely. |
 | `--top N` | `search` | Number of results (default 20). |
-| `--min-similarity` | `search` | Drop results below this cosine score (0–1). |
+| `--min-similarity` | `search` | Drop results below this cosine score (0–1). Useful with `--similar-to` to separate "same scene" from broad resemblance. |
 | `--format` | `search` | `table` (default), `json`, `paths`. |
 | `--rebuild` | `index` | Discard the index and re-embed everything. Needed after a model change. |
 | `--limit N` | `index` | Embed at most N new images — useful for a first look at a huge library. |

@@ -98,6 +98,19 @@ class SearchDB:
         )
         self._conn.commit()
 
+    def get_embedding(self, file_path: Path | str) -> np.ndarray | None:
+        """The stored vector for *file_path*, or None when it is not indexed.
+
+        This is the fast path for query-by-example: an already-indexed photo
+        needs no model at all, so ``--similar-to`` on a library photo costs one
+        row read rather than an 89 MB session.
+        """
+        row = self._conn.execute(
+            "SELECT embedding FROM image_embeddings WHERE file_path = ?",
+            (str(file_path),),
+        ).fetchone()
+        return self._from_blob(row[0]) if row else None
+
     def clear_embeddings(self, model: str | None = None) -> int:
         """Delete every embedding (or every one for *model*); returns the row count."""
         if model is None:
@@ -128,6 +141,7 @@ class SearchDB:
         limit: int = 20,
         allowed_paths: set[str] | None = None,
         min_score: float | None = None,
+        exclude_paths: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """Return the ``(file_path, cosine_score)`` pairs closest to *query*.
 
@@ -135,6 +149,10 @@ class SearchDB:
         (``--person``, ``--date-from``, ``--tag``, …) are resolved to a path set
         by the existing query machinery and semantic ranking is applied inside
         it, so the two compose without a second ranking pass.
+
+        *exclude_paths* drops rows before ranking. Query-by-example uses it for
+        the example photo, which would otherwise always be its own best match
+        at a cosine of 1.0 and waste a slot.
 
         Brute force on purpose. 100k photos is a 100k x 512 float32 matrix —
         200 MB and a single numpy dot product — which is well under the 1 s
@@ -148,6 +166,8 @@ class SearchDB:
         rows = self._conn.execute("SELECT file_path, embedding FROM image_embeddings").fetchall()
         if allowed_paths is not None:
             rows = [r for r in rows if r[0] in allowed_paths]
+        if exclude_paths:
+            rows = [r for r in rows if r[0] not in exclude_paths]
         if not rows:
             return []
 

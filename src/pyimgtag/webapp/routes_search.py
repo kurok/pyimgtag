@@ -56,9 +56,11 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .empty code{background:var(--surface);padding:2px 6px;border-radius:4px;
                 font-family:ui-monospace,'SF Mono',monospace;font-size:12px}
     #lightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);display:none;
-              align-items:center;justify-content:center;z-index:200}
+              align-items:center;justify-content:center;flex-direction:column;
+              gap:14px;z-index:200}
     #lightbox.open{display:flex}
-    #lightbox img{max-width:92vw;max-height:88vh;border-radius:var(--radius-sm)}
+    #lightbox img{max-width:92vw;max-height:80vh;border-radius:var(--radius-sm)}
+    #lb-actions{display:flex;gap:10px}
   </style>
 </head>
 <body>
@@ -93,7 +95,14 @@ __NAV__
 
 <div id="status"></div>
 <div id="grid"></div>
-<div id="lightbox" onclick="this.classList.remove('open')"><img id="lightbox-img" alt=""></div>
+<div id="lightbox" onclick="if (event.target === this) this.classList.remove('open')">
+  <img id="lightbox-img" alt="">
+  <div id="lb-actions">
+    <button id="lb-similar" class="btn btn-primary">More like this</button>
+    <button class="btn btn-secondary"
+            onclick="document.getElementById('lightbox').classList.remove('open')">Close</button>
+  </div>
+</div>
 
 <script>
 const API = '__API_BASE__';
@@ -102,9 +111,22 @@ const statusEl = document.getElementById('status');
 
 function val(id) { return document.getElementById(id).value.trim(); }
 
+// Set when the page is showing "photos like this one" rather than a text
+// query; cleared as soon as the user types a description instead.
+let similarTo = null;
+
+function searchSimilarTo(path) {
+  similarTo = path;
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('q').value = '';
+  runSearch();
+}
+
 async function runSearch() {
   const q = val('q');
-  if (!q) {
+  // Typing a description leaves example mode; they are alternatives, not a pair.
+  if (q) similarTo = null;
+  if (!q && !similarTo) {
     statusEl.textContent = 'Type something to search for.';
     grid.replaceChildren();
     return;
@@ -113,7 +135,8 @@ async function runSearch() {
   statusEl.style.color = '';
   grid.replaceChildren();
 
-  const params = new URLSearchParams({ q: q, top: val('f-top') || '30' });
+  const params = new URLSearchParams({ top: val('f-top') || '30' });
+  if (similarTo) { params.set('similar_to', similarTo); } else { params.set('q', q); }
   for (const [id, key] of [['f-person','person'],['f-tag','tag'],['f-city','city'],
                            ['f-year','year'],['f-min-score','min_score']]) {
     if (val(id)) params.set(key, val(id));
@@ -147,7 +170,10 @@ async function runSearch() {
     return;
   }
   const hits = payload.results || [];
-  statusEl.textContent = hits.length + ' result' + (hits.length === 1 ? '' : 's');
+  const how = similarTo
+    ? ' like ' + similarTo.split('/').pop()
+    : '';
+  statusEl.textContent = hits.length + ' result' + (hits.length === 1 ? '' : 's') + how;
   for (const hit of hits) {
     const card = document.createElement('div');
     card.className = 'card';
@@ -160,6 +186,7 @@ async function runSearch() {
     card.querySelector('.card-name').textContent = name;
     card.onclick = () => {
       document.getElementById('lightbox-img').src = thumb.replace('size=400', 'size=1400');
+      document.getElementById('lb-similar').onclick = () => searchSimilarTo(hit.file_path);
       document.getElementById('lightbox').classList.add('open');
     };
     grid.appendChild(card);
@@ -176,6 +203,11 @@ document.getElementById('go').onclick = runSearch;
 document.getElementById('q').addEventListener('keydown', e => {
   if (e.key === 'Enter') runSearch();
 });
+
+// /search?similar_to=<path> — how "More like this" arrives from /query and
+// /review, which have no index of their own to rank against.
+const _initial = new URLSearchParams(window.location.search).get('similar_to');
+if (_initial) searchSimilarTo(_initial);
 </script>
 </body>
 </html>"""
@@ -229,16 +261,29 @@ def build_search_router(db: ProgressDB, api_base: str = "") -> Any:
 
     @router.get("/api/search")
     async def api_search(
-        q: str = Query(..., min_length=1),
+        q: str | None = Query(default=None, min_length=1),
+        similar_to: str | None = None,
         top: int = 30,
         person: str | None = None,
         tag: str | None = None,
         city: str | None = None,
         year: str | None = None,
         min_score: int | None = None,
+        min_similarity: float | None = None,
     ) -> dict:
-        """Rank indexed photos against *q*, inside the structured filters."""
+        """Rank indexed photos against *q*, or against the photo *similar_to*.
+
+        Exactly one of the two. v1 does no vector arithmetic, so "like this
+        photo but foggy" has no defined meaning and is refused rather than
+        silently honouring one half of it.
+        """
         from pyimgtag.filters import parse_year
+
+        if bool(q) == bool(similar_to):
+            raise HTTPException(
+                status_code=400,
+                detail="pass either q or similar_to, not both and not neither",
+            )
 
         stats = db.embedding_stats()
         if not stats["count"]:
@@ -253,8 +298,25 @@ def build_search_router(db: ProgressDB, api_base: str = "") -> Any:
         # Nothing derived from an exception is returned. The two recoverable
         # setup failures are answered with strings this module owns, so no
         # exception text can reach a browser by accident (py/stack-trace-exposure).
+        exclude: set[str] = set()
+        stored = None
+        if similar_to:
+            # The fast path: an indexed photo already has its vector, so
+            # "More like this" costs one row read and never loads a model.
+            stored = db.get_embedding(similar_to)
+            if stored is None:
+                return {
+                    "available": False,
+                    "message": (
+                        "That photo is not in the semantic index. Re-run the indexer to include it:"
+                    ),
+                    "command": "pyimgtag index --input-dir <DIR>",
+                }
+            exclude = {similar_to}
+
         try:
-            embedder = _embedder()
+            # Query-by-example needs no model at all when the example is indexed.
+            embedder = None if stored is not None else _embedder()
         except ImportError:
             logger.warning("Semantic search is unavailable: the [search] extra is missing")
             return {
@@ -294,8 +356,18 @@ def build_search_router(db: ProgressDB, api_base: str = "") -> Any:
             people = db.paths_for_person_label(person)
             allowed = people if allowed is None else (allowed & people)
 
+        # One ranking path for both modes; only the vector differs.
+        if stored is not None:
+            vector = stored
+        else:
+            assert embedder is not None  # nosec B101 — guarded by the branch above
+            vector = embedder.embed_text(q or "")
         hits = db.search_similar(
-            embedder.embed_text(q), limit=max(1, min(top, 200)), allowed_paths=allowed
+            vector,
+            limit=max(1, min(top, 200)),
+            allowed_paths=allowed,
+            min_score=min_similarity,
+            exclude_paths=exclude,
         )
         return {
             "available": True,

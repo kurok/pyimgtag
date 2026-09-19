@@ -257,6 +257,10 @@ class ProgressDB:
         """Delegate to :meth:`SearchDB.upsert_embedding`."""
         self._search.upsert_embedding(file_path, model, embedding)
 
+    def get_embedding(self, file_path: Path | str) -> np.ndarray | None:
+        """Delegate to :meth:`SearchDB.get_embedding`."""
+        return self._search.get_embedding(file_path)
+
     def clear_embeddings(self, model: str | None = None) -> int:
         """Delegate to :meth:`SearchDB.clear_embeddings`."""
         return self._search.clear_embeddings(model)
@@ -271,9 +275,10 @@ class ProgressDB:
         limit: int = 20,
         allowed_paths: set[str] | None = None,
         min_score: float | None = None,
+        exclude_paths: set[str] | None = None,
     ) -> list[tuple[str, float]]:
         """Delegate to :meth:`SearchDB.search_similar`."""
-        return self._search.search_similar(query, limit, allowed_paths, min_score)
+        return self._search.search_similar(query, limit, allowed_paths, min_score, exclude_paths)
 
     # --- map / timeline (delegated to MapDB) ---
 
