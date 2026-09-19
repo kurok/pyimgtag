@@ -13,9 +13,16 @@ from pyimgtag.progress_db import ProgressDB
 # Sorted public attribute names of ProgressDB captured pre-refactor.
 # If a method is intentionally added or removed, update this list in the
 # same PR and call the API change out explicitly in the description.
+#
+# Added by semantic search (#323): needs_embedding, upsert_embedding,
+# clear_embeddings, embedding_stats and search_similar delegate to SearchDB,
+# and paths_for_person_label delegates to FaceDB so `search --person` can
+# resolve a name to the photos it appears in. All six are additions; nothing
+# was removed or changed.
 EXPECTED_PUBLIC_API = [
     "all_phashes",
     "clear_auto_persons",
+    "clear_embeddings",
     "close",
     "confirm_person",
     "confirm_persons",
@@ -27,6 +34,7 @@ EXPECTED_PUBLIC_API = [
     "delete_person",
     "delete_persons",
     "delete_tag",
+    "embedding_stats",
     "get_all_embeddings",
     "get_all_judge_results",
     "get_assigned_faces",
@@ -72,7 +80,9 @@ EXPECTED_PUBLIC_API = [
     "mark_face_scanned",
     "merge_persons",
     "merge_tags",
+    "needs_embedding",
     "path",
+    "paths_for_person_label",
     "query_images",
     "query_judge_results",
     "record_dedup_action",
@@ -84,6 +94,7 @@ EXPECTED_PUBLIC_API = [
     "reset_untrusted_faces",
     "restore_face",
     "save_judge_result",
+    "search_similar",
     "set_person_id",
     "set_phash",
     "timeline_days",
@@ -94,6 +105,7 @@ EXPECTED_PUBLIC_API = [
     "update_image_tags",
     "update_missing_fields",
     "update_person_label",
+    "upsert_embedding",
 ]
 
 

@@ -15,6 +15,7 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     - Faces at ``/faces``
     - Tags at ``/tags``
     - Query at ``/query``
+    - Search at ``/search``
     - Judge at ``/judge``
     - Insights at ``/insights``
     - Map at ``/map``
@@ -45,6 +46,7 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     from pyimgtag.webapp.routes_map import build_map_router
     from pyimgtag.webapp.routes_query import build_query_router
     from pyimgtag.webapp.routes_review import build_review_router
+    from pyimgtag.webapp.routes_search import build_search_router
     from pyimgtag.webapp.routes_static import build_static_router
     from pyimgtag.webapp.routes_tags import build_tags_router
     from pyimgtag.webapp.routes_timeline import build_timeline_router
@@ -70,6 +72,7 @@ def create_unified_app(db_path: str | Path | None = None) -> Any:
     app.include_router(build_faces_router(db, api_base="/faces"), prefix="/faces")
     app.include_router(build_tags_router(db, api_base="/tags"), prefix="/tags")
     app.include_router(build_query_router(db, api_base="/query"), prefix="/query")
+    app.include_router(build_search_router(db, api_base="/search"), prefix="/search")
     app.include_router(build_judge_router(db, api_base="/judge"), prefix="/judge")
     app.include_router(build_insights_router(db, api_base="/insights"), prefix="/insights")
     app.include_router(build_map_router(db, api_base="/map"), prefix="/map")

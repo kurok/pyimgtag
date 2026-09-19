@@ -160,6 +160,32 @@ Examples:
   pyimgtag query --month 2024-03 --city Lisbon --format json
 """,
     ),
+    "index": (
+        "Build the local semantic-search embedding index",
+        "Embed every photo with a local CLIP model so 'pyimgtag search' can find\n"
+        "them by description. Incremental: unchanged files are skipped. Model\n"
+        "files (~153 MB) download once to ~/.cache/pyimgtag/search_models/.\n"
+        "Needs the [search] extra: pip install 'pyimgtag[search]'",
+        """\
+Examples:
+  pyimgtag index --input-dir ~/Pictures/exported
+  pyimgtag index --photos-library ~/Pictures/Photos.photoslibrary
+  pyimgtag index --input-dir ~/Pictures --rebuild     # re-embed everything
+""",
+    ),
+    "search": (
+        "Find photos by describing them",
+        "Rank photos by how well they match a free-text description, using the\n"
+        "index built by 'pyimgtag index'. Everything runs on-device: the query\n"
+        "text is embedded locally and never leaves the machine. Structured\n"
+        "filters compose -- they select the candidates, similarity orders them.",
+        """\
+Examples:
+  pyimgtag search "foggy morning on a red bridge"
+  pyimgtag search "kids jumping into a pool" --top 25 --format paths
+  pyimgtag search "beach sunset" --person Alice --year 2024 --min-score 7
+""",
+    ),
     "judge": (
         "Score photos with the professional photo-judge rubric",
         "Score photos 1-10 with the photo-judge rubric and print a ranked list.\n"
@@ -982,6 +1008,83 @@ def _add_query_subcommand(subparsers: Any) -> None:
     )
 
 
+def _add_index_subcommand(subparsers: Any) -> None:
+    index_p = _sub(subparsers, "index")
+    index_src = index_p.add_mutually_exclusive_group(required=True)
+    index_src.add_argument("--input-dir", metavar="DIR", help="Directory of images to embed")
+    index_src.add_argument(
+        "--photos-library", metavar="LIBRARY", help="Path to Photos library (.photoslibrary)"
+    )
+    index_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    index_p.add_argument(
+        "--extensions",
+        default="jpg,jpeg,heic,png,tiff,webp",
+        help="Comma-separated file extensions (default: jpg,jpeg,heic,png,tiff,webp)",
+    )
+    index_p.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Re-embed every image, discarding the existing index",
+    )
+    index_p.add_argument("--limit", type=int, metavar="N", help="Embed at most N new images")
+    index_p.add_argument(
+        "--model-dir",
+        metavar="DIR",
+        help="Directory holding the ONNX model files (env: PYIMGTAG_SEARCH_MODEL_DIR)",
+    )
+    index_p.add_argument(
+        "-v", "--verbose", action="store_true", help="Print each file as it is embedded"
+    )
+
+
+def _add_search_subcommand(subparsers: Any) -> None:
+    from pyimgtag.filters import parse_month, parse_year
+
+    search_p = _sub(subparsers, "search")
+    search_p.add_argument("query", help="Free-text description of the photo you want")
+    search_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    search_p.add_argument(
+        "--top", type=int, default=20, metavar="N", help="Number of results (default: 20)"
+    )
+    search_p.add_argument(
+        "--min-similarity",
+        type=float,
+        metavar="SCORE",
+        help="Drop results whose cosine score is below this (0-1)",
+    )
+    search_p.add_argument(
+        "--format",
+        choices=["table", "json", "paths"],
+        default="table",
+        help="Output format (default: table)",
+    )
+    search_p.add_argument(
+        "--model-dir",
+        metavar="DIR",
+        help="Directory holding the ONNX model files (env: PYIMGTAG_SEARCH_MODEL_DIR)",
+    )
+    # Structured filters: these choose the candidates, similarity orders them.
+    search_p.add_argument("--tag", help="Only photos carrying this tag (substring match)")
+    search_p.add_argument("--scene-category", help="Only photos in this scene category")
+    search_p.add_argument("--cleanup", metavar="CLASS", help="Only photos with this cleanup_class")
+    search_p.add_argument("--city", help="Only photos near this city")
+    search_p.add_argument("--country", help="Only photos in this country")
+    search_p.add_argument("--person", help="Only photos containing this named person")
+    search_p.add_argument(
+        "--min-score", type=int, metavar="N", help="Only photos with a judge score >= N"
+    )
+    search_date_grp = search_p.add_mutually_exclusive_group()
+    search_date_grp.add_argument(
+        "--year", metavar="YYYY", type=_arg_type(parse_year), help="Only photos taken in this year"
+    )
+    search_date_grp.add_argument(
+        "--month",
+        metavar="YYYY-MM",
+        type=_arg_type(parse_month),
+        help="Only photos taken in this month",
+    )
+
+
 def _add_judge_subcommand(subparsers: Any) -> None:
     judge_p = _sub(subparsers, "judge")
     judge_src = judge_p.add_mutually_exclusive_group(required=False)
@@ -1281,6 +1384,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_review_subcommand(subparsers)
     _add_faces_subcommand(subparsers)
     _add_query_subcommand(subparsers)
+    _add_index_subcommand(subparsers)
+    _add_search_subcommand(subparsers)
     _add_judge_subcommand(subparsers)
     _add_tags_subcommand(subparsers)
     _add_dedup_subcommand(subparsers)
@@ -1367,6 +1472,7 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.query import cmd_query
     from pyimgtag.commands.review_cmd import cmd_review
     from pyimgtag.commands.run import cmd_run
+    from pyimgtag.commands.search import cmd_index, cmd_search
     from pyimgtag.commands.tags import cmd_tags
     from pyimgtag.commands.watch import cmd_watch
     from pyimgtag.progress_db import ProgressDB
@@ -1392,6 +1498,8 @@ def main(argv: list[str] | None = None) -> int:
         "review": lambda: cmd_review(args),
         "faces": lambda: cmd_faces(args),
         "query": lambda: cmd_query(args),
+        "index": lambda: cmd_index(args),
+        "search": lambda: cmd_search(args),
         "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
         "dedup": lambda: cmd_dedup(args),
