@@ -8,10 +8,14 @@ machine.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
+from pyimgtag.search.model_cache import ModelDownloadError
 from pyimgtag.webapp.nav import DESIGN_CSS as NAV_STYLES
 from pyimgtag.webapp.nav import render_nav
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pyimgtag.progress_db import ProgressDB
@@ -100,9 +104,14 @@ function val(id) { return document.getElementById(id).value.trim(); }
 
 async function runSearch() {
   const q = val('q');
-  if (!q) { statusEl.textContent = 'Type something to search for.'; grid.innerHTML = ''; return; }
+  if (!q) {
+    statusEl.textContent = 'Type something to search for.';
+    grid.replaceChildren();
+    return;
+  }
   statusEl.textContent = 'Searching\\u2026';
-  grid.innerHTML = '';
+  statusEl.style.color = '';
+  grid.replaceChildren();
 
   const params = new URLSearchParams({ q: q, top: val('f-top') || '30' });
   for (const [id, key] of [['f-person','person'],['f-tag','tag'],['f-city','city'],
@@ -116,13 +125,25 @@ async function runSearch() {
     payload = await res.json();
     if (!res.ok) throw new Error(payload.detail || res.statusText);
   } catch (err) {
-    statusEl.innerHTML = '<span style="color:var(--danger)">' + err.message + '</span>';
+    statusEl.textContent = err.message;
+    statusEl.style.color = 'var(--danger)';
     return;
   }
 
   if (payload.available === false) {
+    // textContent, not innerHTML: these strings can carry a filesystem path
+    // from the server's environment, and nothing here needs to be markup.
     statusEl.textContent = '';
-    grid.innerHTML = '<div class="empty">' + payload.message + '</div>';
+    const box = document.createElement('div');
+    box.className = 'empty';
+    box.textContent = payload.message;
+    if (payload.command) {
+      const code = document.createElement('code');
+      code.textContent = payload.command;
+      box.appendChild(document.createElement('br'));
+      box.appendChild(code);
+    }
+    grid.appendChild(box);
     return;
   }
   const hits = payload.results || [];
@@ -143,7 +164,12 @@ async function runSearch() {
     };
     grid.appendChild(card);
   }
-  if (!hits.length) grid.innerHTML = '<div class="empty">Nothing matched that description.</div>';
+  if (!hits.length) {
+    const box = document.createElement('div');
+    box.className = 'empty';
+    box.textContent = 'Nothing matched that description.';
+    grid.appendChild(box);
+  }
 }
 
 document.getElementById('go').onclick = runSearch;
@@ -220,16 +246,26 @@ def build_search_router(db: ProgressDB, api_base: str = "") -> Any:
             # state, and the page should say what to do about it.
             return {
                 "available": False,
-                "message": (
-                    "No semantic index yet. Build one with "
-                    "<code>pyimgtag index --input-dir &lt;DIR&gt;</code>."
-                ),
+                "message": "No semantic index yet. Build one with:",
+                "command": "pyimgtag index --input-dir <DIR>",
             }
 
         try:
             embedder = _embedder()
-        except Exception as exc:  # noqa: BLE001 — surfaced to the page as a message
-            return {"available": False, "message": str(exc).replace("\n", "<br>")}
+        except (ImportError, ModelDownloadError) as exc:
+            # Only these two carry text written to be read by a person: the
+            # missing-extra hint and the manual-download instructions. Anything
+            # else could put internal detail in front of a browser, so it is
+            # logged here and summarised there.
+            return {"available": False, "message": str(exc)}
+        except Exception:
+            logger.exception("Semantic search could not load its model")
+            return {
+                "available": False,
+                "message": (
+                    "The search model could not be loaded. See the server log for details."
+                ),
+            }
 
         allowed: set[str] | None = None
         if any(v is not None for v in (tag, city, year, min_score)):

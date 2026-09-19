@@ -298,7 +298,45 @@ class TestSearchWebapp(unittest.TestCase):
     def test_an_unindexed_library_explains_itself_instead_of_erroring(self):
         payload = self._client().get("/search/api/search", params={"q": "a beach"}).json()
         self.assertFalse(payload["available"])
-        self.assertIn("pyimgtag index", payload["message"])
+        self.assertIn("No semantic index yet", payload["message"])
+        self.assertIn("pyimgtag index", payload["command"])
+
+    def test_an_unexpected_model_failure_is_not_shown_to_the_browser(self):
+        """py/stack-trace-exposure: only our own written-for-humans text ships.
+
+        An ImportError or ModelDownloadError carries text we wrote to be read.
+        Anything else could put a filesystem path or internal detail in front
+        of a browser, so it is logged server-side and summarised in the reply.
+        """
+        import unittest.mock as mock
+
+        (image,) = _make_images(self.tmp, "beach.jpg")
+        self.db.upsert_embedding(image, "stub-v1", np.ones(4, dtype=np.float32))
+
+        boom = RuntimeError("/home/someone/secret/path exploded at line 42")
+        with mock.patch("pyimgtag.search.embedder.load_embedder", side_effect=boom):
+            with self.assertLogs("pyimgtag.webapp.routes_search", level="ERROR"):
+                payload = self._client().get("/search/api/search", params={"q": "a beach"}).json()
+
+        self.assertFalse(payload["available"])
+        self.assertNotIn("secret", payload["message"])
+        self.assertNotIn("line 42", payload["message"])
+        self.assertIn("server log", payload["message"])
+
+    def test_a_missing_extra_still_tells_the_user_what_to_install(self):
+        """The two exception types that do carry user-facing text still do."""
+        import unittest.mock as mock
+
+        (image,) = _make_images(self.tmp, "beach.jpg")
+        self.db.upsert_embedding(image, "stub-v1", np.ones(4, dtype=np.float32))
+
+        with mock.patch(
+            "pyimgtag.search.embedder.load_embedder",
+            side_effect=ImportError("Install it with:\n    pip install 'pyimgtag[search]'"),
+        ):
+            payload = self._client().get("/search/api/search", params={"q": "a beach"}).json()
+
+        self.assertIn("pyimgtag[search]", payload["message"])
 
     def test_results_come_back_ranked(self):
         embedder = StubEmbedder()
