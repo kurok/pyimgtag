@@ -12,6 +12,7 @@ from pyimgtag.db.image_db import _DEFAULT_PATH_BATCH_SIZE, ImageDB
 from pyimgtag.db.insights_db import InsightsDB
 from pyimgtag.db.judge_db import _DEFAULT_JUDGE_RESULTS_LIMIT, JudgeDB
 from pyimgtag.db.map_db import MAX_CELLS, MapDB
+from pyimgtag.db.search_db import SearchDB
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
 
 if TYPE_CHECKING:
@@ -155,6 +156,25 @@ class ProgressDB:
         (14, "ALTER TABLE processed_images ADD COLUMN gps_lon REAL"),
         (14, "CREATE INDEX IF NOT EXISTS idx_pi_gps ON processed_images(gps_lat, gps_lon)"),
         (14, "CREATE INDEX IF NOT EXISTS idx_pi_image_date ON processed_images(image_date)"),
+        # 0.32.0: semantic search. One CLIP embedding per photo, stored as a
+        # little-endian float32 blob (512 floats = 2 KB). ``model`` is part of
+        # the row because vectors from different models are not comparable, so
+        # changing the model has to invalidate the index rather than silently
+        # mix spaces. size+mtime mirror processed_images so re-indexing an
+        # unchanged library does no model work.
+        (
+            15,
+            """CREATE TABLE IF NOT EXISTS image_embeddings (
+                file_path  TEXT PRIMARY KEY,
+                model      TEXT NOT NULL,
+                dim        INTEGER NOT NULL,
+                embedding  BLOB NOT NULL,
+                file_size  INTEGER,
+                file_mtime REAL,
+                indexed_at TEXT NOT NULL
+            )""",
+        ),
+        (15, "CREATE INDEX IF NOT EXISTS idx_embeddings_model ON image_embeddings(model)"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -221,6 +241,39 @@ class ProgressDB:
     def _map(self) -> MapDB:
         """Map/timeline aggregation helper bound to the current connection."""
         return MapDB(self._conn)
+
+    @property
+    def _search(self) -> SearchDB:
+        """Semantic-search embedding helper bound to the current connection."""
+        return SearchDB(self._conn)
+
+    # --- semantic search (delegated to SearchDB) ---
+
+    def needs_embedding(self, file_path: Path, model: str) -> bool:
+        """Delegate to :meth:`SearchDB.needs_embedding`."""
+        return self._search.needs_embedding(file_path, model)
+
+    def upsert_embedding(self, file_path: Path, model: str, embedding: np.ndarray) -> None:
+        """Delegate to :meth:`SearchDB.upsert_embedding`."""
+        self._search.upsert_embedding(file_path, model, embedding)
+
+    def clear_embeddings(self, model: str | None = None) -> int:
+        """Delegate to :meth:`SearchDB.clear_embeddings`."""
+        return self._search.clear_embeddings(model)
+
+    def embedding_stats(self) -> dict[str, int | str | None]:
+        """Delegate to :meth:`SearchDB.embedding_stats`."""
+        return self._search.embedding_stats()
+
+    def search_similar(
+        self,
+        query: np.ndarray,
+        limit: int = 20,
+        allowed_paths: set[str] | None = None,
+        min_score: float | None = None,
+    ) -> list[tuple[str, float]]:
+        """Delegate to :meth:`SearchDB.search_similar`."""
+        return self._search.search_similar(query, limit, allowed_paths, min_score)
 
     # --- map / timeline (delegated to MapDB) ---
 
@@ -488,6 +541,10 @@ class ProgressDB:
     ) -> int:
         """Delegate to :meth:`FaceDB.create_person`."""
         return self._faces.create_person(label, confirmed, source, trusted)
+
+    def paths_for_person_label(self, label: str) -> set[str]:
+        """Delegate to :meth:`FaceDB.paths_for_person_label`."""
+        return self._faces.paths_for_person_label(label)
 
     def get_persons(self) -> list[PersonCluster]:
         """Delegate to :meth:`FaceDB.get_persons`."""

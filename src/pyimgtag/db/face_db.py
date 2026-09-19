@@ -158,6 +158,22 @@ class FaceDB:
             for r in rows
         ]
 
+    def paths_for_person_label(self, label: str) -> set[str]:
+        """Image paths holding a face assigned to a person with this label.
+
+        Case-insensitive and exact: ``--person Alice`` should not also match
+        "Alice's birthday". Dismissed faces are excluded, matching what the
+        faces UI shows.
+        """
+        rows = self._conn.execute(
+            """SELECT DISTINCT f.image_path
+                 FROM faces f
+                 JOIN persons p ON p.id = f.person_id
+                WHERE LOWER(p.label) = LOWER(?) AND COALESCE(f.ignored, 0) = 0""",
+            (label,),
+        ).fetchall()
+        return {row[0] for row in rows}
+
     def get_all_embeddings(self) -> list[tuple[int, np.ndarray]]:
         """Return (face_id, embedding) for all faces that have embeddings."""
         rows = self._conn.execute(

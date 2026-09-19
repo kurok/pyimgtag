@@ -149,8 +149,8 @@ function closeModal() {
 def render_nav(active: str, status_html: str = "") -> str:
     """Return nav HTML with ``active`` section highlighted.
 
-    ``active``: one of dashboard, review, faces, tags, query, judge, insights,
-    map, timeline, dedup, edit, about.
+    ``active``: one of dashboard, review, faces, tags, query, search, judge,
+    insights, map, timeline, dedup, edit, about.
     ``status_html``: injected into the right-side status slot (Dashboard only).
 
     The version label is rendered on every page so the user can see at a
@@ -175,6 +175,7 @@ def render_nav(active: str, status_html: str = "") -> str:
         f'<a class="{cls("faces")}" href="/faces">Faces</a>'
         f'<a class="{cls("tags")}" href="/tags">Tags</a>'
         f'<a class="{cls("query")}" href="/query">Query</a>'
+        f'<a class="{cls("search")}" href="/search">Search</a>'
         f'<a class="{cls("judge")}" href="/judge">Judge</a>'
         f'<a class="{cls("insights")}" href="/insights">Insights</a>'
         f'<a class="{cls("map")}" href="/map">Map</a>'

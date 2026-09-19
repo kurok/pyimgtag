@@ -9,7 +9,7 @@ macOS image tagger using local Ollama Gemma vision model with EXIF GPS reverse g
 - Nominatim reverse geocoding with disk cache
 - Optional: pillow-heif (HEIC), exiftool (reliable HEIC EXIF)
 - `pyproject.toml` with src layout
-- Optional extras: [heic], [photos], [photos-db], [face], [ocr], [review], [raw], [vocab], [dedup], [mcp], [all], [dev], [lint], [security], [screenshot], [e2e]
+- Optional extras: [heic], [photos], [photos-db], [face], [ocr], [review], [raw], [vocab], [dedup], [mcp], [search], [all], [dev], [lint], [security], [screenshot], [e2e]
 
 ## Commands
 
@@ -65,13 +65,15 @@ src/pyimgtag/
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
   db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
-                       versioned migrations via PRAGMA user_version — latest is v14, which
-                       persists EXIF gps_lat/gps_lon plus the gps and image_date indexes),
+                       versioned migrations via PRAGMA user_version — latest is v15, which
+                       adds the image_embeddings table behind semantic search),
                        image_db (ImageDB — incl. the bbox / ISO date-prefix query filters),
                        face_db (FaceDB), judge_db (JudgeDB), insights_db (InsightsDB —
                        SQL-side library aggregation for `insights`), dedup_db (DedupDB —
                        dedup_groups/dedup_members plus the phash columns), map_db (MapDB —
-                       zoom-binned GPS clustering + month/day timeline aggregates)
+                       zoom-binned GPS clustering + month/day timeline aggregates),
+                       search_db (SearchDB — CLIP embedding blobs + brute-force cosine
+                       retrieval with a filter-then-rank path)
   insights_report.py   Terminal + self-contained HTML renderers for the insights document
   mcp_server.py        MCP (stdio) tool surface over the DB for AI assistants: read tools always
                        registered, write tools only with --enable-writes /
@@ -96,6 +98,12 @@ src/pyimgtag/
   commands/watch.py    `watch` polling daemon: stability gate, PID lock, graceful stop,
                        reuses commands/run._run_tagging for the actual tagging
   _face_dep_check.py   Friendly preflight for face_recognition_models
+  search/              Semantic search subpackage: embedder (Embedder protocol +
+                       ClipOnnxEmbedder, so tests can substitute fixed vectors and never
+                       download a model), model_cache (checksum-verified download of the
+                       pinned CLIP ONNX files), indexer (incremental build_index)
+  commands/search.py   `index` (embed a library) and `search` (free-text retrieval);
+                       structured filters select candidates, cosine similarity orders them
   face/                Face pipeline subpackage: detection, embedding, clustering, naming,
                        ocr, thumb (detect, embed, cluster, name, OCR, thumbs) and
                        photos_importer (Apple Photos face/people import)

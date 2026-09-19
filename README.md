@@ -156,6 +156,7 @@ brew install exiftool
 | Apple Photos write-back | ✅ | ❌ | ❌ |
 | Face management (Apple Photos) | ✅ | ❌ | ❌ |
 | Face naming via screen OCR (`capture-names`) | ✅ Vision OCR | ❌ | ❌ |
+| Semantic search (`index` / `search`) | ✅ | ✅ | ✅ |
 
 **Note:** Most features work cross-platform. Apple Photos integration and face management are macOS-only — they require AppleScript via `osascript`. `faces capture-names` additionally uses Apple's Vision framework for OCR (the `[ocr]` extra).
 
@@ -530,6 +531,62 @@ pyimgtag query --tag beach --format paths --limit 50
 `--bbox` only sees photos whose coordinates are in the database. If your
 library was tagged before migration v14, backfill it first — see
 [Populating GPS for an existing library](#populating-gps-for-an-existing-library).
+
+#### `pyimgtag index` / `pyimgtag search` — semantic search
+
+Tags are lossy: if the model wrote `sunset` and you search for `golden hour`,
+the photo is unfindable. A local CLIP index makes every photo findable by
+description instead — *"the foggy morning on the red bridge"*, *"kids jumping
+into a pool"*.
+
+```bash
+pip install 'pyimgtag[search]'
+
+# Build the index (incremental — a re-run embeds only new or changed files)
+pyimgtag index --input-dir ~/Pictures/exported
+pyimgtag index --photos-library ~/Pictures/Photos.photoslibrary
+pyimgtag index --input-dir ~/Pictures --rebuild       # re-embed everything
+
+# Search it
+pyimgtag search "foggy morning on a red bridge"
+pyimgtag search "kids jumping into a pool" --top 25 --format paths
+pyimgtag search "beach sunset" --person Alice --year 2024 --min-score 7
+```
+
+Structured filters **select the candidates; similarity orders them**. Anything
+`query` can filter on, `search` can rank inside: `--tag`, `--scene-category`,
+`--cleanup`, `--city`, `--country`, `--person`, `--min-score`, `--year`,
+`--month`.
+
+| Flag | Applies to | Notes |
+|---|---|---|
+| `--top N` | `search` | Number of results (default 20). |
+| `--min-similarity` | `search` | Drop results below this cosine score (0–1). |
+| `--format` | `search` | `table` (default), `json`, `paths`. |
+| `--rebuild` | `index` | Discard the index and re-embed everything. Needed after a model change. |
+| `--limit N` | `index` | Embed at most N new images — useful for a first look at a huge library. |
+| `--model-dir` | both | Where the ONNX files live (env: `PYIMGTAG_SEARCH_MODEL_DIR`). |
+
+**Privacy.** The index is local and so is the query: text is embedded on your
+machine by a model on your disk, and no part of a search leaves the host. The
+only network access this feature ever makes is the one-time model download.
+
+**Model.** CLIP ViT-B/32, int8-quantized ONNX, pinned to one immutable
+revision of
+[`Xenova/clip-vit-base-patch32`](https://huggingface.co/Xenova/clip-vit-base-patch32).
+The two towers total **153 MB** (89 MB vision + 64 MB text) and download once
+to `~/.cache/pyimgtag/search_models/`, checksum-verified on arrival. For an
+air-gapped install, put the files there yourself — a failed download prints the
+exact `curl` command. No `torch`.
+
+**Cost.** Embeddings are 512 float32 per photo — 2 KB each, so a 50,000-photo
+library adds **198 MB** to the SQLite file. Retrieval is a brute-force numpy
+scan, measured at **90 ms median** over 50,000 photos on CPU (best 79 ms, worst
+114 ms), which is why there is no vector-database dependency.
+
+Embeddings are stored with the model that produced them. Vectors from different
+models are not comparable, so changing the model invalidates the index rather
+than silently mixing two spaces — `search` warns and tells you to `--rebuild`.
 
 #### `pyimgtag watch` — continuous tagging
 
@@ -1403,6 +1460,7 @@ a default server cannot see them at all. No tool deletes anything.
 | `PYIMGTAG_NO_WEB` | All commands that start the dashboard | `1` / `true` / `yes` disables the dashboard by default (same as `--no-web`). |
 | `PYIMGTAG_MAP_TILES` | `/map` page | Raster tile URL template (default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`). Point at a LAN/offline tile server to keep browsing private — see [Map tiles and privacy](#map-tiles-and-privacy). |
 | `PYIMGTAG_MAP_TILES_ATTRIBUTION` | `/map` page | Attribution line drawn on the map (default `© OpenStreetMap contributors`). |
+| `PYIMGTAG_SEARCH_MODEL_DIR` | `pyimgtag index` / `search` / `/search` | Directory holding the CLIP ONNX files. Point it at pre-downloaded models for an air-gapped install (default `~/.cache/pyimgtag/search_models/`). Overridden by `--model-dir`. |
 | `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |
 | `PYIMGTAG_PARSE_ERROR_LOG` | `pyimgtag run` | Path to write JSON-parse error log (opt-in; disabled by default). May contain photo descriptions — do not store in a synced or shared directory. |
