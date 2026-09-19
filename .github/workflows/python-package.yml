@@ -98,6 +98,17 @@ jobs:
         enable-cache: "true"
         cache-dependency-glob: "pyproject.toml"
         cache-suffix: ${{ github.job }}-${{ matrix.os }}-${{ matrix.python-version }}
+    - name: Install ffmpeg
+      # The video tests build a tiny synthetic clip and decode it. Without
+      # ffmpeg they skip with a reason rather than fail, so this is what makes
+      # them actually run on all three runners.
+      shell: bash
+      run: |
+        case "${{ matrix.os }}" in
+          ubuntu-latest)  sudo apt-get update && sudo apt-get install -y ffmpeg ;;
+          macos-latest)   brew install ffmpeg ;;
+          windows-latest) choco install ffmpeg --no-progress -y ;;
+        esac
     - name: Install dependencies
       run: uv pip install -e ".[dev,lint,review]"
     - name: Run tests

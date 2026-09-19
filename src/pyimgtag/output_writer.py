@@ -33,6 +33,10 @@ _CSV_FIELDS = [
     "text_summary",
     "event_hint",
     "significance",
+    # Video rows carry these; a still exports "image" and an empty duration,
+    # so the column set stays the same shape for every row.
+    "media_type",
+    "duration_sec",
 ]
 
 

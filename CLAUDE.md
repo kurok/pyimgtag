@@ -65,8 +65,8 @@ src/pyimgtag/
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
   db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
-                       versioned migrations via PRAGMA user_version — latest is v16, which
-                       adds the events/event_members tables behind `events`),
+                       versioned migrations via PRAGMA user_version — latest is v17, which
+                       adds media_type/duration_sec for video),
                        image_db (ImageDB — incl. the bbox / ISO date-prefix query filters),
                        face_db (FaceDB), judge_db (JudgeDB), insights_db (InsightsDB —
                        SQL-side library aggregation for `insights`), dedup_db (DedupDB —
@@ -100,6 +100,9 @@ src/pyimgtag/
   commands/watch.py    `watch` polling daemon: stability gate, PID lock, graceful stop,
                        reuses commands/run._run_tagging for the actual tagging
   _face_dep_check.py   Friendly preflight for face_recognition_models
+  video.py             Video support: ffmpeg/ffprobe keyframe extraction (external tool,
+                       like exiftool — never a Python dep) plus aggregate_frames, the pure
+                       fold from per-frame TagResults to one row for the clip
   events.py            Spatiotemporal clustering into events and trips — pure functions
                        over PhotoPoint records, no DB and no model call, so the boundary
                        rules are testable against fabricated timelines

@@ -105,6 +105,11 @@ class ImageResult:
     text_summary: str | None = None
     event_hint: str | None = None
     significance: str | None = None
+    #: ``"image"`` or ``"video"``. Videos reach the DB as an aggregate over
+    #: sampled keyframes; see :mod:`pyimgtag.video`.
+    media_type: str = "image"
+    #: Clip length in seconds; None for a still.
+    duration_sec: float | None = None
 
     def build_description(self) -> str | None:
         """Build a human-readable description from summary, location, and date.

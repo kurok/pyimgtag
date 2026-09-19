@@ -510,6 +510,27 @@ def _add_run_flags(run_p: argparse.ArgumentParser) -> None:
     run_p.add_argument("--date-from", help="Process images from this date (YYYY-MM-DD)")
     run_p.add_argument("--date-to", help="Process images up to this date (YYYY-MM-DD)")
     run_p.add_argument(
+        "--include-video",
+        action="store_true",
+        help=(
+            "Also tag video clips. Frames are sampled with ffmpeg and the per-frame "
+            "results aggregated into one row. Needs ffmpeg and ffprobe on PATH"
+        ),
+    )
+    run_p.add_argument(
+        "--video-frames",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Frames to sample per clip with --include-video (default: 3)",
+    )
+    run_p.add_argument(
+        "--video-extensions",
+        default=None,
+        metavar="EXTS",
+        help="Comma-separated video extensions (default: mp4,mov,m4v)",
+    )
+    run_p.add_argument(
         "--extensions",
         default="jpg,jpeg,heic,png",
         help=(
@@ -1026,6 +1047,12 @@ def _add_query_subcommand(subparsers: Any) -> None:
         help="Output format (default: table)",
     )
     query_p.add_argument("--limit", type=int, help="Max results to return")
+    query_p.add_argument(
+        "--type",
+        dest="media_type",
+        choices=["image", "video"],
+        help="Only stills, or only video clips",
+    )
     query_p.add_argument(
         "--event",
         type=int,

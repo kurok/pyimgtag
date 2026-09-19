@@ -65,6 +65,7 @@ def cmd_query(args: argparse.Namespace) -> int:
             # --year and --month are mutually exclusive, so at most one of
             # these is set; both are already validated ISO prefixes.
             date_prefix=getattr(args, "month", None) or getattr(args, "year", None),
+            media_type=getattr(args, "media_type", None),
         )
         if event_paths is not None:
             # Intersected here rather than pushed into SQL: event membership

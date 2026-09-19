@@ -204,6 +204,14 @@ class ProgressDB:
         (16, "CREATE INDEX IF NOT EXISTS idx_event_members_event ON event_members(event_id)"),
         (16, "CREATE INDEX IF NOT EXISTS idx_events_started ON events(started_at)"),
         (16, "CREATE INDEX IF NOT EXISTS idx_events_trip ON events(trip_id)"),
+        # 0.34.0: video. media_type separates clips from stills so `query
+        # --type` and the webapp badges can tell them apart; duration_sec is
+        # what a grid overlay shows. Existing rows predate video entirely, so
+        # the default backfills them as images in one statement.
+        (17, "ALTER TABLE processed_images ADD COLUMN media_type TEXT DEFAULT 'image'"),
+        (17, "ALTER TABLE processed_images ADD COLUMN duration_sec REAL"),
+        (17, "UPDATE processed_images SET media_type = 'image' WHERE media_type IS NULL"),
+        (17, "CREATE INDEX IF NOT EXISTS idx_pi_media_type ON processed_images(media_type)"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -471,6 +479,7 @@ class ProgressDB:
         tags_any: list[str] | None = None,
         bbox: tuple[float, float, float, float] | None = None,
         date_prefix: str | None = None,
+        media_type: str | None = None,
     ) -> list[dict]:
         """Delegate to :meth:`ImageDB.query_images`."""
         return self._images.query_images(
@@ -489,6 +498,7 @@ class ProgressDB:
             tags_any,
             bbox,
             date_prefix,
+            media_type,
         )
 
     def get_tag_counts(self) -> list[tuple[str, int]]:

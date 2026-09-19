@@ -242,7 +242,7 @@ class TestRunPreflight:
 
         results = run_preflight("http://localhost:11434", "gemma4:e4b")
 
-        assert len(results) == 3
+        assert len(results) == 4
         names = [r[0] for r in results]
         assert "Ollama" in names
         assert "Ollama model" in names
@@ -265,7 +265,7 @@ class TestRunPreflight:
 
         results = run_preflight("http://localhost:11434", "gemma4:e4b", str(tmp_path), "directory")
 
-        assert len(results) == 4
+        assert len(results) == 5
         names = [r[0] for r in results]
         assert "Directory" in names
 
@@ -291,7 +291,7 @@ class TestRunPreflight:
             "http://localhost:11434", "gemma4:e4b", str(tmp_path), "photos_library"
         )
 
-        assert len(results) == 4
+        assert len(results) == 5
         names = [r[0] for r in results]
         assert "Photos library" in names
 
