@@ -17,8 +17,11 @@ from pyimgtag.progress_db import ProgressDB
 # Added by semantic search (#323): needs_embedding, upsert_embedding,
 # clear_embeddings, embedding_stats and search_similar delegate to SearchDB,
 # and paths_for_person_label delegates to FaceDB so `search --person` can
-# resolve a name to the photos it appears in. All six are additions; nothing
-# was removed or changed.
+# resolve a name to the photos it appears in.
+#
+# Added by query-by-example (#324): get_embedding, which reads back a stored
+# vector so `--similar-to` on an indexed photo needs no model. All additions;
+# nothing has been removed or changed.
 EXPECTED_PUBLIC_API = [
     "all_phashes",
     "clear_auto_persons",
@@ -44,6 +47,7 @@ EXPECTED_PUBLIC_API = [
     "get_clusterable_embeddings",
     "get_dedup_group",
     "get_dedup_totals",
+    "get_embedding",
     "get_embeddings_for_faces",
     "get_face_by_id",
     "get_face_count",

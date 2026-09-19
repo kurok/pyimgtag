@@ -48,6 +48,9 @@
                z-index:1000;align-items:center;justify-content:center;cursor:zoom-out}
     .lightbox.open{display:flex}
     .lightbox img{max-width:95vw;max-height:95vh;object-fit:contain;cursor:default}
+    .lightbox-similar{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
+                      background:var(--accent,#0071e3);color:#fff;text-decoration:none;
+                      padding:9px 18px;border-radius:8px;font-size:13px;font-weight:500}
     .lightbox-close{position:fixed;top:16px;right:24px;color:#fff;font-size:32px;
                      cursor:pointer;line-height:1;user-select:none}
     .img-judge{position:absolute;top:8px;right:8px;font-size:11px;font-weight:700;
@@ -102,6 +105,7 @@
 
 <div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
   <img id="lightboxImg" alt="" />
+  <a id="lightboxSimilar" class="lightbox-similar" href="#">More like this</a>
   <span class="lightbox-close" onclick="closeLightbox(event)">&times;</span>
 </div>
 <script>
@@ -182,11 +186,15 @@ function openLightbox(path) {
   const lb = document.getElementById('lightbox');
   const img = document.getElementById('lightboxImg');
   img.src = '{{ api_base }}/original?path=' + encodeURIComponent(path);
+  // /review cannot rank anything itself; the Search page owns the index.
+  document.getElementById('lightboxSimilar').href =
+    '/search?similar_to=' + encodeURIComponent(path);
   lb.classList.add('open');
 }
 function closeLightbox(e) {
-  // Only close on clicks on the backdrop or the close glyph, not on the image.
-  if (e && e.target && e.target.tagName === 'IMG') return;
+  // Only close on clicks on the backdrop or the close glyph, not on the image
+  // and not on the "More like this" link, which needs its navigation.
+  if (e && e.target && (e.target.tagName === 'IMG' || e.target.tagName === 'A')) return;
   document.getElementById('lightbox').classList.remove('open');
   document.getElementById('lightboxImg').removeAttribute('src');
 }

@@ -174,16 +174,24 @@ Examples:
 """,
     ),
     "search": (
-        "Find photos by describing them",
-        "Rank photos by how well they match a free-text description, using the\n"
-        "index built by 'pyimgtag index'. Everything runs on-device: the query\n"
-        "text is embedded locally and never leaves the machine. Structured\n"
+        "Find photos by describing them, or by example",
+        "Rank photos by how well they match a free-text description -- or, with\n"
+        "--similar-to, how much they look like a photo you already have --\n"
+        "using the index built by 'pyimgtag index'. Everything runs on-device:\n"
+        "the query is embedded locally and never leaves the machine. Structured\n"
         "filters compose -- they select the candidates, similarity orders them.",
         """\
 Examples:
   pyimgtag search "foggy morning on a red bridge"
   pyimgtag search "kids jumping into a pool" --top 25 --format paths
   pyimgtag search "beach sunset" --person Alice --year 2024 --min-score 7
+
+  # Query by example: more photos like this one
+  pyimgtag search --similar-to ~/Pictures/exported/IMG_4211.jpg --top 20
+  pyimgtag search --similar-to IMG_4211.jpg --person Alice --format paths
+
+  # Tighten it to the same scene rather than broad similarity
+  pyimgtag search --similar-to IMG_4211.jpg --min-similarity 0.95
 """,
     ),
     "judge": (
@@ -1041,7 +1049,20 @@ def _add_search_subcommand(subparsers: Any) -> None:
     from pyimgtag.filters import parse_month, parse_year
 
     search_p = _sub(subparsers, "search")
-    search_p.add_argument("query", help="Free-text description of the photo you want")
+    search_p.add_argument(
+        "query",
+        nargs="?",
+        help="Free-text description of the photo you want (omit when using --similar-to)",
+    )
+    search_p.add_argument(
+        "--similar-to",
+        metavar="IMAGE",
+        help=(
+            "Find photos like this one instead of like a description. An already "
+            "indexed photo is answered from its stored vector without loading the "
+            "model; any other image file is embedded on the fly"
+        ),
+    )
     search_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     search_p.add_argument(
         "--top", type=int, default=20, metavar="N", help="Number of results (default: 20)"
@@ -1457,6 +1478,14 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--include-children requires --tag")
         if not (args.vocabulary or os.environ.get("PYIMGTAG_VOCABULARY")):
             parser.error("--include-children requires --vocabulary (or PYIMGTAG_VOCABULARY)")
+    if args.subcommand == "search":
+        # Exactly one query mode. Combining them would mean deciding what
+        # "like this photo, but also foggy" means, and v1 does not do vector
+        # arithmetic -- so it says so rather than quietly honouring one.
+        if args.query and args.similar_to:
+            parser.error("a text query cannot be combined with --similar-to; pass one or the other")
+        if not args.query and not args.similar_to:
+            parser.error("give a text query, or --similar-to IMAGE")
 
     _check_for_update()
 

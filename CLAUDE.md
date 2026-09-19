@@ -102,8 +102,10 @@ src/pyimgtag/
                        ClipOnnxEmbedder, so tests can substitute fixed vectors and never
                        download a model), model_cache (checksum-verified download of the
                        pinned CLIP ONNX files), indexer (incremental build_index)
-  commands/search.py   `index` (embed a library) and `search` (free-text retrieval);
-                       structured filters select candidates, cosine similarity orders them
+  commands/search.py   `index` (embed a library) and `search` (free-text retrieval, or
+                       query-by-example via --similar-to, which reuses an indexed photo's
+                       stored vector and loads no model); structured filters select
+                       candidates, cosine similarity orders them
   face/                Face pipeline subpackage: detection, embedding, clustering, naming,
                        ocr, thumb (detect, embed, cluster, name, OCR, thumbs) and
                        photos_importer (Apple Photos face/people import)

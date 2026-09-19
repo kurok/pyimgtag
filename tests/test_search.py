@@ -226,6 +226,175 @@ class TestRetrieval(unittest.TestCase):
         self.assertEqual(self._search("sunny beach", limit=4), [])
 
 
+class TestQueryByExample(unittest.TestCase):
+    """--similar-to: rank by resemblance to a photo instead of a description."""
+
+    def setUp(self):
+        self.tmp = Path(__import__("tempfile").mkdtemp())
+        self.db = ProgressDB(db_path=self.tmp / "p.db")
+        self.embedder = StubEmbedder()
+        self.paths = _make_images(self.tmp, "beach.jpg", "forest.jpg", "city.jpg")
+        build_index(self.paths, self.db, self.embedder)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_an_indexed_photo_is_answered_without_loading_a_model(self):
+        """The fast path. A library photo already has its vector."""
+        beach = self.tmp / "beach.jpg"
+        stored = self.db.get_embedding(beach)
+        self.assertIsNotNone(stored)
+        self.embedder.embed_calls.clear()
+
+        hits = self.db.search_similar(stored, limit=3, exclude_paths={str(beach)})
+        self.assertEqual(self.embedder.embed_calls, [], "the fast path embedded something")
+        self.assertNotIn(str(beach), [h[0] for h in hits])
+
+    def test_an_unindexed_file_returns_no_stored_vector(self):
+        self.assertIsNone(self.db.get_embedding(self.tmp / "never-seen.jpg"))
+
+    def test_the_example_photo_is_not_its_own_best_match(self):
+        """It would score 1.0 against itself and waste the top slot."""
+        beach = str(self.tmp / "beach.jpg")
+        vector = self.db.get_embedding(beach)
+
+        with_it = self.db.search_similar(vector, limit=3)
+        without = self.db.search_similar(vector, limit=3, exclude_paths={beach})
+
+        self.assertEqual(with_it[0][0], beach)
+        self.assertNotIn(beach, [h[0] for h in without])
+        self.assertEqual(len(without), 2)
+
+    def test_exclusion_composes_with_the_structured_filter(self):
+        """Both hooks apply; neither cancels the other."""
+        beach = str(self.tmp / "beach.jpg")
+        forest = str(self.tmp / "forest.jpg")
+        vector = self.db.get_embedding(beach)
+
+        hits = self.db.search_similar(
+            vector,
+            limit=3,
+            allowed_paths={beach, forest},
+            exclude_paths={beach},
+        )
+        self.assertEqual([h[0] for h in hits], [forest])
+
+    def test_top_k_and_min_similarity_apply_to_example_search_too(self):
+        beach = str(self.tmp / "beach.jpg")
+        vector = self.db.get_embedding(beach)
+        # The stub's vectors are orthogonal, so everything but the example
+        # itself scores 0 — and the example is excluded.
+        self.assertEqual(
+            self.db.search_similar(vector, limit=3, exclude_paths={beach}, min_score=0.5), []
+        )
+        self.assertEqual(len(self.db.search_similar(vector, limit=1, exclude_paths={beach})), 1)
+
+
+class TestQueryByExampleCli(unittest.TestCase):
+    """The CLI wiring around --similar-to."""
+
+    def setUp(self):
+        self.tmp = Path(__import__("tempfile").mkdtemp())
+        self.db_path = self.tmp / "p.db"
+        self.embedder = StubEmbedder()
+        with ProgressDB(db_path=self.db_path) as db:
+            self.paths = _make_images(self.tmp, "beach.jpg", "forest.jpg", "city.jpg")
+            build_index(self.paths, db, self.embedder)
+
+    def _run(self, argv: list[str]) -> tuple[int, str, str]:
+        import contextlib
+        import io
+
+        from pyimgtag.main import main
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = main(argv)
+            except SystemExit as exc:  # argparse errors
+                code = int(exc.code or 0)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_text_query_and_similar_to_are_mutually_exclusive(self):
+        code, _, err = self._run(["search", "a beach", "--similar-to", str(self.tmp / "beach.jpg")])
+        self.assertNotEqual(code, 0)
+        self.assertIn("cannot be combined with --similar-to", err)
+
+    def test_one_of_them_is_required(self):
+        code, _, err = self._run(["search", "--db", str(self.db_path)])
+        self.assertNotEqual(code, 0)
+        self.assertIn("--similar-to", err)
+
+    def test_similar_to_an_indexed_photo_needs_no_model(self):
+        """No [search] extra, no model download: the stored vector is enough."""
+        import unittest.mock as mock
+
+        with mock.patch(
+            "pyimgtag.search.embedder.load_embedder",
+            side_effect=AssertionError("the fast path must not load a model"),
+        ):
+            code, out, _ = self._run(
+                [
+                    "search",
+                    "--db",
+                    str(self.db_path),
+                    "--similar-to",
+                    str(self.tmp / "beach.jpg"),
+                    "--format",
+                    "paths",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        listed = [line for line in out.splitlines() if line.strip()]
+        self.assertNotIn(str(self.tmp / "beach.jpg"), listed, "the example ranked itself")
+        self.assertEqual(len(listed), 2)
+
+    def test_a_missing_file_says_so(self):
+        code, _, err = self._run(
+            ["search", "--db", str(self.db_path), "--similar-to", str(self.tmp / "nope.jpg")]
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("neither an indexed photo nor a readable image file", err)
+
+    def test_an_unindexed_image_is_embedded_on_the_fly(self):
+        import unittest.mock as mock
+
+        fresh = self.tmp / "beach.jpg"  # name the stub knows
+        outside = self.tmp / "elsewhere"
+        outside.mkdir()
+        copy = outside / "beach.jpg"
+        copy.write_bytes(b"not-a-real-image")
+
+        with mock.patch("pyimgtag.search.embedder.load_embedder", return_value=self.embedder):
+            code, out, _ = self._run(
+                [
+                    "search",
+                    "--db",
+                    str(self.db_path),
+                    "--similar-to",
+                    str(copy),
+                    "--format",
+                    "paths",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        # It embedded the copy and ranked the indexed beach photo first.
+        # Compared resolved: the embedder is handed the resolved path, and on
+        # macOS a tmp_path under /var resolves to /private/var.
+        self.assertIn(copy.resolve(), self.embedder.embed_calls)
+        self.assertEqual(out.splitlines()[0], str(fresh))
+
+    def test_an_unindexed_library_is_reported_before_anything_else(self):
+        empty = self.tmp / "empty.db"
+        code, _, err = self._run(
+            ["search", "--db", str(empty), "--similar-to", str(self.tmp / "beach.jpg")]
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("pyimgtag index", err)
+
+
 class TestSchemaMigration(unittest.TestCase):
     def test_a_v14_database_upgrades_cleanly(self):
         """An existing library must gain the table without losing its rows."""
@@ -379,3 +548,57 @@ class TestSearchWebapp(unittest.TestCase):
         self.assertEqual(
             self._client().get("/search/api/search", params={"q": ""}).status_code, 422
         )
+
+    def test_the_lightbox_offers_more_like_this(self):
+        text = self._client().get("/search/").text
+        self.assertIn("More like this", text)
+        self.assertIn("searchSimilarTo", text)
+        # The deep link the other pages navigate to.
+        self.assertIn("similar_to", text)
+
+    def test_similar_to_ranks_without_loading_a_model(self):
+        """The fast path through the API: an indexed photo needs no embedder."""
+        import unittest.mock as mock
+
+        embedder = StubEmbedder()
+        paths = _make_images(self.tmp, "beach.jpg", "forest.jpg", "city.jpg")
+        build_index(paths, self.db, embedder)
+        beach = str(self.tmp / "beach.jpg")
+
+        with mock.patch(
+            "pyimgtag.search.embedder.load_embedder",
+            side_effect=AssertionError("the fast path must not load a model"),
+        ):
+            payload = (
+                self._client()
+                .get("/search/api/search", params={"similar_to": beach, "top": 5})
+                .json()
+            )
+
+        self.assertTrue(payload["available"])
+        returned = [r["file_path"] for r in payload["results"]]
+        self.assertNotIn(beach, returned, "the example ranked itself")
+        self.assertEqual(len(returned), 2)
+
+    def test_similar_to_an_unindexed_photo_says_what_to_do(self):
+        embedder = StubEmbedder()
+        build_index(_make_images(self.tmp, "beach.jpg"), self.db, embedder)
+
+        payload = (
+            self._client()
+            .get("/search/api/search", params={"similar_to": "/not/in/the/index.jpg"})
+            .json()
+        )
+        self.assertFalse(payload["available"])
+        self.assertIn("not in the semantic index", payload["message"])
+        self.assertIn("pyimgtag index", payload["command"])
+
+    def test_q_and_similar_to_are_mutually_exclusive(self):
+        for params in (
+            {"q": "a beach", "similar_to": "/x.jpg"},
+            {},
+        ):
+            with self.subTest(params=params):
+                response = self._client().get("/search/api/search", params=params)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("either q or similar_to", response.json()["detail"])
