@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pyimgtag.db.dedup_db import DedupDB
+from pyimgtag.db.events_db import EventsDB
 from pyimgtag.db.face_db import FaceDB
 from pyimgtag.db.image_db import _DEFAULT_PATH_BATCH_SIZE, ImageDB
 from pyimgtag.db.insights_db import InsightsDB
@@ -175,6 +176,34 @@ class ProgressDB:
             )""",
         ),
         (15, "CREATE INDEX IF NOT EXISTS idx_embeddings_model ON image_embeddings(model)"),
+        # 0.33.0: events and trips. The clustering is recomputed from scratch
+        # on every `events detect`, so identity has to live here: an event a
+        # user renamed, or turned into an Apple Photos album, keeps its id when
+        # new photos arrive (see EventsDB.reconcile). trip_id groups
+        # consecutive same-place events into the tier above.
+        (
+            16,
+            """CREATE TABLE IF NOT EXISTS events (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL,
+                named_by    TEXT,
+                started_at  TEXT NOT NULL,
+                ended_at    TEXT NOT NULL,
+                place       TEXT,
+                trip_id     INTEGER,
+                detected_at TEXT NOT NULL
+            )""",
+        ),
+        (
+            16,
+            """CREATE TABLE IF NOT EXISTS event_members (
+                file_path TEXT PRIMARY KEY,
+                event_id  INTEGER NOT NULL REFERENCES events(id)
+            )""",
+        ),
+        (16, "CREATE INDEX IF NOT EXISTS idx_event_members_event ON event_members(event_id)"),
+        (16, "CREATE INDEX IF NOT EXISTS idx_events_started ON events(started_at)"),
+        (16, "CREATE INDEX IF NOT EXISTS idx_events_trip ON events(trip_id)"),
     )
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -246,6 +275,53 @@ class ProgressDB:
     def _search(self) -> SearchDB:
         """Semantic-search embedding helper bound to the current connection."""
         return SearchDB(self._conn)
+
+    @property
+    def _events(self) -> EventsDB:
+        """Event/trip helper bound to the current connection."""
+        return EventsDB(self._conn)
+
+    # --- events / trips (delegated to EventsDB) ---
+
+    def list_events(self, limit: int | None = None) -> list[dict]:
+        """Delegate to :meth:`EventsDB.list_events`."""
+        return self._events.list_events(limit)
+
+    def get_event(self, event_id: int) -> dict | None:
+        """Delegate to :meth:`EventsDB.get_event`."""
+        return self._events.get_event(event_id)
+
+    def event_paths(self, event_id: int) -> set[str]:
+        """Delegate to :meth:`EventsDB.event_paths`."""
+        return self._events.event_paths(event_id)
+
+    def event_for_path(self, file_path: str) -> int | None:
+        """Delegate to :meth:`EventsDB.event_for_path`."""
+        return self._events.event_for_path(file_path)
+
+    def event_stats(self) -> dict[str, int]:
+        """Delegate to :meth:`EventsDB.event_stats`."""
+        return self._events.event_stats()
+
+    def rename_event(self, event_id: int, name: str) -> bool:
+        """Delegate to :meth:`EventsDB.rename_event`."""
+        return self._events.rename_event(event_id, name)
+
+    def set_event_name(self, event_id: int, name: str, named_by: str) -> None:
+        """Delegate to :meth:`EventsDB.set_event_name`."""
+        self._events.set_event_name(event_id, name, named_by)
+
+    def unnamed_events(self) -> list[dict]:
+        """Delegate to :meth:`EventsDB.unnamed_events`."""
+        return self._events.unnamed_events()
+
+    def reconcile_events(self, clusters: list[dict]) -> dict[str, int]:
+        """Delegate to :meth:`EventsDB.reconcile`."""
+        return self._events.reconcile(clusters)
+
+    def clear_events(self) -> int:
+        """Delegate to :meth:`EventsDB.clear_events`."""
+        return self._events.clear_events()
 
     # --- semantic search (delegated to SearchDB) ---
 

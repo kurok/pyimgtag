@@ -37,6 +37,13 @@ def cmd_query(args: argparse.Namespace) -> int:
         return 1
 
     with ProgressDB(db_path=args.db) as db:
+        event_paths: set[str] | None = None
+        if getattr(args, "event", None) is not None:
+            if db.get_event(args.event) is None:
+                print(f"Error: no event with id {args.event}.", file=sys.stderr)
+                return 1
+            event_paths = db.event_paths(args.event)
+
         has_text: bool | None = None
         if args.has_text:
             has_text = True
@@ -59,6 +66,11 @@ def cmd_query(args: argparse.Namespace) -> int:
             # these is set; both are already validated ISO prefixes.
             date_prefix=getattr(args, "month", None) or getattr(args, "year", None),
         )
+        if event_paths is not None:
+            # Intersected here rather than pushed into SQL: event membership
+            # is its own table, and filtering the result keeps query_images a
+            # single shape for every caller.
+            results = [row for row in results if row["file_path"] in event_paths]
 
     if tags_any is not None:
         print(f"Matching tags: {', '.join(tags_any)}", file=sys.stderr)

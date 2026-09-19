@@ -65,15 +65,17 @@ src/pyimgtag/
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
   db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
-                       versioned migrations via PRAGMA user_version — latest is v15, which
-                       adds the image_embeddings table behind semantic search),
+                       versioned migrations via PRAGMA user_version — latest is v16, which
+                       adds the events/event_members tables behind `events`),
                        image_db (ImageDB — incl. the bbox / ISO date-prefix query filters),
                        face_db (FaceDB), judge_db (JudgeDB), insights_db (InsightsDB —
                        SQL-side library aggregation for `insights`), dedup_db (DedupDB —
                        dedup_groups/dedup_members plus the phash columns), map_db (MapDB —
                        zoom-binned GPS clustering + month/day timeline aggregates),
                        search_db (SearchDB — CLIP embedding blobs + brute-force cosine
-                       retrieval with a filter-then-rank path)
+                       retrieval with a filter-then-rank path), events_db (EventsDB —
+                       events/event_members plus the overlap reconciliation that keeps
+                       event ids stable across re-detection)
   insights_report.py   Terminal + self-contained HTML renderers for the insights document
   mcp_server.py        MCP (stdio) tool surface over the DB for AI assistants: read tools always
                        registered, write tools only with --enable-writes /
@@ -98,6 +100,12 @@ src/pyimgtag/
   commands/watch.py    `watch` polling daemon: stability gate, PID lock, graceful stop,
                        reuses commands/run._run_tagging for the actual tagging
   _face_dep_check.py   Friendly preflight for face_recognition_models
+  events.py            Spatiotemporal clustering into events and trips — pure functions
+                       over PhotoPoint records, no DB and no model call, so the boundary
+                       rules are testable against fabricated timelines
+  commands/events.py   `events detect|list|show|name|rename|apply`: naming sends metadata
+                       only (never image bytes); apply materializes albums as folders,
+                       Apple Photos albums (membership only) or Event/<name> keywords
   search/              Semantic search subpackage: embedder (Embedder protocol +
                        ClipOnnxEmbedder, so tests can substitute fixed vectors and never
                        download a model), model_cache (checksum-verified download of the
