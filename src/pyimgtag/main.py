@@ -1263,6 +1263,20 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     )
     judge_p.add_argument("--limit", type=int, metavar="N", help="Process at most N images")
     judge_p.add_argument(
+        "--include-video",
+        action="store_true",
+        help=(
+            "Also score video clips. The middle frame stands for the clip (a v1 "
+            "heuristic); needs ffmpeg on PATH"
+        ),
+    )
+    judge_p.add_argument(
+        "--video-extensions",
+        default=None,
+        metavar="EXTS",
+        help="Comma-separated video extensions (default: mp4,mov,m4v)",
+    )
+    judge_p.add_argument(
         "--min-score",
         type=float,
         metavar="SCORE",

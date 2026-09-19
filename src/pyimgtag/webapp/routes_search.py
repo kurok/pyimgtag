@@ -52,6 +52,10 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .card-score{font-size:12px;font-weight:700;color:var(--accent);
                 font-variant-numeric:tabular-nums}
     .card-name{font-size:11px;color:var(--muted);word-break:break-all;margin-top:2px}
+    .card{position:relative}
+    .media-badge{position:absolute;top:8px;right:8px;background:rgba(0,0,0,.72);
+                 color:#fff;border-radius:4px;padding:1px 6px;font-size:10px;
+                 font-weight:600;font-variant-numeric:tabular-nums}
     .empty{padding:40px 32px;color:var(--muted);font-size:14px}
     .empty code{background:var(--surface);padding:2px 6px;border-radius:4px;
                 font-family:ui-monospace,'SF Mono',monospace;font-size:12px}

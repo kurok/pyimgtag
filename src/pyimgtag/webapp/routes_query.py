@@ -48,6 +48,9 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
     .judge-high{color:#16a34a}
     .judge-mid{color:#d97706}
     .judge-low{color:var(--danger)}
+    .media-badge{display:inline-block;background:#1d1d1f;color:#fff;border-radius:4px;
+                 padding:1px 5px;font-size:10px;font-weight:600;margin-right:5px;
+                 font-variant-numeric:tabular-nums}
     .similar-link{font-size:11px;color:var(--accent);text-decoration:none;
                   white-space:nowrap}
     .similar-link:hover{text-decoration:underline}
@@ -274,11 +277,27 @@ async function search() {
     similar.textContent = 'similar';
     tdSimilar.appendChild(similar);
 
+    // A clip is labelled with its length: "is this the 40-minute one?" is the
+    // first question anyone asks of a video row.
+    if (row.media_type === 'video') {
+      const badge = document.createElement('span');
+      badge.className = 'media-badge';
+      badge.textContent = row.duration_sec ? formatDuration(row.duration_sec) : 'video';
+      tdFile.insertBefore(badge, tdFile.firstChild);
+    }
+
     const cells = [tdFile, tdDate, tdStatus, tdJudge, tdTags, tdCat, tdClean, tdLoc, tdSimilar];
     for (const td of cells) tr.appendChild(td);
     tbl.appendChild(tr);
   }
   wrap.appendChild(tbl);
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const m = Math.floor(total / 60);
+  const s = String(total % 60).padStart(2, '0');
+  return m + ':' + s;
 }
 
 function judgeColour(score) {
@@ -313,6 +332,8 @@ function showHoverThumb(row) {
   _hoverThumb.innerHTML = '';
   _hoverThumb.classList.remove('placeholder');
   const img = document.createElement('img');
+  // A clip has no still to hover, so the first frame the thumbnailer can get
+  // is what shows; the badge on the row already says it is a video.
   img.src = '/review/thumbnail?path=' + encodeURIComponent(row.file_path) + '&size=400';
   img.alt = row.file_name || '';
   img.addEventListener('error', () => {
