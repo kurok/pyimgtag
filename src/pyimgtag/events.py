@@ -228,6 +228,10 @@ def fallback_name(event: Event) -> str:
     places = event.places
     if places:
         return f"{places[0]} — {span}"
+    # Day written as an int rather than with strftime's %-d: that flag is a
+    # glibc/BSD extension and raises ValueError("Invalid format string") on
+    # Windows, where it would take down naming for the whole library.
+    start, end = event.started_at, event.ended_at
     if event.spans_days > 1:
-        return f"{event.started_at:%-d %b} – {event.ended_at:%-d %b %Y}"
-    return f"{event.started_at:%-d %B %Y}"
+        return f"{start.day} {start:%b} – {end.day} {end:%b %Y}"
+    return f"{start.day} {start:%B %Y}"

@@ -219,6 +219,26 @@ class TestFallbackName(unittest.TestCase):
         )
         self.assertTrue(fallback_name(event).startswith("Lisbon"))
 
+    def test_names_use_no_platform_specific_strftime_flags(self):
+        """%-d is a glibc/BSD extension; Windows raises on it.
+
+        Naming runs for every event in the library, so one unsupported flag
+        would take the feature down entirely on one of the three supported
+        platforms.
+        """
+        single = Event(members=[_point("a", datetime(2024, 6, 5, 10, 0))])
+        multi = Event(
+            members=[
+                _point("a", datetime(2024, 6, 5, 10, 0)),
+                _point("b", datetime(2024, 6, 7, 10, 0)),
+            ]
+        )
+        for event in (single, multi):
+            name = fallback_name(event)
+            self.assertTrue(name)
+            # The day is rendered unpadded, which is what %-d was there for.
+            self.assertIn("5", name)
+
     def test_naming_needs_no_model_and_no_network(self):
         """The deterministic path is what makes `events name` optional."""
         event = Event(members=[_point("a", datetime(2024, 1, 2, 8, 0))])
@@ -767,7 +787,6 @@ class TestAlbumApplescript(unittest.TestCase):
         self.assertEqual(add_to_album("Trip", []), (True, 0))
 
     def test_dry_run_reports_without_running_osascript(self):
-        import sys as _sys
         import unittest.mock as mock
 
         from pyimgtag.applescript_writer import add_to_album
@@ -778,7 +797,6 @@ class TestAlbumApplescript(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(count, 1)
         run.assert_not_called()
-        del _sys
 
     def test_it_refuses_cleanly_off_macos(self):
         import unittest.mock as mock
