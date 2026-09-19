@@ -215,6 +215,34 @@ class OllamaClient:
         resp.raise_for_status()
         return resp
 
+    def generate_text(self, prompt: str, max_tokens: int = 60) -> str:
+        """Ask the model a text-only question and return its reply.
+
+        Used by ``pyimgtag events name``, which describes an event in words
+        the tagger already extracted and asks for an album name. No image is
+        sent -- that is what makes naming cheap enough to run over a whole
+        library and lets a small local text model do it.
+
+        Raises:
+            requests.RequestException: On network or HTTP failure.
+        """
+        acquire_global_rate_limit()
+        resp = self._session.post(
+            f"{self.base_url}/api/chat",
+            json={
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                # No "format": "json" -- the answer is a phrase, not a document.
+                "stream": False,
+                "think": False,
+                "options": {"temperature": _MODEL_TEMPERATURE, "num_predict": max_tokens},
+            },
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        return str(payload.get("message", {}).get("content", "")).strip()
+
     def _prepare_image(self, file_path: str) -> str:
         """Backwards-compatible wrapper around :func:`prepare_image_b64`."""
         return prepare_image_b64(file_path, self.max_dim)

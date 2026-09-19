@@ -20,12 +20,17 @@ from pyimgtag.progress_db import ProgressDB
 # resolve a name to the photos it appears in.
 #
 # Added by query-by-example (#324): get_embedding, which reads back a stored
-# vector so `--similar-to` on an indexed photo needs no model. All additions;
+# vector so `--similar-to` on an indexed photo needs no model.
+#
+# Added by events & trips (#325): list_events, get_event, event_paths,
+# event_for_path, event_stats, rename_event, set_event_name, unnamed_events,
+# reconcile_events and clear_events delegate to EventsDB. All additions;
 # nothing has been removed or changed.
 EXPECTED_PUBLIC_API = [
     "all_phashes",
     "clear_auto_persons",
     "clear_embeddings",
+    "clear_events",
     "close",
     "confirm_person",
     "confirm_persons",
@@ -38,6 +43,9 @@ EXPECTED_PUBLIC_API = [
     "delete_persons",
     "delete_tag",
     "embedding_stats",
+    "event_for_path",
+    "event_paths",
+    "event_stats",
     "get_all_embeddings",
     "get_all_judge_results",
     "get_assigned_faces",
@@ -49,6 +57,7 @@ EXPECTED_PUBLIC_API = [
     "get_dedup_totals",
     "get_embedding",
     "get_embeddings_for_faces",
+    "get_event",
     "get_face_by_id",
     "get_face_count",
     "get_faces_by_uuid",
@@ -78,6 +87,7 @@ EXPECTED_PUBLIC_API = [
     "iter_image_paths",
     "iter_paths_missing_phash",
     "list_dedup_groups",
+    "list_events",
     "map_clusters",
     "mark_dedup_resolved",
     "mark_done",
@@ -89,7 +99,9 @@ EXPECTED_PUBLIC_API = [
     "paths_for_person_label",
     "query_images",
     "query_judge_results",
+    "reconcile_events",
     "record_dedup_action",
+    "rename_event",
     "rename_tag",
     "replace_unresolved_dedup_groups",
     "reset_all",
@@ -99,12 +111,14 @@ EXPECTED_PUBLIC_API = [
     "restore_face",
     "save_judge_result",
     "search_similar",
+    "set_event_name",
     "set_person_id",
     "set_phash",
     "timeline_days",
     "timeline_months",
     "unassign_face",
     "undo_dedup_group",
+    "unnamed_events",
     "update_image_cleanup",
     "update_image_tags",
     "update_missing_fields",

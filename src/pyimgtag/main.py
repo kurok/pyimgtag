@@ -194,6 +194,32 @@ Examples:
   pyimgtag search --similar-to IMG_4211.jpg --min-similarity 0.95
 """,
     ),
+    "events": (
+        "Group photos into events and trips, name them, make albums",
+        "Cluster the library into the unit people actually think in -- an\n"
+        "afternoon, a dinner, a week away -- from capture times and GPS the\n"
+        "tagger already stored. No model call and no new dependency: the\n"
+        "clustering is arithmetic over the DB. 'name' can ask a local text\n"
+        "model for better titles; without it every event still gets a\n"
+        "deterministic name.",
+        """\
+Examples:
+  pyimgtag events detect                        # cluster everything in the DB
+  pyimgtag events detect --gap-hours 8 --distance-km 50
+  pyimgtag events list                          # id, name, dates, trip, count
+  pyimgtag events list --unassigned             # photos with no capture date
+  pyimgtag events show 12
+
+  # Better names from a local text model (optional)
+  pyimgtag events name
+  pyimgtag events rename 12 "Anniversary dinner"
+
+  # Turn events into albums
+  pyimgtag events apply --export-dir ~/Albums   # a folder per event (symlinks)
+  pyimgtag events apply --photos-albums         # Apple Photos albums (macOS)
+  pyimgtag events apply --write-keywords        # Event/<name> in the file's metadata
+""",
+    ),
     "judge": (
         "Score photos with the professional photo-judge rubric",
         "Score photos 1-10 with the photo-judge rubric and print a ranked list.\n"
@@ -1001,6 +1027,12 @@ def _add_query_subcommand(subparsers: Any) -> None:
     )
     query_p.add_argument("--limit", type=int, help="Max results to return")
     query_p.add_argument(
+        "--event",
+        type=int,
+        metavar="ID",
+        help="Only photos in this event (see 'pyimgtag events list')",
+    )
+    query_p.add_argument(
         "--include-children",
         action="store_true",
         help=(
@@ -1103,6 +1135,90 @@ def _add_search_subcommand(subparsers: Any) -> None:
         metavar="YYYY-MM",
         type=_arg_type(parse_month),
         help="Only photos taken in this month",
+    )
+
+
+def _add_events_subcommand(subparsers: Any) -> None:
+    from pyimgtag.events import DEFAULT_DISTANCE_KM, DEFAULT_GAP_HOURS
+
+    events_p = _sub(subparsers, "events")
+    events_sub = events_p.add_subparsers(dest="events_action")
+
+    detect = events_sub.add_parser("detect", help="Cluster photos into events and trips")
+    detect.add_argument("--db", help=_DEFAULT_DB_HELP)
+    detect.add_argument(
+        "--gap-hours",
+        type=float,
+        default=DEFAULT_GAP_HOURS,
+        metavar="H",
+        help=f"A gap longer than this ends an event (default: {DEFAULT_GAP_HOURS})",
+    )
+    detect.add_argument(
+        "--distance-km",
+        type=float,
+        default=DEFAULT_DISTANCE_KM,
+        metavar="KM",
+        help=f"A jump further than this ends an event (default: {DEFAULT_DISTANCE_KM})",
+    )
+
+    listing = events_sub.add_parser("list", help="List detected events")
+    listing.add_argument("--db", help=_DEFAULT_DB_HELP)
+    listing.add_argument("--limit", type=int, help="Show at most N events")
+    listing.add_argument(
+        "--unassigned",
+        action="store_true",
+        help="List photos with no capture date instead (they belong to no event)",
+    )
+    listing.add_argument(
+        "--format", choices=["table", "json"], default="table", help="Output format"
+    )
+
+    show = events_sub.add_parser("show", help="Show one event and its photos")
+    show.add_argument("event_id", type=int, help="Event id from 'events list'")
+    show.add_argument("--db", help=_DEFAULT_DB_HELP)
+    show.add_argument("--format", choices=["table", "json"], default="table", help="Output format")
+
+    name = events_sub.add_parser("name", help="Name events with a local text model")
+    name.add_argument("--db", help=_DEFAULT_DB_HELP)
+    name.add_argument("--backend", help="Text backend (default: ollama, or PYIMGTAG_BACKEND)")
+    name.add_argument("--model", help="Model name for the backend")
+    name.add_argument("--ollama-url", help="Ollama base URL")
+    name.add_argument("--api-key", help="API key for a cloud backend")
+    name.add_argument(
+        "--fallback-only",
+        action="store_true",
+        help="Do not call any model; keep the deterministic generated names",
+    )
+    name.add_argument("-v", "--verbose", action="store_true", help="Print each name as it is set")
+
+    rename = events_sub.add_parser("rename", help="Give one event a name by hand")
+    rename.add_argument("event_id", type=int, help="Event id from 'events list'")
+    rename.add_argument("name", help="The new name")
+    rename.add_argument("--db", help=_DEFAULT_DB_HELP)
+
+    apply_p = events_sub.add_parser("apply", help="Materialize events as albums")
+    apply_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    apply_target = apply_p.add_mutually_exclusive_group()
+    apply_target.add_argument(
+        "--export-dir", metavar="DIR", help="Create a folder per event under DIR"
+    )
+    apply_target.add_argument(
+        "--photos-albums",
+        action="store_true",
+        help="Create Apple Photos albums and add the photos (macOS; adds membership only)",
+    )
+    apply_target.add_argument(
+        "--write-keywords",
+        action="store_true",
+        help="Write an Event/<name> keyword into each file's metadata",
+    )
+    apply_p.add_argument(
+        "--copy",
+        action="store_true",
+        help="With --export-dir, copy the files instead of symlinking them",
+    )
+    apply_p.add_argument(
+        "--dry-run", action="store_true", help="Report what would happen and change nothing"
     )
 
 
@@ -1407,6 +1523,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_query_subcommand(subparsers)
     _add_index_subcommand(subparsers)
     _add_search_subcommand(subparsers)
+    _add_events_subcommand(subparsers)
     _add_judge_subcommand(subparsers)
     _add_tags_subcommand(subparsers)
     _add_dedup_subcommand(subparsers)
@@ -1492,6 +1609,7 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.cleanup_drift import cmd_cleanup_drift
     from pyimgtag.commands.db import cmd_cleanup, cmd_reprocess, cmd_status
     from pyimgtag.commands.dedup import cmd_dedup
+    from pyimgtag.commands.events import cmd_events
     from pyimgtag.commands.faces import cmd_faces
     from pyimgtag.commands.insights import cmd_insights
     from pyimgtag.commands.judge import cmd_judge
@@ -1529,6 +1647,7 @@ def main(argv: list[str] | None = None) -> int:
         "query": lambda: cmd_query(args),
         "index": lambda: cmd_index(args),
         "search": lambda: cmd_search(args),
+        "events": lambda: cmd_events(args),
         "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
         "dedup": lambda: cmd_dedup(args),

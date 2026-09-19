@@ -157,6 +157,8 @@ brew install exiftool
 | Face management (Apple Photos) | ✅ | ❌ | ❌ |
 | Face naming via screen OCR (`capture-names`) | ✅ Vision OCR | ❌ | ❌ |
 | Semantic search (`index` / `search`) | ✅ | ✅ | ✅ |
+| Events & trips (`events detect` / `apply --export-dir`) | ✅ | ✅ | ✅ |
+| Events → Apple Photos albums (`apply --photos-albums`) | ✅ | ❌ | ❌ |
 
 **Note:** Most features work cross-platform. Apple Photos integration and face management are macOS-only — they require AppleScript via `osascript`. `faces capture-names` additionally uses Apple's Vision framework for OCR (the `[ocr]` extra).
 
@@ -612,6 +614,78 @@ scan, measured at **90 ms median** over 50,000 photos on CPU (best 79 ms, worst
 Embeddings are stored with the model that produced them. Vectors from different
 models are not comparable, so changing the model invalidates the index rather
 than silently mixing two spaces — `search` warns and tells you to `--rebuild`.
+
+#### `pyimgtag events` — events, trips, and albums
+
+The DB already knows *when* and *where* every photo was taken. `events` composes
+that into the unit people actually think in — an afternoon, a dinner, a week
+away — so albums stop being something you build by hand, photo by photo.
+
+```bash
+pyimgtag events detect                          # cluster everything in the DB
+pyimgtag events detect --gap-hours 8 --distance-km 50
+pyimgtag events list                            # id, name, dates, trip, count
+pyimgtag events show 12
+```
+
+**No model call and no new dependency.** Clustering is arithmetic over rows the
+tagger already wrote: photos are sorted by capture time and split wherever the
+clock or the map says the occasion ended — a gap longer than `--gap-hours`
+(default 6), or a jump further than `--distance-km` (default 50). Consecutive
+same-place events spanning more than one day are linked into a **trip**, so a
+week in Lisbon is one trip of seven days rather than seven unrelated events.
+
+| Case | Behaviour |
+|---|---|
+| No GPS | Clusters on time alone. Half of any archive predates GPS-tagged phones; refusing to group it would make the feature useless on exactly the photos people most want organised. |
+| One photo missing GPS | Not treated as travel. A single missing reading must not split an afternoon in half. |
+| No capture date | Left unassigned rather than guessed at — `pyimgtag events list --unassigned`. |
+
+**Names.** Every event gets a deterministic name immediately (`Lisbon — June
+2024`), so naming is optional rather than a prerequisite:
+
+```bash
+pyimgtag events name                            # better names from a local text model
+pyimgtag events name --fallback-only            # keep the generated ones
+pyimgtag events rename 12 "Anniversary dinner"
+```
+
+The prompt carries **metadata only** — dates, places, common tags, event hints,
+named people — never image bytes. That is what makes naming cheap enough to run
+over a whole library, and it means no photo reaches a backend that never saw
+one. A name you set by hand is never overwritten by a later `events name`.
+
+> **Backend support:** naming currently runs against `--backend ollama` only.
+> The cloud clients are vision clients — their payloads are built around an
+> image part — so a text-only call needs work that is not done yet. A cloud
+> backend says so and leaves the generated names in place.
+
+**Albums.**
+
+```bash
+pyimgtag events apply --export-dir ~/Albums     # a folder per event (symlinks)
+pyimgtag events apply --export-dir ~/Albums --copy
+pyimgtag events apply --photos-albums           # Apple Photos albums (macOS)
+pyimgtag events apply --write-keywords          # Event/<name> into the file's metadata
+```
+
+`--export-dir` symlinks by default: an album of 4,000 photos should not double
+the library's size to exist. Two events that share a generated name — the
+consecutive days of one trip do — get distinct folders rather than silently
+merging.
+
+`--photos-albums` adds **album membership only**. Nothing is moved, renamed or
+deleted in your Photos library, so it is safe to run against a curated one.
+
+Events compose with the rest of the query surface:
+
+```bash
+pyimgtag query --event 12 --format paths
+```
+
+Re-running `detect` is safe and incremental: an event still holding most of its
+photos keeps its id, so a rename — or an album built from it — survives new
+photos arriving.
 
 #### `pyimgtag watch` — continuous tagging
 

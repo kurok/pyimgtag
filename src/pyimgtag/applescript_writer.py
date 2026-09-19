@@ -443,6 +443,100 @@ def _build_reveal_applescript(file_name: str) -> str:
     )
 
 
+def _build_album_applescript(album_name: str, file_names: list[str]) -> str:
+    """AppleScript that ensures an album exists and adds photos to it.
+
+    Deliberately additive. The script creates the album when it is missing and
+    adds membership; it never removes a photo from an album, moves it, or
+    deletes anything. An album the user has curated by hand only ever gains
+    the photos this event contains.
+    """
+    safe_album = _escape_applescript_string(album_name)
+    lookups = "\n".join(
+        f"{_filename_scan_block(_escape_applescript_string(name), indent='    ')}\n"
+        f"    if found is not missing value then set end of matches to found"
+        for name in file_names
+    )
+    return f"""tell application "Photos"
+  set albumName to "{safe_album}"
+  set targetAlbum to missing value
+  repeat with a in albums
+    if name of a is albumName then
+      set targetAlbum to a
+      exit repeat
+    end if
+  end repeat
+  if targetAlbum is missing value then
+    set targetAlbum to make new album named albumName
+  end if
+  set matches to {{}}
+{lookups}
+  if (count of matches) > 0 then
+    add matches to targetAlbum
+  end if
+  return (count of matches)
+end tell"""
+
+
+def add_to_album(
+    album_name: str, file_paths: list[str], *, dry_run: bool = False
+) -> tuple[bool, int]:
+    """Add photos to a (possibly new) Apple Photos album.
+
+    **macOS only.** Membership is the only thing written: nothing is moved,
+    renamed or deleted, so running this against a curated library is safe.
+
+    Args:
+        album_name: Album to create or reuse.
+        file_paths: Full paths; only the basenames are used for lookup, the
+            same way :func:`write_to_photos` finds a photo.
+        dry_run: Build the script and report what would happen without
+            running osascript.
+
+    Returns:
+        ``(ok, photos_added)``. *ok* is False when osascript failed; the
+        error has already been printed.
+    """
+    if not file_paths:
+        return True, 0
+    if not _IS_MACOS:
+        return False, 0
+
+    names = [PurePosixPath(p).name for p in file_paths]
+    script = _build_album_applescript(album_name, names)
+    if dry_run:
+        return True, len(names)
+
+    if not is_applescript_available():
+        print("osascript is not available on this system", file=sys.stderr)
+        return False, 0
+
+    try:
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"osascript timed out adding to album {album_name!r}", file=sys.stderr)
+        return False, 0
+    except OSError as exc:
+        print(f"Failed to launch osascript: {exc}", file=sys.stderr)
+        return False, 0
+
+    if proc.returncode != 0:
+        print(
+            f"AppleScript error for album {album_name!r}: {proc.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return False, 0
+    try:
+        return True, int(proc.stdout.strip() or 0)
+    except ValueError:
+        return True, 0
+
+
 def reveal_in_photos(file_path: str) -> str | None:
     """Activate Apple Photos and reveal the matching item.
 

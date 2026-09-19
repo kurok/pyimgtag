@@ -14,13 +14,14 @@ def test_render_nav_includes_all_links():
         'href="/tags"',
         'href="/query"',
         'href="/search"',
+        'href="/events"',
         'href="/judge"',
     ):
         assert href in html, f"missing {href}"
 
 
 def test_render_nav_marks_active_section():
-    for section in ("dashboard", "review", "faces", "tags", "query", "search", "judge"):
+    for section in ("dashboard", "review", "faces", "tags", "query", "search", "events", "judge"):
         html = render_nav(section)
         assert "nav-link active" in html
 
