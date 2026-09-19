@@ -192,6 +192,14 @@ select = ["E", "F", "W", "I"]
 "tests/test_mcp_server.py" = ["E402"]
 
 [tool.uv]
-# Transitive via pip-audit (the `security` extra). Floor for GHSA-qwm4-qh6w-59xr /
-# CVE-2026-13346 (doubly-encoded index URLs), fixed in pip 26.2.0.
-constraint-dependencies = ["pip>=26.2.0"]
+# Floors for advisories in packages we never depend on directly, so a future
+# relock cannot resolve back below the fixed version.
+constraint-dependencies = [
+    # Transitive via pip-audit (the `security` extra). GHSA-qwm4-qh6w-59xr /
+    # CVE-2026-13346, doubly-encoded index URLs, fixed in pip 26.2.0.
+    "pip>=26.2.0",
+    # Transitive via osxphotos -> beautifulsoup4 (the `photos-db` extra).
+    # GHSA-j934-xhv5-fg8f and GHSA-gjv8-xp57-g29c, two polynomial-time ReDoS
+    # holes in the CSS-selector parser, both fixed in soupsieve 2.9.0.
+    "soupsieve>=2.9.0",
+]
