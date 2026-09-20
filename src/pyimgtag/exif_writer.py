@@ -95,13 +95,16 @@ def _run_exiftool(args: list[str], *, timeout: int = 30) -> subprocess.Completed
             # them would change what the argument means.
             if sep and "\n" in value and not tag.endswith(("+", "-", "<")):
                 value_file = tmp / f"value{index}"
-                value_file.write_text(value, encoding="utf-8")
+                # newline="" disables the translation that would turn every
+                # \n into \r\n on Windows -- exiftool reads this file whole,
+                # so the CR would land in the description itself.
+                value_file.write_text(value, encoding="utf-8", newline="")
                 lines.append(f"{tag}<={value_file}")
             else:
                 lines.append(arg)
 
         argfile = tmp / "args.txt"
-        argfile.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        argfile.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
         proc = subprocess.run(  # noqa: S603  # nosec B603 B607
             [args[0], "-charset", "UTF8", "-@", str(argfile)],

@@ -838,6 +838,24 @@ class TestRunExiftool:
         assert lines[1] == "/p/a.jpg"
         assert list(seen["siblings"].values()) == ["line one\nline two"]
 
+    def test_a_spilled_value_keeps_its_line_endings(self):
+        """write_text would translate \n to \r\n on Windows.
+
+        exiftool reads the spilled file whole, so the CR would land inside the
+        description -- a corruption introduced by the very code meant to stop
+        one. Caught by CI on windows-latest, not by review.
+        """
+        seen, _ = self._captured_argfile(
+            ["exiftool", "-XMP:Description=line one\nline two", "/p/a.jpg"]
+        )
+        spilled = next(iter(seen["siblings"].values()))
+        assert spilled == "line one\nline two"
+        assert "\r" not in spilled
+
+    def test_the_argfile_itself_uses_plain_newlines(self):
+        seen, _ = self._captured_argfile(["exiftool", "-XMP:Subject=x", "/p/a.jpg"])
+        assert "\r" not in seen["text"]
+
     def test_a_single_line_value_stays_inline(self):
         """Spilling everything would make every argument unreadable in a log."""
         seen, _ = self._captured_argfile(["exiftool", "-XMP:Description=one line", "/p/a.jpg"])
@@ -908,7 +926,14 @@ class TestNonAsciiRoundTrip:
         assert data["Subject"] == ["Óbidos", "José", "Kraków"]
         assert data["Description"] == "Sunset at Óbidos"
         assert data["HierarchicalSubject"] == "Places|Portugal|Leiria|Óbidos"
-        assert "?" not in json.dumps(data, ensure_ascii=False)
+
+        # Deliberately not asserting over the whole JSON: exiftool echoes
+        # SourceFile back through its own filename charset, which is the system
+        # code page on Windows, so the path in the *output* can read "?bidos"
+        # for a file it nonetheless opened and wrote correctly -- as the three
+        # assertions above, all read back from that very path, show.
+        values = [data["Description"], data["HierarchicalSubject"], *data["Subject"]]
+        assert not any("?" in v for v in values), values
 
     @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
     def test_a_multiline_description_is_not_truncated(self, tmp_path):
