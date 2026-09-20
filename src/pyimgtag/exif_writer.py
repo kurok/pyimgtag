@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess  # nosec B404
+import tempfile
 from pathlib import Path
 
 # Date tags that exiftool might silently update when writing other fields.
@@ -60,11 +61,70 @@ RAW_SIDECAR_ONLY_EXTENSIONS: frozenset[str] = frozenset(
 )
 
 
+def _run_exiftool(args: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess:
+    """Invoke exiftool with *args*, handing the arguments over in a UTF-8 file.
+
+    ``args[0]`` is the executable; everything after it is what exiftool would
+    otherwise have been given on the command line.
+
+    Values do not go on the command line any more. On Windows the C runtime
+    converts the command line to the active code page before Perl reads argv,
+    and every character that code page cannot represent becomes a literal
+    ``?`` -- in the written file, unrecoverably. A geocoded ``\u00d3bidos``
+    was stored as ``?bidos``. An argument file is read as UTF-8 while
+    ``-charset UTF8`` is in force, so the bytes arrive intact on every
+    platform, and file paths travel the same way for the same reason.
+
+    One argument per line is literal in an argument file, so a value containing
+    a newline -- a model-written description, typically -- would be read as a
+    second argument and then as a filename, leaving the tag truncated while
+    exiftool still reports files updated. Those values are spilled to their own
+    file and passed as ``-TAG<=FILE``, which exiftool reads whole.
+
+    stdout and stderr come back decoded as UTF-8 rather than by locale, for the
+    same reason the input is written as UTF-8.
+    """
+    with tempfile.TemporaryDirectory(prefix="pyimgtag-exiftool-") as tmpdir:
+        tmp = Path(tmpdir)
+        lines: list[str] = []
+
+        for index, arg in enumerate(args[1:]):
+            tag, sep, value = arg.partition("=")
+            # Only a plain assignment can be spilled: '+=' and '-=' are list
+            # operators and '<=' is already the file form, so rewriting any of
+            # them would change what the argument means.
+            if sep and "\n" in value and not tag.endswith(("+", "-", "<")):
+                value_file = tmp / f"value{index}"
+                # newline="" disables the translation that would turn every
+                # \n into \r\n on Windows -- exiftool reads this file whole,
+                # so the CR would land in the description itself.
+                value_file.write_text(value, encoding="utf-8", newline="")
+                lines.append(f"{tag}<={value_file}")
+            else:
+                lines.append(arg)
+
+        argfile = tmp / "args.txt"
+        argfile.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
+
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
+            [args[0], "-charset", "UTF8", "-@", str(argfile)],
+            capture_output=True,
+            timeout=timeout,
+        )
+
+    return subprocess.CompletedProcess(
+        proc.args,
+        proc.returncode,
+        proc.stdout.decode("utf-8", "replace"),
+        proc.stderr.decode("utf-8", "replace"),
+    )
+
+
 def _read_date_fields(file_path: str) -> dict[str, str] | None:
     """Read existing date fields from the image so we can restore them after writing."""
     try:
         args = ["exiftool", "-json", "-n"] + [f"-{tag}" for tag in _DATE_TAGS] + [file_path]
-        proc = subprocess.run(args, capture_output=True, text=True, timeout=10)  # noqa: S603  # nosec B603 B607
+        proc = _run_exiftool(args, timeout=10)
         if proc.returncode != 0:
             return None
         data = json.loads(proc.stdout)
@@ -211,12 +271,7 @@ def write_exif_description(
     args.append(file_path)
 
     try:
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            args,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        proc = _run_exiftool(args, timeout=30)
     except subprocess.TimeoutExpired:
         return "exiftool timed out after 30 seconds"
     except OSError as exc:
@@ -300,12 +355,7 @@ def write_xmp_sidecar(
         args += ["-o", str(sidecar_path), file_path]
 
     try:
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            args,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        proc = _run_exiftool(args, timeout=30)
     except subprocess.TimeoutExpired:
         return "exiftool timed out after 30 seconds"
     except OSError as exc:
@@ -337,7 +387,7 @@ def read_existing_metadata(file_path: str) -> dict[str, object]:
     target = str(sidecar) if sidecar.exists() else file_path
 
     try:
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
+        proc = _run_exiftool(
             [
                 "exiftool",
                 "-json",
@@ -347,8 +397,6 @@ def read_existing_metadata(file_path: str) -> dict[str, object]:
                 "-Subject",
                 target,
             ],
-            capture_output=True,
-            text=True,
             timeout=10,
         )
         if proc.returncode != 0 or not proc.stdout.strip():

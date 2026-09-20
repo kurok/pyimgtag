@@ -12,8 +12,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
-import sys  # nosec B404
+import subprocess  # nosec B404
 from pathlib import Path
 from unittest.mock import patch
 
@@ -44,16 +43,6 @@ CHECKLIST = REPO_ROOT / "docs" / "interop-verification.md"
 
 requires_exiftool = pytest.mark.skipif(
     not shutil.which("exiftool"), reason="requires exiftool on PATH"
-)
-
-#: On Windows the accented city is stored as "?bidos": the value is destroyed
-#: in the argv code-page conversion before exiftool ever sees it (#366). Marked
-#: strict, so the day that is fixed these fail and the marker comes off rather
-#: than sitting here forever saying a bug exists that no longer does.
-windows_mangles_non_ascii = pytest.mark.xfail(
-    sys.platform == "win32",
-    reason="#366: non-ASCII metadata values are written as '?' on Windows",
-    strict=True,
 )
 
 
@@ -276,7 +265,6 @@ class TestExiftoolRoundTrip:
         return json.loads(proc.stdout.decode("utf-8"))[0]
 
     @requires_exiftool
-    @windows_mangles_non_ascii
     def test_the_embedded_image_carries_the_documented_tree(self, tmp_path):
         build_fixture(tmp_path)
         data = self._read(tmp_path / EMBEDDED_NAME)
@@ -287,7 +275,6 @@ class TestExiftoolRoundTrip:
         assert data["Subject"] == flat_keywords()
 
     @requires_exiftool
-    @windows_mangles_non_ascii
     def test_the_sidecar_carries_the_same_tree(self, tmp_path):
         build_fixture(tmp_path)
         data = self._read((tmp_path / SIDECAR_NAME).with_suffix(".xmp"))

@@ -121,10 +121,6 @@ def build_fixture(out_dir: str | Path) -> list[Path]:
     companion ``.xmp``. Both paths need checking, because a DAM can read
     embedded metadata happily and ignore sidecars, or the reverse.
 
-    Generate on macOS or Linux. On Windows non-ASCII values are written as a
-    literal ``?`` (#366), so the accented city would go into the file already
-    broken and the import check would blame the wrong thing.
-
     Raises:
         RuntimeError: if exiftool is missing, or a write fails. Half a fixture
             would be worse than none -- it would be imported and believed.

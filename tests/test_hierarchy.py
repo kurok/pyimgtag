@@ -133,7 +133,7 @@ class TestHierarchicalExifArgs(unittest.TestCase):
         ok.stdout = ""
         ok.stderr = ""
         with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
-            with patch("pyimgtag.exif_writer.subprocess.run", return_value=ok) as run:
+            with patch("pyimgtag.exif_writer._run_exiftool", return_value=ok) as run:
                 write_exif_description("/photos/a.jpg", **kwargs)
         return list(run.call_args_list[-1].args[0])
 
@@ -157,7 +157,7 @@ class TestHierarchicalExifArgs(unittest.TestCase):
         ok.stdout = ""
         ok.stderr = ""
         with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
-            with patch("pyimgtag.exif_writer.subprocess.run", return_value=ok) as run:
+            with patch("pyimgtag.exif_writer._run_exiftool", return_value=ok) as run:
                 with patch("pyimgtag.exif_writer._read_date_fields", return_value=None):
                     write_exif_description(
                         "/photos/a.jpg",
@@ -199,7 +199,7 @@ class TestHierarchicalExifArgs(unittest.TestCase):
     def test_nothing_at_all_still_short_circuits(self):
         from pyimgtag.exif_writer import write_exif_description
 
-        with patch("pyimgtag.exif_writer.subprocess.run") as run:
+        with patch("pyimgtag.exif_writer._run_exiftool") as run:
             self.assertIsNone(write_exif_description("/photos/a.jpg"))
         run.assert_not_called()
 
@@ -213,7 +213,7 @@ class TestSidecarHierarchical(unittest.TestCase):
         ok.stdout = ""
         ok.stderr = ""
         with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
-            with patch("pyimgtag.exif_writer.subprocess.run", return_value=ok) as run:
+            with patch("pyimgtag.exif_writer._run_exiftool", return_value=ok) as run:
                 write_xmp_sidecar(str(tmp / "raw.dng"), **kwargs)
         return list(run.call_args_list[-1].args[0])
 

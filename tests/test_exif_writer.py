@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
-import sys
+import subprocess  # nosec B404
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +14,7 @@ from pyimgtag.exif_writer import (
     RAW_SIDECAR_ONLY_EXTENSIONS,
     SUPPORTED_DIRECT_WRITE_EXTENSIONS,
     _read_date_fields,
+    _run_exiftool,
     diff_metadata,
     is_exiftool_available,
     read_existing_metadata,
@@ -60,7 +61,7 @@ class TestWriteExifDescription:
     def _patch_run(self, *side_effects):
         """Helper: patch subprocess.run with sequential return values."""
         return patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=list(side_effects),
         )
 
@@ -238,7 +239,7 @@ class TestWriteExifDescriptionFormats:
 
     def _patch_run(self, *side_effects):
         return patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=list(side_effects),
         )
 
@@ -306,7 +307,7 @@ class TestWriteExifDescriptionFormats:
 class TestWriteXmpSidecar:
     def _patch_run(self, *side_effects):
         return patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=list(side_effects),
         )
 
@@ -390,7 +391,7 @@ class TestWriteXmpSidecar:
 class TestReadExistingMetadata:
     def _patch_run(self, stdout="", returncode=0):
         mock = _make_completed_process(returncode, stdout=stdout)
-        return patch("pyimgtag.exif_writer.subprocess.run", return_value=mock)
+        return patch("pyimgtag.exif_writer._run_exiftool", return_value=mock)
 
     def test_returns_description_and_keywords(self, tmp_path):
         src = tmp_path / "photo.jpg"
@@ -431,7 +432,7 @@ class TestReadExistingMetadata:
         sidecar = tmp_path / "photo.xmp"
         sidecar.touch()
         mock = _make_completed_process(0, stdout="[]")
-        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock) as mock_run:
+        with patch("pyimgtag.exif_writer._run_exiftool", return_value=mock) as mock_run:
             read_existing_metadata(str(src))
             cmd = mock_run.call_args_list[0][0][0]
             assert str(sidecar) in cmd
@@ -493,7 +494,7 @@ class TestReadDateFields:
         src = tmp_path / "photo.jpg"
         src.touch()
         mock = _make_completed_process(0, stdout="[]")
-        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+        with patch("pyimgtag.exif_writer._run_exiftool", return_value=mock):
             assert _read_date_fields(str(src)) is None
 
     def test_returns_only_date_tags_with_values(self, tmp_path):
@@ -510,7 +511,7 @@ class TestReadDateFields:
             ]
         )
         mock = _make_completed_process(0, stdout=payload)
-        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+        with patch("pyimgtag.exif_writer._run_exiftool", return_value=mock):
             result = _read_date_fields(str(src))
         assert result == {"DateTimeOriginal": "2026:04:01 10:30:00"}
 
@@ -519,7 +520,7 @@ class TestReadDateFields:
         src = tmp_path / "photo.jpg"
         src.touch()
         with patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=subprocess.TimeoutExpired(cmd="exiftool", timeout=10),
         ):
             assert _read_date_fields(str(src)) is None
@@ -529,7 +530,7 @@ class TestReadDateFields:
         src = tmp_path / "photo.jpg"
         src.touch()
         mock = _make_completed_process(0, stdout="not json {{{")
-        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+        with patch("pyimgtag.exif_writer._run_exiftool", return_value=mock):
             assert _read_date_fields(str(src)) is None
 
     def test_oserror_returns_none(self, tmp_path):
@@ -537,7 +538,7 @@ class TestReadDateFields:
         src = tmp_path / "photo.jpg"
         src.touch()
         with patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=OSError("exiftool missing"),
         ):
             assert _read_date_fields(str(src)) is None
@@ -548,7 +549,7 @@ class TestWriteXmpSidecarErrors:
 
     def _patch_run(self, *side_effects):
         return patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=list(side_effects),
         )
 
@@ -581,7 +582,7 @@ class TestReadExistingMetadataErrors:
         src = tmp_path / "photo.jpg"
         src.touch()
         with patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=subprocess.TimeoutExpired(cmd="exiftool", timeout=10),
         ):
             result = read_existing_metadata(str(src))
@@ -591,7 +592,7 @@ class TestReadExistingMetadataErrors:
         src = tmp_path / "photo.jpg"
         src.touch()
         mock = _make_completed_process(0, stdout="garbage {{{")
-        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+        with patch("pyimgtag.exif_writer._run_exiftool", return_value=mock):
             result = read_existing_metadata(str(src))
         assert result == {"description": None, "keywords": []}
 
@@ -599,7 +600,7 @@ class TestReadExistingMetadataErrors:
         src = tmp_path / "photo.jpg"
         src.touch()
         with patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=OSError("exiftool missing"),
         ):
             result = read_existing_metadata(str(src))
@@ -610,7 +611,7 @@ class TestReadExistingMetadataErrors:
         src = tmp_path / "photo.jpg"
         src.touch()
         mock = _make_completed_process(0, stdout="[]")
-        with patch("pyimgtag.exif_writer.subprocess.run", return_value=mock):
+        with patch("pyimgtag.exif_writer._run_exiftool", return_value=mock):
             result = read_existing_metadata(str(src))
         assert result == {"description": None, "keywords": []}
 
@@ -662,7 +663,7 @@ class TestIptcCharsetDeclaration:
 
     def _patch_run(self, *side_effects):
         return patch(
-            "pyimgtag.exif_writer.subprocess.run",
+            "pyimgtag.exif_writer._run_exiftool",
             side_effect=list(side_effects),
         )
 
@@ -736,19 +737,13 @@ class TestIptcCharsetDeclaration:
         assert data["CodedCharacterSet"] == "UTF8"
 
     @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
-    @pytest.mark.xfail(
-        sys.platform == "win32",
-        reason="#366: non-ASCII metadata values are written as '?' on Windows",
-        strict=True,
-    )
     def test_the_declared_values_survive(self, tmp_path):
         """Declaring the charset is worth nothing if the bytes arrive broken.
 
-        On Windows they do, for an unrelated reason: the values are destroyed
-        in the argv code-page conversion before exiftool sees them (#366), so
-        the record correctly declares UTF-8 over content that is already
-        '?bidos'. Marked strict, so this fails once #366 is fixed and the
-        marker comes off.
+        They used to on Windows, destroyed in the argv code-page conversion
+        before exiftool saw them, so the record correctly declared UTF-8 over
+        content that was already '?bidos'. #366 moved the handover into a
+        UTF-8 argument file and this now runs everywhere.
         """
         photo = self._write_accented(tmp_path, "a.jpg")
         data = _exiftool_json(photo, "-IPTC:Keywords", "-IPTC:Caption-Abstract")
@@ -766,3 +761,191 @@ class TestIptcCharsetDeclaration:
 
         data = _exiftool_json(photo, "-IPTC:CodedCharacterSet")
         assert "CodedCharacterSet" not in data
+
+
+class TestRunExiftool:
+    """How the arguments are handed over, which is the whole of #366.
+
+    Everything else in this file asserts the argument vector; these assert what
+    becomes of it, because on Windows the vector was correct and the file was
+    not.
+    """
+
+    @staticmethod
+    def _captured_argfile(args, stdout=b"", returncode=0):
+        """Run the helper against a mocked subprocess and return the argfile text.
+
+        The file is inside a TemporaryDirectory that is gone by the time the
+        helper returns, so it has to be read from within the mock.
+        """
+        seen = {}
+
+        def _fake_run(cmd, **kwargs):
+            seen["cmd"] = cmd
+            seen["text"] = Path(cmd[-1]).read_text(encoding="utf-8")
+            seen["dir"] = Path(cmd[-1]).parent
+            seen["siblings"] = {
+                p.name: p.read_text(encoding="utf-8")
+                for p in Path(cmd[-1]).parent.iterdir()
+                if p.name != "args.txt"
+            }
+            return subprocess.CompletedProcess(cmd, returncode, stdout, b"")
+
+        with patch("pyimgtag.exif_writer.subprocess.run", side_effect=_fake_run):
+            proc = _run_exiftool(args)
+        return seen, proc
+
+    def test_the_values_go_in_a_file_not_on_the_command_line(self):
+        seen, _ = self._captured_argfile(
+            ["exiftool", "-overwrite_original", "-XMP:Subject=Óbidos", "/p/a.jpg"]
+        )
+
+        assert seen["cmd"][:4] == ["exiftool", "-charset", "UTF8", "-@"]
+        assert "Óbidos" not in " ".join(seen["cmd"])
+        assert seen["text"].splitlines() == [
+            "-overwrite_original",
+            "-XMP:Subject=Óbidos",
+            "/p/a.jpg",
+        ]
+
+    def test_the_file_is_utf8_whatever_the_locale(self, tmp_path):
+        """The bytes on disk are what exiftool reads; the locale must not matter."""
+        captured = {}
+
+        def _fake_run(cmd, **kwargs):
+            captured["bytes"] = Path(cmd[-1]).read_bytes()
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        with patch("pyimgtag.exif_writer.subprocess.run", side_effect=_fake_run):
+            _run_exiftool(["exiftool", "-XMP:Subject=Óbidos", "/p/a.jpg"])
+
+        assert "Óbidos".encode() in captured["bytes"]
+
+    def test_a_value_with_a_newline_is_spilled_to_its_own_file(self):
+        """One argument per line is literal, so a newline would split the value.
+
+        exiftool would read the second line as a filename, truncate the tag,
+        and still report the file updated -- a caller checking only for success
+        would never notice.
+        """
+        seen, _ = self._captured_argfile(
+            ["exiftool", "-XMP:Description=line one\nline two", "/p/a.jpg"]
+        )
+
+        lines = seen["text"].splitlines()
+        assert len(lines) == 2, lines
+        assert lines[0].startswith("-XMP:Description<=")
+        assert lines[1] == "/p/a.jpg"
+        assert list(seen["siblings"].values()) == ["line one\nline two"]
+
+    def test_a_spilled_value_keeps_its_line_endings(self):
+        """write_text would translate \n to \r\n on Windows.
+
+        exiftool reads the spilled file whole, so the CR would land inside the
+        description -- a corruption introduced by the very code meant to stop
+        one. Caught by CI on windows-latest, not by review.
+        """
+        seen, _ = self._captured_argfile(
+            ["exiftool", "-XMP:Description=line one\nline two", "/p/a.jpg"]
+        )
+        spilled = next(iter(seen["siblings"].values()))
+        assert spilled == "line one\nline two"
+        assert "\r" not in spilled
+
+    def test_the_argfile_itself_uses_plain_newlines(self):
+        seen, _ = self._captured_argfile(["exiftool", "-XMP:Subject=x", "/p/a.jpg"])
+        assert "\r" not in seen["text"]
+
+    def test_a_single_line_value_stays_inline(self):
+        """Spilling everything would make every argument unreadable in a log."""
+        seen, _ = self._captured_argfile(["exiftool", "-XMP:Description=one line", "/p/a.jpg"])
+        assert "-XMP:Description=one line" in seen["text"].splitlines()
+        assert seen["siblings"] == {}
+
+    def test_list_operators_are_never_rewritten(self):
+        """'+=' and '-=' mean something; '<=' would silently change it."""
+        seen, _ = self._captured_argfile(
+            ["exiftool", "-IPTC:Keywords+=a\nb", "-IPTC:Keywords-=c\nd", "/p/a.jpg"]
+        )
+        lines = seen["text"].splitlines()
+        assert "<=" not in "".join(lines)
+        assert seen["siblings"] == {}
+
+    def test_an_empty_value_survives_as_an_empty_value(self):
+        """'-XMP:Subject=' is the clear-the-list idiom, not a blank line."""
+        seen, _ = self._captured_argfile(["exiftool", "-XMP:Subject=", "/p/a.jpg"])
+        assert "-XMP:Subject=" in seen["text"].splitlines()
+
+    def test_output_is_decoded_as_utf8_not_by_locale(self):
+        _, proc = self._captured_argfile(
+            ["exiftool", "-json", "/p/a.jpg"], stdout="Óbidos".encode()
+        )
+        assert proc.stdout == "Óbidos"
+
+    def test_undecodable_output_does_not_raise(self):
+        """A truncated read should degrade, not take down the caller."""
+        _, proc = self._captured_argfile(["exiftool", "-json", "/p/a.jpg"], stdout=b"\xff\xfe")
+        assert isinstance(proc.stdout, str)
+
+    def test_the_return_code_is_passed_through(self):
+        _, proc = self._captured_argfile(["exiftool", "/p/a.jpg"], returncode=2)
+        assert proc.returncode == 2
+
+    def test_the_temporary_directory_does_not_outlive_the_call(self):
+        seen, _ = self._captured_argfile(["exiftool", "-XMP:Subject=x", "/p/a.jpg"])
+        assert not seen["dir"].exists()
+
+
+class TestNonAsciiRoundTrip:
+    """#366: the bug was in the file, not in the argument vector."""
+
+    @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
+    def test_accented_keywords_and_paths_survive(self, tmp_path):
+        from PIL import Image
+
+        # The directory name is non-ASCII too: paths went through the same
+        # conversion as values, so a photo under ~/Fotos/Óbidos was the same bug.
+        folder = tmp_path / "Óbidos"
+        folder.mkdir()
+        photo = folder / "praça.jpg"
+        Image.new("RGB", (16, 16), (9, 9, 9)).save(photo)
+
+        assert (
+            write_exif_description(
+                str(photo),
+                description="Sunset at Óbidos",
+                keywords=["Óbidos", "José", "Kraków"],
+                hierarchical=["Places|Portugal|Leiria|Óbidos"],
+            )
+            is None
+        )
+
+        data = _exiftool_json(
+            photo, "-XMP:Subject", "-XMP:Description", "-XMP-lr:HierarchicalSubject"
+        )
+        assert data["Subject"] == ["Óbidos", "José", "Kraków"]
+        assert data["Description"] == "Sunset at Óbidos"
+        assert data["HierarchicalSubject"] == "Places|Portugal|Leiria|Óbidos"
+
+        # Deliberately not asserting over the whole JSON: exiftool echoes
+        # SourceFile back through its own filename charset, which is the system
+        # code page on Windows, so the path in the *output* can read "?bidos"
+        # for a file it nonetheless opened and wrote correctly -- as the three
+        # assertions above, all read back from that very path, show.
+        values = [data["Description"], data["HierarchicalSubject"], *data["Subject"]]
+        assert not any("?" in v for v in values), values
+
+    @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
+    def test_a_multiline_description_is_not_truncated(self, tmp_path):
+        """The argfile hazard: exiftool reports success while losing line two."""
+        from PIL import Image
+
+        photo = tmp_path / "a.jpg"
+        Image.new("RGB", (16, 16), (9, 9, 9)).save(photo)
+
+        assert (
+            write_exif_description(str(photo), description="line one\nline two with Óbidos") is None
+        )
+
+        data = _exiftool_json(photo, "-XMP:Description")
+        assert data["Description"] == "line one\nline two with Óbidos"
