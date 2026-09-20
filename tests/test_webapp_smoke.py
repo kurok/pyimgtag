@@ -41,6 +41,24 @@ from pyimgtag.webapp.unified_app import create_unified_app
 _TEST_FILE_NAME = "DSC00042.jpg"
 
 
+def _wait_for_worker(client, *, timeout: float = 15.0, poll: float = 0.025) -> dict:
+    """Poll /edit/api/status until the background job settles, and return it.
+
+    The budget is generous on purpose. These tests start a worker thread and
+    then race it, and a Windows CI runner under xdist has been seen not to
+    have started the job 2.5 seconds in -- 'state': 'running', 'done': 0, which
+    is a slow runner, not a hung worker. It stays bounded so a job that really
+    is stuck fails the test instead of hanging the suite, and the caller gets
+    the last status dict back so the assertion message says what it saw.
+    """
+    deadline = time.monotonic() + timeout
+    status = client.get("/edit/api/status").json()
+    while status["state"] not in ("done", "error") and time.monotonic() < deadline:
+        time.sleep(poll)
+        status = client.get("/edit/api/status").json()
+    return status
+
+
 def _seed_db(db_path: Path, image_path: Path) -> None:
     """Populate one ok image, one error image, one judge row, one face row."""
     with ProgressDB(db_path=db_path) as db:
@@ -838,15 +856,8 @@ class TestEditPage:
             assert r.status_code == 200, r.text
             assert r.json()["ok"] is True
 
-            # Wait for the worker thread to finish — keep the budget
-            # generous but bounded so a hung job fails the test cleanly.
-            for _ in range(50):
-                d = edit_client.get("/edit/api/status").json()
-                if d["state"] in ("done", "error"):
-                    break
-                time.sleep(0.05)
+            d = _wait_for_worker(edit_client)
 
-        d = edit_client.get("/edit/api/status").json()
         assert d["state"] == "done", d
         assert d["total"] == 2
         assert d["done"] == 2
@@ -1057,14 +1068,8 @@ class TestEditDriftPanel:
         assert r.status_code == 200, r.text
         assert r.json()["ok"] is True
 
-        # Wait for the worker to finish.
-        for _ in range(50):
-            d = drift_client.get("/edit/api/status").json()
-            if d["state"] in ("done", "error"):
-                break
-            time.sleep(0.05)
+        d = _wait_for_worker(drift_client)
 
-        d = drift_client.get("/edit/api/status").json()
         assert d["state"] == "done", d
         assert d["total"] == 1  # exactly one dead row
         assert d["ok"] == 1
