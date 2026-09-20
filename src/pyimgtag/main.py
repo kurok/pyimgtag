@@ -220,6 +220,19 @@ Examples:
   pyimgtag events apply --write-keywords        # Event/<name> in the file's metadata
 """,
     ),
+    "export": (
+        "Export the whole library for another photo manager",
+        "Dump everything the database knows -- tags, places, judge scores, the\n"
+        "event each photo belongs to -- in a format another tool can read.\n"
+        "csv and json are flat; digikam is a tag-tree XML for digiKam's tag\n"
+        "importer.",
+        """\
+Examples:
+  pyimgtag export --format csv --output library.csv
+  pyimgtag export --format json --output library.json
+  pyimgtag export --format digikam --output tags.xml
+""",
+    ),
     "judge": (
         "Score photos with the professional photo-judge rubric",
         "Score photos 1-10 with the photo-judge rubric and print a ranked list.\n"
@@ -1249,6 +1262,20 @@ def _add_events_subcommand(subparsers: Any) -> None:
     )
 
 
+def _add_export_subcommand(subparsers: Any) -> None:
+    export_p = _sub(subparsers, "export")
+    export_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    export_p.add_argument(
+        "--format",
+        choices=["csv", "json", "digikam"],
+        default="csv",
+        help="Output format (default: csv)",
+    )
+    export_p.add_argument(
+        "-o", "--output", required=True, metavar="FILE", help="Where to write the export"
+    )
+
+
 def _add_judge_subcommand(subparsers: Any) -> None:
     judge_p = _sub(subparsers, "judge")
     judge_src = judge_p.add_mutually_exclusive_group(required=False)
@@ -1565,6 +1592,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_index_subcommand(subparsers)
     _add_search_subcommand(subparsers)
     _add_events_subcommand(subparsers)
+    _add_export_subcommand(subparsers)
     _add_judge_subcommand(subparsers)
     _add_tags_subcommand(subparsers)
     _add_dedup_subcommand(subparsers)
@@ -1651,6 +1679,7 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.db import cmd_cleanup, cmd_reprocess, cmd_status
     from pyimgtag.commands.dedup import cmd_dedup
     from pyimgtag.commands.events import cmd_events
+    from pyimgtag.commands.export import cmd_export
     from pyimgtag.commands.faces import cmd_faces
     from pyimgtag.commands.insights import cmd_insights
     from pyimgtag.commands.judge import cmd_judge
@@ -1689,6 +1718,7 @@ def main(argv: list[str] | None = None) -> int:
         "index": lambda: cmd_index(args),
         "search": lambda: cmd_search(args),
         "events": lambda: cmd_events(args),
+        "export": lambda: cmd_export(args),
         "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
         "dedup": lambda: cmd_dedup(args),

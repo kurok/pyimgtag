@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
 
@@ -73,6 +74,50 @@ def write_csv(results: list[ImageResult], output_path: str | Path) -> None:
                 writer.writerow(row)
     except OSError as e:
         raise OSError(f"Failed to write CSV to {output_path}: {e}") from e
+
+
+def write_rows_csv(rows: list[dict], output_path: str | Path, fields: Sequence[str]) -> None:
+    """Write dict rows as CSV using *fields* as the column order.
+
+    The row-based twin of :func:`write_csv`. ``pyimgtag export`` carries
+    columns an :class:`~pyimgtag.models.ImageResult` has no field for -- the
+    judge score and the event a photo belongs to both come from their own
+    tables -- so it cannot go through the dataclass writers. Keeping it here
+    means both paths still agree on what a pyimgtag CSV looks like: same
+    ``';'``-joined tags, same quoting, same newline handling.
+
+    Raises:
+        OSError: If writing the file fails.
+    """
+    try:
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(fields), extrasaction="ignore")
+            writer.writeheader()
+            for row in rows:
+                flat = dict(row)
+                value = flat.get("tags")
+                if isinstance(value, (list, tuple)):
+                    flat["tags"] = ";".join(str(v) for v in value)
+                writer.writerow(flat)
+    except OSError as e:
+        raise OSError(f"Failed to write CSV to {output_path}: {e}") from e
+
+
+def write_rows_json(rows: list[dict], output_path: str | Path) -> None:
+    """Write dict rows as a pretty-printed JSON array.
+
+    Tags stay a list here, unlike the CSV: JSON can represent one.
+
+    Raises:
+        OSError: If writing the file fails.
+    """
+    try:
+        Path(output_path).write_text(
+            json.dumps(rows, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+    except OSError as e:
+        raise OSError(f"Failed to write JSON to {output_path}: {e}") from e
 
 
 def result_to_jsonl(result: ImageResult) -> str:

@@ -100,6 +100,8 @@ src/pyimgtag/
   commands/watch.py    `watch` polling daemon: stability gate, PID lock, graceful stop,
                        reuses commands/run._run_tagging for the actual tagging
   _face_dep_check.py   Friendly preflight for face_recognition_models
+  commands/export.py   `export --format csv|json|digikam`: the whole DB out for another
+                       photo manager; build_tag_tree/tag_tree_to_xml are pure functions
   video.py             Video support: ffmpeg/ffprobe keyframe extraction (external tool,
                        like exiftool — never a Python dep) plus aggregate_frames, the pure
                        fold from per-frame TagResults to one row for the clip

@@ -679,6 +679,46 @@ That is a documented v1 heuristic. A photo judge scores composition and
 exposure, which one representative frame carries better than an average over
 three would — averaging three compositions describes none of them.
 
+#### `pyimgtag export` — take the library somewhere else
+
+Everything the database knows, in a format another tool reads. Metadata
+portability is the point of a local-first tagger: enrichment locked in one
+SQLite file is enrichment you cannot take with you.
+
+```bash
+pyimgtag export --format csv  --output library.csv
+pyimgtag export --format json --output library.json
+pyimgtag export --format digikam --output tags.xml
+```
+
+**`csv` / `json`** dump every stored field — including the ones `query` does
+not surface (`has_text`, `text_summary`, `phash`, pixel dimensions) — plus the
+judge score and the event each photo belongs to, joined in from their own
+tables. Rows come out ordered by path, so two exports of the same library
+diff cleanly. Tags are `;`-joined in CSV and stay a list in JSON.
+
+**`digikam`** emits a `<digikam-tags>` tag-tree XML for digiKam's tag importer:
+
+```
+Places|Portugal|Lisboa|Óbidos
+Tags|sunset
+Events|Italy 2025
+People|Alice
+```
+
+Places nest country → region → city, which is the only order in which the
+branches merge usefully — a hundred photos from one country share one node
+rather than becoming a hundred siblings. A photo geocoded to a country but no
+city is a leaf, not a parent of a blank node. Output is byte-identical between
+runs, so a diff means something changed.
+
+> **Unverified against digiKam itself.** The XML is well-formed and structured
+> as documented, and the shape is pinned by tests — but nobody has yet imported
+> a generated file into a real digiKam and confirmed the tree appears as
+> expected. That round-trip is tracked with the same verification work as the
+> hierarchical-keyword writing; treat this format as provisional until it is
+> done.
+
 #### `pyimgtag events` — events, trips, and albums
 
 The DB already knows *when* and *where* every photo was taken. `events` composes

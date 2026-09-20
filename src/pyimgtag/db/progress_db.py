@@ -501,6 +501,10 @@ class ProgressDB:
             media_type,
         )
 
+    def export_rows(self) -> list[dict]:
+        """Delegate to :meth:`ImageDB.export_rows`."""
+        return self._images.export_rows()
+
     def get_tag_counts(self) -> list[tuple[str, int]]:
         """Delegate to :meth:`ImageDB.get_tag_counts`."""
         return self._images.get_tag_counts()
