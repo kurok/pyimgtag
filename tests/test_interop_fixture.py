@@ -9,6 +9,7 @@ round-trip proves the files really carry what the page claims.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess  # nosec B404
@@ -231,50 +232,60 @@ class TestChecklistStaysInSync:
 class TestExiftoolRoundTrip:
     """The fixture is only useful if the files really carry the tree."""
 
+    TAGS_READ = (
+        "-XMP-lr:HierarchicalSubject",
+        "-XMP-digiKam:TagsList",
+        "-XMP:Rating",
+        "-XMP:Subject",
+    )
+
     @staticmethod
-    def _read(path: Path) -> str:
+    def _read(path: Path) -> dict:
+        """Read the tags back as JSON.
+
+        Deliberately not ``-s -s -s`` with ``text=True``: that returns a blob
+        of text decoded with the locale encoding, which is not UTF-8 on every
+        runner. exiftool writes its JSON as UTF-8, so the bytes are decoded
+        explicitly here and the values compared as lists rather than as
+        substrings -- which also makes the assertion exact instead of "appears
+        somewhere in the output".
+        """
         proc = subprocess.run(  # noqa: S603  # nosec B603
             [
                 shutil.which("exiftool"),
-                "-s",
-                "-s",
-                "-s",
-                "-XMP-lr:HierarchicalSubject",
-                "-XMP-digiKam:TagsList",
-                "-XMP:Rating",
-                "-XMP:Subject",
+                "-json",
+                *TestExiftoolRoundTrip.TAGS_READ,
                 str(path),
             ],
             capture_output=True,
-            text=True,
             timeout=60,
             check=False,
         )
-        assert proc.returncode == 0, proc.stderr
-        return proc.stdout
+        assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+        return json.loads(proc.stdout.decode("utf-8"))[0]
 
     @requires_exiftool
     def test_the_embedded_image_carries_the_documented_tree(self, tmp_path):
         build_fixture(tmp_path)
-        out = self._read(tmp_path / EMBEDDED_NAME)
+        data = self._read(tmp_path / EMBEDDED_NAME)
 
-        for path in expected_paths():
-            assert path in out, f"{path} missing from {out!r}"
-        assert str(expected_rating()) in out
-        for keyword in flat_keywords():
-            assert keyword in out
+        assert data["HierarchicalSubject"] == expected_paths()
+        assert data["TagsList"] == expected_paths()
+        assert data["Rating"] == expected_rating()
+        assert data["Subject"] == flat_keywords()
 
     @requires_exiftool
     def test_the_sidecar_carries_the_same_tree(self, tmp_path):
         build_fixture(tmp_path)
-        out = self._read((tmp_path / SIDECAR_NAME).with_suffix(".xmp"))
+        data = self._read((tmp_path / SIDECAR_NAME).with_suffix(".xmp"))
 
-        for path in expected_paths():
-            assert path in out, f"{path} missing from {out!r}"
-        assert str(expected_rating()) in out
+        assert data["HierarchicalSubject"] == expected_paths()
+        assert data["TagsList"] == expected_paths()
+        assert data["Rating"] == expected_rating()
+        assert data["Subject"] == flat_keywords()
 
     @requires_exiftool
     def test_the_sidecar_image_itself_stays_bare(self, tmp_path):
         """An application that ignores sidecars must show nothing, not a tree."""
         build_fixture(tmp_path)
-        assert self._read(tmp_path / SIDECAR_NAME).strip() == ""
+        assert set(self._read(tmp_path / SIDECAR_NAME)) == {"SourceFile"}
