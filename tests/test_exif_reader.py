@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import subprocess
+import shutil
+import subprocess  # nosec B404
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -604,3 +605,52 @@ class TestReadPillowGpsPath:
 
         assert result.has_gps
         assert result.gps_lat is not None and result.gps_lat > 51
+
+
+class TestNonAsciiPaths:
+    """#372: a path is an argument too, and argv is where #366 lost them.
+
+    #371 fixed the handover inside `exif_writer`. `exif_reader` still builds
+    its own exiftool command line, so a photo under an accented directory is
+    handed over the way values used to be. The failure is quiet: a non-zero
+    exit makes `_read_exiftool` return None and the caller falls back to
+    Pillow, so GPS and dates come from the weaker source for exactly those
+    photos and nothing says so.
+    """
+
+    @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
+    def test_gps_is_read_from_a_photo_under_an_accented_directory(self, tmp_path: Path):
+        from PIL import Image
+
+        from pyimgtag.exif_reader import _read_exiftool
+
+        folder = tmp_path / "Óbidos"
+        folder.mkdir()
+        photo = folder / "praça.jpg"
+        Image.new("RGB", (16, 16), (9, 9, 9)).save(photo)
+
+        # Written through exif_writer's handover, which #371 made safe, so a
+        # failure here is the read and not the write.
+        write = subprocess.run(  # noqa: S603  # nosec B603
+            [
+                shutil.which("exiftool"),
+                "-overwrite_original",
+                "-GPSLatitude=39.3606",
+                "-GPSLatitudeRef=N",
+                "-GPSLongitude=9.1568",
+                "-GPSLongitudeRef=W",
+                "-DateTimeOriginal=2026:04:01 14:30:00",
+                str(photo),
+            ],
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+        assert write.returncode == 0, write.stderr.decode("utf-8", "replace")
+
+        result = _read_exiftool(photo)
+
+        assert result is not None, "exiftool could not read the file at this path"
+        assert result.has_gps
+        assert abs(result.gps_lat - 39.3606) < 1e-3
+        assert result.date_original == "2026-04-01 14:30:00"
