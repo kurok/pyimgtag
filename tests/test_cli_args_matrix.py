@@ -566,6 +566,11 @@ _DISPATCH_TABLE = [
     ("tags", "pyimgtag.commands.tags.cmd_tags", ["tags", "list"]),
     ("faces", "pyimgtag.commands.faces.cmd_faces", ["faces", "review"]),
     ("judge", "pyimgtag.commands.judge.cmd_judge", ["judge", "--input-dir", "/tmp"]),
+    (
+        "immich-sync",
+        "pyimgtag.commands.immich.cmd_immich_sync",
+        ["immich-sync", "--url", "https://immich.test"],
+    ),
 ]
 
 
