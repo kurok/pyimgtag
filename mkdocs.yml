@@ -36,6 +36,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Platform Setup: platform-setup.md
+  - Interop Verification: interop-verification.md
   - Changelog: changelog.md
   - Contributing: contributing.md
   - Security: security.md

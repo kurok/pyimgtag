@@ -728,7 +728,10 @@ A photo the judge never scored gets no rating, rather than one star.
 > right namespaces with the right values. Nobody has yet imported a
 > pyimgtag-tagged file into a real Lightroom Classic or digiKam and confirmed
 > the tree appears as expected. That round-trip is the one open item on the
-> interop work.
+> interop work, and it is ten minutes' work for anyone who has either
+> application: `python -m pyimgtag.interop_fixture` writes the files to import,
+> and [docs/interop-verification.md](docs/interop-verification.md) is the
+> checklist of what to look for and where to record it.
 
 #### `pyimgtag export` — take the library somewhere else
 
@@ -767,8 +770,9 @@ runs, so a diff means something changed.
 > as documented, and the shape is pinned by tests — but nobody has yet imported
 > a generated file into a real digiKam and confirmed the tree appears as
 > expected. That round-trip is tracked with the same verification work as the
-> hierarchical-keyword writing; treat this format as provisional until it is
-> done.
+> hierarchical-keyword writing — see
+> [docs/interop-verification.md](docs/interop-verification.md) — and this
+> format stays provisional until it is done.
 
 #### `pyimgtag immich-sync` — push tags to immich *(experimental)*
 
