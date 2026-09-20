@@ -619,12 +619,28 @@ class TestNonAsciiPaths:
     """
 
     @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
-    def test_gps_is_read_from_a_photo_under_an_accented_directory(self, tmp_path: Path):
+    @pytest.mark.parametrize(
+        "folder_name",
+        [
+            # Every character here is representable in CP1252, the usual
+            # Windows ANSI code page, so the path survives the conversion
+            # losslessly even though a *value* made of the same characters does
+            # not -- exiftool decodes values as UTF-8 and never decodes paths.
+            pytest.param("Óbidos", id="in-the-code-page"),
+            # These are not in CP1252. A lossy conversion replaces them with
+            # '?', and exiftool is handed a path to a file that does not exist.
+            pytest.param("Łódź", id="outside-the-code-page"),
+            pytest.param("日本", id="outside-any-latin-code-page"),
+        ],
+    )
+    def test_gps_is_read_from_a_photo_under_an_accented_directory(
+        self, tmp_path: Path, folder_name: str
+    ):
         from PIL import Image
 
         from pyimgtag.exif_reader import _read_exiftool
 
-        folder = tmp_path / "Óbidos"
+        folder = tmp_path / folder_name
         folder.mkdir()
         photo = folder / "praça.jpg"
         Image.new("RGB", (16, 16), (9, 9, 9)).save(photo)
