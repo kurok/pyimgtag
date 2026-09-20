@@ -10,7 +10,11 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from xml.etree import ElementTree as ET
+
+# nosec B405 — B405 is about *parsing* untrusted XML. This module only builds
+# it: Element/SubElement/indent/tostring, no parse() and no input document
+# anywhere. defusedxml hardens the parser, which is not the surface in use.
+from xml.etree import ElementTree as ET  # nosec B405
 
 from pyimgtag.progress_db import ProgressDB
 
