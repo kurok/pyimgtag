@@ -27,14 +27,6 @@ step is done by hand and recorded here.
 python -m pyimgtag.interop_fixture --out-dir ~/Desktop/pyimgtag-interop
 ```
 
-> **Generate it on macOS or Linux, not Windows.** On Windows every non-ASCII
-> character in a metadata value is written as a literal `?`
-> ([#366](https://github.com/kurok/pyimgtag/issues/366)), so `Óbidos` would go
-> into the file as `?bidos` and the accented-city check below would fail for a
-> reason that has nothing to do with the application you are testing. The
-> import itself can be done on Windows — it is only the writing that is
-> affected.
-
 Three files:
 
 | File | What it checks |
