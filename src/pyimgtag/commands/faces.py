@@ -874,11 +874,21 @@ def _write_person_keywords(
         write_xmp_sidecar,
     )
 
+    hierarchical = None
+    if getattr(args, "hierarchical_keywords", False):
+        from pyimgtag.hierarchy import keyword_paths
+
+        # The names are already the person names; People|<name> is the branch
+        # every photo manager expects to find a face in.
+        hierarchical = keyword_paths(people=keywords)
+
     if args.sidecar_only:
-        return write_xmp_sidecar(image_path, keywords=keywords)
+        return write_xmp_sidecar(image_path, keywords=keywords, hierarchical=hierarchical)
 
     ext = Path(image_path).suffix.lower()
     if ext not in SUPPORTED_DIRECT_WRITE_EXTENSIONS:
-        return write_xmp_sidecar(image_path, keywords=keywords)
+        return write_xmp_sidecar(image_path, keywords=keywords, hierarchical=hierarchical)
 
-    return write_exif_description(image_path, keywords=keywords, merge=True)
+    return write_exif_description(
+        image_path, keywords=keywords, merge=True, hierarchical=hierarchical
+    )

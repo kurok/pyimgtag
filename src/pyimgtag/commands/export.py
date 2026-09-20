@@ -18,54 +18,34 @@ from xml.etree import ElementTree as ET  # nosec B405
 
 from pyimgtag.progress_db import ProgressDB
 
-#: Top-level branches of the exported tag tree. The same shape the
-#: hierarchical-keyword writing in #357 targets, so a library exported here and
-#: a library tagged there land in the same places in digiKam.
-_PEOPLE = "People"
-_PLACES = "Places"
-_TAGS = "Tags"
-_EVENTS = "Events"
-
 
 def build_tag_tree(rows: list[dict], people: dict[str, set[str]] | None = None) -> dict:
     """Fold export rows into a nested ``{name: {child: {...}}}`` tag tree.
 
-    ``Places`` is built from the geocoded fields in country → region → city
-    order, which is how every photo manager expects a place hierarchy and the
-    only order in which the branches merge usefully: a hundred photos from one
-    country share one node rather than a hundred sibling city nodes.
+    The taxonomy itself lives in :mod:`pyimgtag.hierarchy`, shared with the
+    hierarchical XMP keywords the tagger writes. That is deliberate: a library
+    exported here and the same library tagged with ``--hierarchical-keywords``
+    have to land in the same branches, or importing both produces two parallel
+    trees saying the same thing.
 
     *people* maps a person's name to the paths they appear in, so a named face
     becomes ``People|Alice``. Omitted when the face pipeline has not run.
     """
-    tree: dict = {}
+    from pyimgtag.hierarchy import keyword_paths, tree_from_paths
 
-    def _branch(*path: str) -> None:
-        """Insert a path, skipping empty segments so gaps do not create blanks."""
-        node = tree
-        for part in path:
-            if not part:
-                # A photo geocoded to a country but no city must not produce a
-                # nameless child between them.
-                continue
-            node = node.setdefault(str(part).strip(), {})
-
+    paths: set[str] = set()
     for row in rows:
-        for tag in row.get("tags") or []:
-            _branch(_TAGS, tag)
-        if row.get("nearest_country") or row.get("nearest_city"):
-            _branch(
-                _PLACES,
-                row.get("nearest_country") or "",
-                row.get("nearest_region") or "",
-                row.get("nearest_city") or "",
+        paths.update(
+            keyword_paths(
+                row.get("tags"),
+                country=row.get("nearest_country"),
+                region=row.get("nearest_region"),
+                city=row.get("nearest_city"),
+                event=row.get("event_name"),
             )
-        if row.get("event_name"):
-            _branch(_EVENTS, row["event_name"])
-
-    for name in sorted(people or {}):
-        _branch(_PEOPLE, name)
-    return tree
+        )
+    paths.update(keyword_paths(people=sorted(people or {})))
+    return tree_from_paths(paths)
 
 
 def tag_tree_to_xml(tree: dict) -> str:

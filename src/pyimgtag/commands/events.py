@@ -437,16 +437,24 @@ def _apply_photos_albums(args: argparse.Namespace, db: ProgressDB, events: list[
 def _apply_keywords(args: argparse.Namespace, db: ProgressDB, events: list[dict]) -> int:
     from pyimgtag.exif_writer import write_exif_description
 
+    hierarchical_wanted = getattr(args, "hierarchical_keywords", False)
     written = failed = 0
     for event in events:
         keyword = f"Event/{event['name']}"
+        hierarchical = None
+        if hierarchical_wanted:
+            from pyimgtag.hierarchy import keyword_paths
+
+            hierarchical = keyword_paths(event=event["name"])
         for path in sorted(db.event_paths(event["id"])):
             if args.dry_run:
                 written += 1
                 continue
             # merge=True: the event keyword joins the tags the run already
             # wrote rather than replacing somebody's whole keyword list.
-            error = write_exif_description(path, keywords=[keyword], merge=True)
+            error = write_exif_description(
+                path, keywords=[keyword], merge=True, hierarchical=hierarchical
+            )
             if error is None:
                 written += 1
             else:

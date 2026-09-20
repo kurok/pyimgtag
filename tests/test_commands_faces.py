@@ -403,7 +403,11 @@ class TestWritePersonKeywords:
         with patch("pyimgtag.exif_writer.write_xmp_sidecar", return_value=None) as mock_xmp:
             err = _write_person_keywords("/img/photo.jpg", ["person:Alice"], args)
         assert err is None
-        mock_xmp.assert_called_once_with("/img/photo.jpg", keywords=["person:Alice"])
+        # hierarchical=None: the writers take it unconditionally now, and
+        # without --hierarchical-keywords there is no tree to write.
+        mock_xmp.assert_called_once_with(
+            "/img/photo.jpg", keywords=["person:Alice"], hierarchical=None
+        )
 
     def test_unsupported_extension_falls_back_to_sidecar(self, tmp_path):
         args = _make_args(write_exif=True, sidecar_only=False)
@@ -421,7 +425,9 @@ class TestWritePersonKeywords:
             ) as mock_exif:
                 err = _write_person_keywords("/img/photo.jpg", ["person:Alice"], args)
         assert err is None
-        mock_exif.assert_called_once_with("/img/photo.jpg", keywords=["person:Alice"], merge=True)
+        mock_exif.assert_called_once_with(
+            "/img/photo.jpg", keywords=["person:Alice"], merge=True, hierarchical=None
+        )
 
 
 class TestMakeThumbnail:
