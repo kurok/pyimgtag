@@ -46,6 +46,7 @@ EXPECTED_PUBLIC_API = [
     "event_for_path",
     "event_paths",
     "event_stats",
+    "export_rows",
     "get_all_embeddings",
     "get_all_judge_results",
     "get_assigned_faces",

@@ -407,6 +407,108 @@ class ImageDB:
             "duration_sec": row[21] if len(row) > 21 else None,
         }
 
+    #: Every ``processed_images`` column worth exporting, in a fixed order so a
+    #: CSV diff between two exports is readable. file_size/file_mtime are the
+    #: incremental-run bookkeeping and are deliberately left out -- they say
+    #: nothing about the photo.
+    EXPORT_COLUMNS: tuple[str, ...] = (
+        "file_path",
+        "file_name",
+        "media_type",
+        "duration_sec",
+        "status",
+        "error_message",
+        "processed_at",
+        "image_date",
+        "tags",
+        "scene_summary",
+        "scene_category",
+        "emotional_tone",
+        "cleanup_class",
+        "significance",
+        "event_hint",
+        "has_text",
+        "text_summary",
+        "nearest_city",
+        "nearest_region",
+        "nearest_country",
+        "gps_lat",
+        "gps_lon",
+        "width",
+        "height",
+        "phash",
+        "judge_score",
+        "judge_verdict",
+        "judge_reason",
+        "event_id",
+        "event_name",
+    )
+
+    def export_rows(self) -> list[dict]:
+        """Every row with everything the library knows about it.
+
+        Deliberately not :meth:`query_images`: that one is shaped for the query
+        UI and drops ``has_text``, ``text_summary``, ``phash`` and the pixel
+        dimensions, which an export of "everything queryable" should carry. The
+        judge score and the event a photo belongs to come from their own
+        tables, so they are joined here rather than reconstructed by the caller.
+        """
+        sql = """
+            SELECT pi.file_path, pi.media_type, pi.duration_sec, pi.status, pi.error_message,
+                   pi.processed_at, pi.image_date, pi.tags, pi.scene_summary, pi.scene_category,
+                   pi.emotional_tone, pi.cleanup_class, pi.significance, pi.event_hint,
+                   pi.has_text, pi.text_summary, pi.nearest_city, pi.nearest_region,
+                   pi.nearest_country, pi.gps_lat, pi.gps_lon, pi.width, pi.height, pi.phash,
+                   js.weighted_score, js.verdict, js.reason, em.event_id, ev.name
+              FROM processed_images pi
+              LEFT JOIN judge_scores js ON js.file_path = pi.file_path
+              LEFT JOIN event_members em ON em.file_path = pi.file_path
+              LEFT JOIN events ev ON ev.id = em.event_id
+             ORDER BY pi.file_path
+        """
+        rows = []
+        for r in self._conn.execute(sql):
+            try:
+                tags = json.loads(r[7]) if r[7] else []
+            except (TypeError, json.JSONDecodeError):
+                tags = []
+            score = r[24]
+            rows.append(
+                {
+                    "file_path": r[0],
+                    "file_name": Path(r[0]).name,
+                    "media_type": r[1] or "image",
+                    "duration_sec": r[2],
+                    "status": r[3],
+                    "error_message": r[4],
+                    "processed_at": r[5],
+                    "image_date": r[6],
+                    "tags": tags,
+                    "scene_summary": r[8],
+                    "scene_category": r[9],
+                    "emotional_tone": r[10],
+                    "cleanup_class": r[11],
+                    "significance": r[12],
+                    "event_hint": r[13],
+                    "has_text": bool(r[14]),
+                    "text_summary": r[15],
+                    "nearest_city": r[16],
+                    "nearest_region": r[17],
+                    "nearest_country": r[18],
+                    "gps_lat": r[19],
+                    "gps_lon": r[20],
+                    "width": r[21],
+                    "height": r[22],
+                    "phash": r[23],
+                    "judge_score": int(round(float(score))) if score is not None else None,
+                    "judge_verdict": r[25],
+                    "judge_reason": r[26],
+                    "event_id": r[27],
+                    "event_name": r[28],
+                }
+            )
+        return rows
+
     def get_tag_counts(self) -> list[tuple[str, int]]:
         """Return (tag, count) pairs sorted by count descending.
 
