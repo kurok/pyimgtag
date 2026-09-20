@@ -83,12 +83,13 @@ Alongside the tree, both files carry:
 - a rating of **4 of 5 stars**
 - the description `pyimgtag interop fixture: sunset over the castle at Obidos`
 
-The description spells Óbidos without its accent on purpose: it is written into
-IPTC as well as XMP, and pyimgtag does not declare `IPTC:CodedCharacterSet`, so
-non-ASCII text there would arrive with an undeclared encoding and could display
-mangled for reasons unrelated to the keyword tree. Everything this fixture puts
-into IPTC is ASCII; the accented `Óbidos` under `Places` travels in XMP only,
-which is where it belongs and where it should survive intact.
+The description spells Óbidos without its accent on purpose. It is not a
+constraint — [#364](https://github.com/kurok/pyimgtag/issues/364) made pyimgtag
+declare `IPTC:CodedCharacterSet`, so non-ASCII text in IPTC is safe now — but
+the non-ASCII case worth checking belongs in the city name under `Places`,
+where the applications actually render the tree. A second accented string in
+the description would only add a way for this check to fail without adding
+anything it can tell you.
 
 ## digiKam
 

@@ -100,6 +100,9 @@ def write_exif_description(
             ``"iptc"``, or ``"exif"``. ``"auto"`` writes all compatible
             fields (default). An unrecognized value writes none of the
             description/keyword fields (only date fields are restored).
+            Whenever IPTC text goes out, ``IPTC:CodedCharacterSet`` is
+            declared as UTF-8 alongside it: IIM has no default encoding, so
+            undeclared non-ASCII is read as Latin-1 and arrives mangled.
         merge: When True, existing keywords are preserved and new keywords
             are added alongside them (XPKeywords is skipped — it is a flat
             semicolon-joined string that cannot be merged without reading
@@ -133,6 +136,15 @@ def write_exif_description(
     _write_xmp = fmt in ("auto", "xmp")
     _write_iptc = fmt in ("auto", "iptc")
     _write_exif_fields = fmt in ("auto", "exif")
+
+    if _write_iptc and (description is not None or keywords):
+        # IPTC IIM has no default encoding: a record with no CodedCharacterSet
+        # is undeclared, and readers fall back to Latin-1. The strings here are
+        # UTF-8, so without this a city like Obidos arrives as mojibake in any
+        # reader that follows the spec. exiftool turns this into the ESC % G
+        # escape the standard specifies. Only when IPTC text is actually going
+        # out -- declaring a charset for a record with no text in it is noise.
+        args.append("-codedcharacterset=utf8")
 
     if description is not None:
         if _write_exif_fields:
