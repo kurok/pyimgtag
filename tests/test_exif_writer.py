@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess  # nosec B404
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,7 +13,6 @@ from pyimgtag.exif_writer import (
     RAW_SIDECAR_ONLY_EXTENSIONS,
     SUPPORTED_DIRECT_WRITE_EXTENSIONS,
     _read_date_fields,
-    _run_exiftool,
     diff_metadata,
     is_exiftool_available,
     read_existing_metadata,
@@ -761,139 +759,6 @@ class TestIptcCharsetDeclaration:
 
         data = _exiftool_json(photo, "-IPTC:CodedCharacterSet")
         assert "CodedCharacterSet" not in data
-
-
-class TestRunExiftool:
-    """How the arguments are handed over, which is the whole of #366.
-
-    Everything else in this file asserts the argument vector; these assert what
-    becomes of it, because on Windows the vector was correct and the file was
-    not.
-    """
-
-    @staticmethod
-    def _captured_argfile(args, stdout=b"", returncode=0):
-        """Run the helper against a mocked subprocess and return the argfile text.
-
-        The file is inside a TemporaryDirectory that is gone by the time the
-        helper returns, so it has to be read from within the mock.
-        """
-        seen = {}
-
-        def _fake_run(cmd, **kwargs):
-            seen["cmd"] = cmd
-            seen["text"] = Path(cmd[-1]).read_text(encoding="utf-8")
-            seen["dir"] = Path(cmd[-1]).parent
-            seen["siblings"] = {
-                p.name: p.read_text(encoding="utf-8")
-                for p in Path(cmd[-1]).parent.iterdir()
-                if p.name != "args.txt"
-            }
-            return subprocess.CompletedProcess(cmd, returncode, stdout, b"")
-
-        with patch("pyimgtag.exif_writer.subprocess.run", side_effect=_fake_run):
-            proc = _run_exiftool(args)
-        return seen, proc
-
-    def test_the_values_go_in_a_file_not_on_the_command_line(self):
-        seen, _ = self._captured_argfile(
-            ["exiftool", "-overwrite_original", "-XMP:Subject=Óbidos", "/p/a.jpg"]
-        )
-
-        assert seen["cmd"][:4] == ["exiftool", "-charset", "UTF8", "-@"]
-        assert "Óbidos" not in " ".join(seen["cmd"])
-        assert seen["text"].splitlines() == [
-            "-overwrite_original",
-            "-XMP:Subject=Óbidos",
-            "/p/a.jpg",
-        ]
-
-    def test_the_file_is_utf8_whatever_the_locale(self, tmp_path):
-        """The bytes on disk are what exiftool reads; the locale must not matter."""
-        captured = {}
-
-        def _fake_run(cmd, **kwargs):
-            captured["bytes"] = Path(cmd[-1]).read_bytes()
-            return subprocess.CompletedProcess(cmd, 0, b"", b"")
-
-        with patch("pyimgtag.exif_writer.subprocess.run", side_effect=_fake_run):
-            _run_exiftool(["exiftool", "-XMP:Subject=Óbidos", "/p/a.jpg"])
-
-        assert "Óbidos".encode() in captured["bytes"]
-
-    def test_a_value_with_a_newline_is_spilled_to_its_own_file(self):
-        """One argument per line is literal, so a newline would split the value.
-
-        exiftool would read the second line as a filename, truncate the tag,
-        and still report the file updated -- a caller checking only for success
-        would never notice.
-        """
-        seen, _ = self._captured_argfile(
-            ["exiftool", "-XMP:Description=line one\nline two", "/p/a.jpg"]
-        )
-
-        lines = seen["text"].splitlines()
-        assert len(lines) == 2, lines
-        assert lines[0].startswith("-XMP:Description<=")
-        assert lines[1] == "/p/a.jpg"
-        assert list(seen["siblings"].values()) == ["line one\nline two"]
-
-    def test_a_spilled_value_keeps_its_line_endings(self):
-        """write_text would translate \n to \r\n on Windows.
-
-        exiftool reads the spilled file whole, so the CR would land inside the
-        description -- a corruption introduced by the very code meant to stop
-        one. Caught by CI on windows-latest, not by review.
-        """
-        seen, _ = self._captured_argfile(
-            ["exiftool", "-XMP:Description=line one\nline two", "/p/a.jpg"]
-        )
-        spilled = next(iter(seen["siblings"].values()))
-        assert spilled == "line one\nline two"
-        assert "\r" not in spilled
-
-    def test_the_argfile_itself_uses_plain_newlines(self):
-        seen, _ = self._captured_argfile(["exiftool", "-XMP:Subject=x", "/p/a.jpg"])
-        assert "\r" not in seen["text"]
-
-    def test_a_single_line_value_stays_inline(self):
-        """Spilling everything would make every argument unreadable in a log."""
-        seen, _ = self._captured_argfile(["exiftool", "-XMP:Description=one line", "/p/a.jpg"])
-        assert "-XMP:Description=one line" in seen["text"].splitlines()
-        assert seen["siblings"] == {}
-
-    def test_list_operators_are_never_rewritten(self):
-        """'+=' and '-=' mean something; '<=' would silently change it."""
-        seen, _ = self._captured_argfile(
-            ["exiftool", "-IPTC:Keywords+=a\nb", "-IPTC:Keywords-=c\nd", "/p/a.jpg"]
-        )
-        lines = seen["text"].splitlines()
-        assert "<=" not in "".join(lines)
-        assert seen["siblings"] == {}
-
-    def test_an_empty_value_survives_as_an_empty_value(self):
-        """'-XMP:Subject=' is the clear-the-list idiom, not a blank line."""
-        seen, _ = self._captured_argfile(["exiftool", "-XMP:Subject=", "/p/a.jpg"])
-        assert "-XMP:Subject=" in seen["text"].splitlines()
-
-    def test_output_is_decoded_as_utf8_not_by_locale(self):
-        _, proc = self._captured_argfile(
-            ["exiftool", "-json", "/p/a.jpg"], stdout="Óbidos".encode()
-        )
-        assert proc.stdout == "Óbidos"
-
-    def test_undecodable_output_does_not_raise(self):
-        """A truncated read should degrade, not take down the caller."""
-        _, proc = self._captured_argfile(["exiftool", "-json", "/p/a.jpg"], stdout=b"\xff\xfe")
-        assert isinstance(proc.stdout, str)
-
-    def test_the_return_code_is_passed_through(self):
-        _, proc = self._captured_argfile(["exiftool", "/p/a.jpg"], returncode=2)
-        assert proc.returncode == 2
-
-    def test_the_temporary_directory_does_not_outlive_the_call(self):
-        seen, _ = self._captured_argfile(["exiftool", "-XMP:Subject=x", "/p/a.jpg"])
-        assert not seen["dir"].exists()
 
 
 class TestNonAsciiRoundTrip:

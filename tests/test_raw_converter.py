@@ -82,7 +82,7 @@ class TestExtractRawThumbnail:
         src.write_bytes(b"fake")
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", return_value=self._mock_proc()),
+            patch("pyimgtag.raw_converter.exiftool.run", return_value=self._mock_proc()),
         ):
             result = extract_raw_thumbnail(src, tmp_path)
         assert result.suffix == ".jpg"
@@ -93,7 +93,7 @@ class TestExtractRawThumbnail:
         out_dir = tmp_path / "out"
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", return_value=self._mock_proc()),
+            patch("pyimgtag.raw_converter.exiftool.run", return_value=self._mock_proc()),
         ):
             result = extract_raw_thumbnail(src, out_dir)
         assert result.parent == out_dir
@@ -103,7 +103,7 @@ class TestExtractRawThumbnail:
         src.write_bytes(b"fake")
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", return_value=self._mock_proc()),
+            patch("pyimgtag.raw_converter.exiftool.run", return_value=self._mock_proc()),
         ):
             result = extract_raw_thumbnail(src, tmp_path)
         assert result.stem == "IMG_001_thumb"
@@ -113,7 +113,7 @@ class TestExtractRawThumbnail:
         src.write_bytes(b"fake")
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", return_value=self._mock_proc()),
+            patch("pyimgtag.raw_converter.exiftool.run", return_value=self._mock_proc()),
         ):
             result = extract_raw_thumbnail(src, tmp_path)
         assert result.read_bytes() == self._FAKE_JPEG
@@ -137,7 +137,7 @@ class TestExtractRawThumbnail:
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
             patch(
-                "pyimgtag.raw_converter.subprocess.run", return_value=self._mock_proc()
+                "pyimgtag.raw_converter.exiftool.run", return_value=self._mock_proc()
             ) as mock_run,
         ):
             extract_raw_thumbnail(src, tmp_path)
@@ -152,7 +152,7 @@ class TestExtractRawThumbnail:
         side_effects = [empty_proc, success_proc]
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", side_effect=side_effects) as mock_run,
+            patch("pyimgtag.raw_converter.exiftool.run", side_effect=side_effects) as mock_run,
         ):
             extract_raw_thumbnail(src, tmp_path)
         second_call_args = mock_run.call_args_list[1][0][0]
@@ -164,7 +164,7 @@ class TestExtractRawThumbnail:
         empty_proc = self._mock_proc(returncode=0, stdout=b"")
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", return_value=empty_proc),
+            patch("pyimgtag.raw_converter.exiftool.run", return_value=empty_proc),
         ):
             with pytest.raises(RuntimeError, match="No embedded JPEG"):
                 extract_raw_thumbnail(src, tmp_path)
@@ -175,7 +175,7 @@ class TestExtractRawThumbnail:
         out_dir = tmp_path / "a" / "b" / "c"
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", return_value=self._mock_proc()),
+            patch("pyimgtag.raw_converter.exiftool.run", return_value=self._mock_proc()),
         ):
             extract_raw_thumbnail(src, out_dir)
         assert out_dir.is_dir()
@@ -185,7 +185,7 @@ class TestExtractRawThumbnail:
         src.write_bytes(b"fake")
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", return_value=self._mock_proc()),
+            patch("pyimgtag.raw_converter.exiftool.run", return_value=self._mock_proc()),
         ):
             result = extract_raw_thumbnail(src, None)
         try:
@@ -203,7 +203,7 @@ class TestExtractRawThumbnail:
                 return self._mock_proc(stdout=b"")
             return self._mock_proc()
 
-        with patch("pyimgtag.raw_converter.subprocess.run", side_effect=fake_run):
+        with patch("pyimgtag.raw_converter.exiftool.run", side_effect=fake_run):
             with patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"):
                 src = tmp_path / "photo.cr2"
                 src.write_bytes(b"fake")
@@ -387,7 +387,7 @@ class TestExtractRawThumbnailErrorPaths:
 
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", side_effect=fake_run),
+            patch("pyimgtag.raw_converter.exiftool.run", side_effect=fake_run),
         ):
             result = extract_raw_thumbnail(src, output_dir=tmp_path)
 
@@ -413,7 +413,7 @@ class TestExtractRawThumbnailErrorPaths:
 
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", side_effect=fake_run),
+            patch("pyimgtag.raw_converter.exiftool.run", side_effect=fake_run),
         ):
             result = extract_raw_thumbnail(src, output_dir=tmp_path)
 
@@ -432,7 +432,7 @@ class TestExtractRawThumbnailErrorPaths:
 
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
-            patch("pyimgtag.raw_converter.subprocess.run", side_effect=responses),
+            patch("pyimgtag.raw_converter.exiftool.run", side_effect=responses),
         ):
             result = extract_raw_thumbnail(src, output_dir=tmp_path)
 
@@ -452,7 +452,7 @@ class TestExtractRawThumbnailErrorPaths:
         with (
             patch("pyimgtag.raw_converter.shutil.which", return_value="/usr/bin/exiftool"),
             patch(
-                "pyimgtag.raw_converter.subprocess.run",
+                "pyimgtag.raw_converter.exiftool.run",
                 side_effect=_subprocess.TimeoutExpired(cmd="exiftool", timeout=30),
             ),
             patch("pyimgtag.raw_converter.shutil.rmtree", side_effect=fake_rmtree),

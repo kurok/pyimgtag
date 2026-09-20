@@ -7,6 +7,8 @@ import subprocess  # nosec B404
 import tempfile
 from pathlib import Path
 
+from pyimgtag import exiftool
+
 try:
     import rawpy  # noqa: F401
 except ImportError:
@@ -89,10 +91,13 @@ def extract_raw_thumbnail(
     try:
         for tag in _THUMBNAIL_TAGS:
             try:
-                proc = subprocess.run(  # nosec B603 B607
+                # text=False: -b puts an embedded JPEG on stdout, and
+                # decoding that as UTF-8 would corrupt the thumbnail without
+                # failing anything.
+                proc = exiftool.run(
                     ["exiftool", "-b", f"-{tag}", str(input_path)],
-                    capture_output=True,
                     timeout=30,
+                    text=False,
                 )
             except (subprocess.TimeoutExpired, OSError):
                 continue

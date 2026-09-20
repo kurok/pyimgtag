@@ -48,6 +48,10 @@ src/pyimgtag/
   scanner.py           Directory and Photos library scanning
   exif_reader.py       EXIF GPS + date (exiftool primary, Pillow fallback)
   exif_writer.py       EXIF tag/description write-back
+  exiftool.py          The one way to invoke exiftool: arguments go over in a UTF-8 argfile
+                       (`-charset UTF8 -@`), never on argv, because on Windows the code-page
+                       conversion turns any non-ASCII value or path into '?'. Values holding a
+                       newline spill to `-TAG<=FILE`; `text=False` returns bytes for `-b`
   ollama_client.py     Ollama vision API client (1 call/image, rich structured response)
   cloud_clients.py     Anthropic / OpenAI / Gemini vision-API adapters
   vocabulary.py        Controlled tag vocabulary (JSON/YAML load + validate, synonym/plural

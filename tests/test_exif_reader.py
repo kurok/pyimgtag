@@ -281,7 +281,7 @@ class TestReadExiftool:
                 }
             ]
         )
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             result = _read_exiftool(fake_img)
         assert result is not None
         assert result.has_gps
@@ -301,7 +301,7 @@ class TestReadExiftool:
         mock_proc.returncode = 0
         mock_proc.stdout = json.dumps([{"SourceFile": str(fake_img)}])
         with (
-            patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc),
+            patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc),
             patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
         ):
             result = _read_exiftool(fake_img)
@@ -317,7 +317,7 @@ class TestReadExiftool:
         mock_proc = MagicMock()
         mock_proc.returncode = 1
         mock_proc.stdout = ""
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             result = _read_exiftool(fake_img)
         assert result is None
 
@@ -330,7 +330,7 @@ class TestReadExiftool:
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = "[]"
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             result = _read_exiftool(fake_img)
         assert result is None
 
@@ -338,7 +338,7 @@ class TestReadExiftool:
         fake_img = tmp_path / "photo.jpg"
         fake_img.write_bytes(b"fake")
         with patch(
-            "pyimgtag.exif_reader.subprocess.run",
+            "pyimgtag.exif_reader.exiftool.run",
             side_effect=subprocess.TimeoutExpired(cmd="exiftool", timeout=10),
         ):
             from pyimgtag.exif_reader import _read_exiftool
@@ -352,7 +352,7 @@ class TestReadExiftool:
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = "not valid json {{{"
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             from pyimgtag.exif_reader import _read_exiftool
 
             result = _read_exiftool(fake_img)
@@ -367,7 +367,7 @@ class TestReadExiftool:
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = json.dumps([{"GPSLatitude": "N/A", "GPSLongitude": "W/A"}])
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             from pyimgtag.exif_reader import _read_exiftool
 
             result = _read_exiftool(fake_img)
