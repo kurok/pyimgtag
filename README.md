@@ -1425,7 +1425,7 @@ pip install -e ".[dev,lint,security]"
 
 pytest tests/ -v
 ruff format src/ tests/ && ruff check src/ tests/ --fix
-python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+python -m mypy src/pyimgtag/
 python -m bandit -r src/pyimgtag/ -c pyproject.toml
 pre-commit install && pre-commit run --all-files
 ```

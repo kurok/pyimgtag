@@ -207,7 +207,7 @@ ruff check src/ tests/ --fix
 pytest -v
 
 # Type checking
-python -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+python -m mypy src/pyimgtag/
 
 # Security scan
 python -m bandit -r src/pyimgtag/ -c pyproject.toml
