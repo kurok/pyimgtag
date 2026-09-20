@@ -27,8 +27,8 @@ pytest -n 0 -v                                   # sequential (debugging)
 ruff format src/ tests/
 ruff check src/ tests/ --fix
 
-# Type check
-python3 -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+# Type check (flags live in pyproject.toml — this is what CI runs)
+python3 -m mypy src/pyimgtag/
 
 # Security
 python3 -m bandit -r src/pyimgtag/ -c pyproject.toml
@@ -255,7 +255,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
    ruff format src/ tests/             # format first
    pre-commit run --all-files          # MUST run this — uses pinned ruff v0.15.15
    python3 -m pytest tests/ -v
-   python3 -m mypy src/pyimgtag/ --ignore-missing-imports --disable-error-code import-untyped
+   python3 -m mypy src/pyimgtag/
    python3 -m bandit -r src/pyimgtag/ -c pyproject.toml
    ```
 5. Commit with Conventional Commits: `feat: add x`, `fix: resolve y`

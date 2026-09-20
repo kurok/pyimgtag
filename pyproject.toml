@@ -158,14 +158,16 @@ exclude_lines = [
 ]
 
 [tool.mypy]
-python_version = "3.12"
+# The declared floor, not the newest supported version: checking against the
+# oldest runtime is what catches syntax or stdlib that would break there.
+python_version = "3.11"
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false
 # Global baseline: silence untyped third-party imports for modules not yet migrated.
 # Strict modules override this via [[tool.mypy.overrides]] below.
 ignore_missing_imports = true
-disable_error_codes = ["import-untyped"]
+disable_error_code = ["import-untyped"]
 
 [[tool.mypy.overrides]]
 module = ["pyimgtag.models", "pyimgtag.geocoder"]

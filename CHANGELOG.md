@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **mypy's `disable_error_codes` setting was a misspelling and had never taken effect** (#365): the option is `disable_error_code`, singular. mypy did not recognize the plural, warned about it on every run, and ignored it — and since CI runs `mypy src/pyimgtag/` with no flags of its own, `pyproject.toml` was the entire configuration. The typecheck job was green because nothing currently raises `import-untyped`, not because the suppression worked. `CLAUDE.md`, `README.md` and `CONTRIBUTING.md` documented `--ignore-missing-imports --disable-error-code import-untyped` on the command line, which is redundant with the working config and has been dropped, leaving one way to run it that matches CI.
+- **mypy now type-checks against Python 3.11, the declared floor** (#365): it was set to 3.12 while the project supports 3.11–3.14, so syntax or stdlib usage that breaks on the oldest supported runtime would not have been caught. A no-op today — the tree is clean at 3.11 and at 3.14.
+
 ### Added
 - **Lightroom Classic / digiKam verification fixture and checklist** (#357): `python -m pyimgtag.interop_fixture` writes an embedded-metadata image, a sidecar image and its `.xmp`, all carrying one sample that exercises every branch the taxonomy can emit — two people, a three-level place with a non-ASCII city, a plain tag, a controlled-vocabulary tag, an event and a star rating. `docs/interop-verification.md` states the exact tree to expect and walks through the import in both applications. This is the half of #357's remaining acceptance criterion that can be done without the applications; the other half is someone running the import and adding the screenshots. The sample is built by calling `pyimgtag.hierarchy`, and a test parses the checklist and compares it to what the fixture writes, so the page cannot quietly go stale.
 
