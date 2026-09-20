@@ -1,0 +1,1884 @@
+{
+  "components": {
+    "schemas": {
+      "AssetBulkUpdateDto": {
+        "properties": {
+          "dateTimeOriginal": {
+            "description": "Original date and time",
+            "type": "string"
+          },
+          "dateTimeRelative": {
+            "description": "Relative time offset in minutes",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "description": {
+            "description": "Asset description",
+            "type": "string"
+          },
+          "duplicateId": {
+            "description": "Duplicate ID",
+            "nullable": true,
+            "type": "string"
+          },
+          "ids": {
+            "description": "Asset IDs to update",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "isFavorite": {
+            "description": "Mark as favorite",
+            "type": "boolean"
+          },
+          "latitude": {
+            "description": "Latitude coordinate",
+            "format": "double",
+            "maximum": 90,
+            "minimum": -90,
+            "type": "number"
+          },
+          "longitude": {
+            "description": "Longitude coordinate",
+            "format": "double",
+            "maximum": 180,
+            "minimum": -180,
+            "type": "number"
+          },
+          "rating": {
+            "description": "Rating in range [1-5] (starred), -1 (rejected), or null (unrated)",
+            "maximum": 5,
+            "minimum": -1,
+            "nullable": true,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "description": "Using 0 as a rating is no longer valid.",
+                "state": "Updated",
+                "version": "v3"
+              }
+            ],
+            "x-immich-state": "Stable"
+          },
+          "timeZone": {
+            "description": "Time zone (IANA timezone)",
+            "type": "string"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/AssetVisibility"
+          }
+        },
+        "required": [
+          "ids"
+        ],
+        "type": "object"
+      },
+      "DateFilter": {
+        "properties": {
+          "eq": {
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "gt": {
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "gte": {
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "lt": {
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "lte": {
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          },
+          "ne": {
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MetadataSearchDto": {
+        "properties": {
+          "albumIds": {
+            "deprecated": true,
+            "description": "Filter by album IDs",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "checksum": {
+            "deprecated": true,
+            "description": "Filter by file checksum",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "city": {
+            "deprecated": true,
+            "description": "Filter by city name",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "country": {
+            "deprecated": true,
+            "description": "Filter by country name",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "createdAfter": {
+            "deprecated": true,
+            "description": "Filter by creation date (after)",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "createdBefore": {
+            "deprecated": true,
+            "description": "Filter by creation date (before)",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "cursor": {
+            "description": "Cursor for the next page of results",
+            "minLength": 1,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v3.2.0"
+              }
+            ]
+          },
+          "description": {
+            "deprecated": true,
+            "description": "Filter by description text",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "encodedVideoPath": {
+            "deprecated": true,
+            "description": "Filter by encoded video file path",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "filter": {
+            "$ref": "#/components/schemas/SearchFilter",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v3.2.0"
+              }
+            ]
+          },
+          "id": {
+            "deprecated": true,
+            "description": "Filter by asset ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "isEncoded": {
+            "deprecated": true,
+            "description": "Filter by encoded status",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "isFavorite": {
+            "deprecated": true,
+            "description": "Filter by favorite status",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "isMotion": {
+            "deprecated": true,
+            "description": "Filter by motion photo status",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "isNotInAlbum": {
+            "deprecated": true,
+            "description": "Filter assets not in any album",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "isOffline": {
+            "deprecated": true,
+            "description": "Filter by offline status",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "lensModel": {
+            "deprecated": true,
+            "description": "Filter by lens model",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "libraryId": {
+            "deprecated": true,
+            "description": "Library ID to filter by",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "make": {
+            "deprecated": true,
+            "description": "Filter by camera make",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "model": {
+            "deprecated": true,
+            "description": "Filter by camera model",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "ocr": {
+            "deprecated": true,
+            "description": "Filter by OCR text content",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "order": {
+            "$ref": "#/components/schemas/AssetOrder",
+            "deprecated": true,
+            "description": "Sort order",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "orderBy": {
+            "$ref": "#/components/schemas/SearchOrder",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v3.2.0"
+              }
+            ]
+          },
+          "originalFileName": {
+            "deprecated": true,
+            "description": "Filter by original file name",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "originalPath": {
+            "deprecated": true,
+            "description": "Filter by original file path",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "page": {
+            "deprecated": true,
+            "description": "Page number",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "personIds": {
+            "deprecated": true,
+            "description": "Filter by person IDs",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "previewPath": {
+            "deprecated": true,
+            "description": "Filter by preview file path",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "rating": {
+            "deprecated": true,
+            "description": "Filter by rating [1-5], or null for unrated",
+            "maximum": 5,
+            "minimum": 1,
+            "nullable": true,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "description": "Using -1 as a rating is deprecated and will be removed in the next major version.",
+                "state": "Updated",
+                "version": "v2.6.0"
+              },
+              {
+                "description": "Using -1 as a rating is no longer valid.",
+                "state": "Updated",
+                "version": "v3"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "size": {
+            "default": 250,
+            "description": "Number of results to return",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "state": {
+            "deprecated": true,
+            "description": "Filter by state/province name",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "tagIds": {
+            "deprecated": true,
+            "description": "Filter by tag IDs",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "takenAfter": {
+            "deprecated": true,
+            "description": "Filter by taken date (after)",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "takenBefore": {
+            "deprecated": true,
+            "description": "Filter by taken date (before)",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "thumbnailPath": {
+            "deprecated": true,
+            "description": "Filter by thumbnail file path",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "trashedAfter": {
+            "deprecated": true,
+            "description": "Filter by trash date (after)",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "trashedBefore": {
+            "deprecated": true,
+            "description": "Filter by trash date (before)",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "type": {
+            "$ref": "#/components/schemas/AssetTypeEnum",
+            "deprecated": true,
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "updatedAfter": {
+            "deprecated": true,
+            "description": "Filter by update date (after)",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "updatedBefore": {
+            "deprecated": true,
+            "description": "Filter by update date (before)",
+            "example": "2024-01-01T00:00:00.000Z",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/AssetVisibility",
+            "deprecated": true,
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "withDeleted": {
+            "deprecated": true,
+            "description": "Include deleted assets",
+            "type": "boolean",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "withExif": {
+            "description": "Include EXIF data in response",
+            "type": "boolean"
+          },
+          "withPeople": {
+            "description": "Include people data in response",
+            "type": "boolean"
+          },
+          "withStacked": {
+            "description": "Include stacked assets",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "SearchAssetResponseDto": {
+        "properties": {
+          "count": {
+            "description": "Number of assets in this page",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "facets": {
+            "items": {
+              "$ref": "#/components/schemas/SearchFacetResponseDto"
+            },
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AssetResponseDto"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Cursor for the next page of results",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v3.2.0"
+              }
+            ]
+          },
+          "nextPage": {
+            "deprecated": true,
+            "description": "Next page token",
+            "nullable": true,
+            "type": "string",
+            "x-immich-history": [
+              {
+                "state": "Added",
+                "version": "v1"
+              },
+              {
+                "state": "Stable",
+                "version": "v2"
+              },
+              {
+                "state": "Deprecated",
+                "version": "v3.2.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          },
+          "total": {
+            "description": "Total number of matching assets",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer",
+            "x-immich-history": [
+              {
+                "state": "Deprecated",
+                "version": "v3.0.0"
+              }
+            ],
+            "x-immich-state": "Deprecated"
+          }
+        },
+        "required": [
+          "count",
+          "facets",
+          "items",
+          "nextCursor",
+          "nextPage",
+          "total"
+        ],
+        "type": "object"
+      },
+      "SearchFilter": {
+        "additionalProperties": false,
+        "properties": {
+          "albumIds": {
+            "$ref": "#/components/schemas/IdsFilter"
+          },
+          "checksum": {
+            "$ref": "#/components/schemas/StringFilter"
+          },
+          "city": {
+            "$ref": "#/components/schemas/StringFilterNullable"
+          },
+          "country": {
+            "$ref": "#/components/schemas/StringFilterNullable"
+          },
+          "createdAt": {
+            "$ref": "#/components/schemas/DateFilter"
+          },
+          "description": {
+            "$ref": "#/components/schemas/StringPatternFilter"
+          },
+          "encodedVideoPath": {
+            "$ref": "#/components/schemas/StringFilter"
+          },
+          "fileSizeInBytes": {
+            "$ref": "#/components/schemas/NumberFilter"
+          },
+          "hasAlbums": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
+          "hasPeople": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
+          "hasTags": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
+          "id": {
+            "$ref": "#/components/schemas/IdFilter"
+          },
+          "isEncoded": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
+          "isFavorite": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
+          "isMotion": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
+          "isOffline": {
+            "$ref": "#/components/schemas/BoolFilter"
+          },
+          "lensModel": {
+            "$ref": "#/components/schemas/StringFilterNullable"
+          },
+          "libraryId": {
+            "$ref": "#/components/schemas/IdFilterNullable"
+          },
+          "make": {
+            "$ref": "#/components/schemas/StringFilterNullable"
+          },
+          "model": {
+            "$ref": "#/components/schemas/StringFilterNullable"
+          },
+          "ocr": {
+            "$ref": "#/components/schemas/StringSimilarityFilter"
+          },
+          "or": {
+            "items": {
+              "$ref": "#/components/schemas/SearchFilterBranch"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "originalFileName": {
+            "$ref": "#/components/schemas/StringPatternFilter"
+          },
+          "originalPath": {
+            "$ref": "#/components/schemas/StringPatternFilter"
+          },
+          "personIds": {
+            "$ref": "#/components/schemas/IdsFilter"
+          },
+          "rating": {
+            "$ref": "#/components/schemas/NumberFilterNullable"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StringFilterNullable"
+          },
+          "tagIds": {
+            "$ref": "#/components/schemas/IdsFilter"
+          },
+          "takenAt": {
+            "$ref": "#/components/schemas/DateFilter"
+          },
+          "trashedAt": {
+            "$ref": "#/components/schemas/DateFilterNullable"
+          },
+          "type": {
+            "$ref": "#/components/schemas/EnumFilterAssetType"
+          },
+          "updatedAt": {
+            "$ref": "#/components/schemas/DateFilter"
+          },
+          "visibility": {
+            "$ref": "#/components/schemas/EnumFilterAssetVisibility"
+          }
+        },
+        "type": "object"
+      },
+      "SearchResponseDto": {
+        "properties": {
+          "albums": {
+            "$ref": "#/components/schemas/SearchAlbumResponseDto"
+          },
+          "assets": {
+            "$ref": "#/components/schemas/SearchAssetResponseDto"
+          }
+        },
+        "required": [
+          "albums",
+          "assets"
+        ],
+        "type": "object"
+      },
+      "StringPatternFilter": {
+        "properties": {
+          "endsWith": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "eq": {
+            "nullable": true,
+            "type": "string"
+          },
+          "in": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "like": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ne": {
+            "nullable": true,
+            "type": "string"
+          },
+          "notIn": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "notLike": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "startsWith": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TagBulkAssetsDto": {
+        "properties": {
+          "assetIds": {
+            "description": "Asset IDs",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tagIds": {
+            "description": "Tag IDs",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "assetIds",
+          "tagIds"
+        ],
+        "type": "object"
+      },
+      "TagCreateDto": {
+        "properties": {
+          "color": {
+            "description": "Tag color (hex)",
+            "nullable": true,
+            "pattern": "^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$",
+            "type": "string"
+          },
+          "name": {
+            "description": "Tag name",
+            "pattern": "^[^/]*$",
+            "type": "string"
+          },
+          "parentId": {
+            "description": "Parent tag ID",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "TagResponseDto": {
+        "properties": {
+          "color": {
+            "description": "Tag color (hex)",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "Creation date",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Tag ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "name": {
+            "description": "Tag name",
+            "type": "string"
+          },
+          "parentId": {
+            "description": "Parent tag ID",
+            "type": "string"
+          },
+          "updatedAt": {
+            "description": "Last update date",
+            "format": "date-time",
+            "type": "string"
+          },
+          "value": {
+            "description": "Tag value (full path)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "createdAt",
+          "id",
+          "name",
+          "updatedAt",
+          "value"
+        ],
+        "type": "object"
+      },
+      "TagUpsertDto": {
+        "properties": {
+          "tags": {
+            "description": "Tag names to upsert",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tags"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Immich",
+    "version": "3.2.0"
+  },
+  "paths": {
+    "/assets": {
+      "delete": {
+        "description": "Deletes multiple assets at the same time.",
+        "operationId": "deleteAssets",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetBulkDeleteDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Delete assets",
+        "tags": [
+          "Assets"
+        ],
+        "x-immich-history": [
+          {
+            "state": "Added",
+            "version": "v1"
+          },
+          {
+            "state": "Beta",
+            "version": "v1"
+          },
+          {
+            "state": "Stable",
+            "version": "v2"
+          }
+        ],
+        "x-immich-permission": "asset.delete",
+        "x-immich-state": "Stable"
+      },
+      "post": {
+        "description": "Uploads a new asset to the server.",
+        "operationId": "uploadAsset",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "slug",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "sha1 checksum that can be used for duplicate detection before the file is uploaded",
+            "in": "header",
+            "name": "x-immich-checksum",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetMediaCreateDto"
+              }
+            }
+          },
+          "description": "Asset Upload Information",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetMediaResponseDto"
+                }
+              }
+            },
+            "description": "Asset is a duplicate"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetMediaResponseDto"
+                }
+              }
+            },
+            "description": "Asset uploaded successfully"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Upload asset",
+        "tags": [
+          "Assets"
+        ],
+        "x-immich-history": [
+          {
+            "state": "Added",
+            "version": "v1"
+          },
+          {
+            "state": "Beta",
+            "version": "v1"
+          },
+          {
+            "state": "Stable",
+            "version": "v2"
+          }
+        ],
+        "x-immich-permission": "asset.upload",
+        "x-immich-state": "Stable"
+      },
+      "put": {
+        "deprecated": true,
+        "description": "Updates multiple assets at the same time.",
+        "operationId": "updateAssets",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetBulkUpdateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Update assets",
+        "tags": [
+          "Assets",
+          "Deprecated"
+        ],
+        "x-immich-history": [
+          {
+            "state": "Added",
+            "version": "v1"
+          },
+          {
+            "state": "Beta",
+            "version": "v1"
+          },
+          {
+            "state": "Stable",
+            "version": "v2"
+          },
+          {
+            "replacementId": "updateAssets",
+            "state": "Deprecated",
+            "version": "v3"
+          }
+        ],
+        "x-immich-permission": "asset.update",
+        "x-immich-state": "Deprecated"
+      }
+    },
+    "/search/metadata": {
+      "post": {
+        "description": "Search for assets based on various metadata criteria.",
+        "operationId": "searchAssets",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "slug",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetadataSearchDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Search assets by metadata",
+        "tags": [
+          "Search"
+        ],
+        "x-immich-history": [
+          {
+            "state": "Added",
+            "version": "v1"
+          },
+          {
+            "state": "Beta",
+            "version": "v1"
+          },
+          {
+            "state": "Stable",
+            "version": "v2"
+          }
+        ],
+        "x-immich-permission": "asset.read",
+        "x-immich-state": "Stable"
+      }
+    },
+    "/tags": {
+      "get": {
+        "description": "Retrieve a list of all tags.",
+        "operationId": "getAllTags",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TagResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve tags",
+        "tags": [
+          "Tags"
+        ],
+        "x-immich-history": [
+          {
+            "state": "Added",
+            "version": "v1"
+          },
+          {
+            "state": "Beta",
+            "version": "v1"
+          },
+          {
+            "state": "Stable",
+            "version": "v2"
+          }
+        ],
+        "x-immich-permission": "tag.read",
+        "x-immich-state": "Stable"
+      },
+      "post": {
+        "description": "Create a new tag by providing a name and optional color.",
+        "operationId": "createTag",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagCreateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Create a tag",
+        "tags": [
+          "Tags"
+        ],
+        "x-immich-history": [
+          {
+            "state": "Added",
+            "version": "v1"
+          },
+          {
+            "state": "Beta",
+            "version": "v1"
+          },
+          {
+            "state": "Stable",
+            "version": "v2"
+          }
+        ],
+        "x-immich-permission": "tag.create",
+        "x-immich-state": "Stable"
+      },
+      "put": {
+        "description": "Create or update multiple tags in a single request.",
+        "operationId": "upsertTags",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagUpsertDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TagResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Upsert tags",
+        "tags": [
+          "Tags"
+        ],
+        "x-immich-history": [
+          {
+            "state": "Added",
+            "version": "v1"
+          },
+          {
+            "state": "Beta",
+            "version": "v1"
+          },
+          {
+            "state": "Stable",
+            "version": "v2"
+          }
+        ],
+        "x-immich-permission": "tag.create",
+        "x-immich-state": "Stable"
+      }
+    },
+    "/tags/assets": {
+      "put": {
+        "description": "Add multiple tags to multiple assets in a single request.",
+        "operationId": "bulkTagAssets",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagBulkAssetsDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TagBulkAssetsResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Tag assets",
+        "tags": [
+          "Tags"
+        ],
+        "x-immich-history": [
+          {
+            "state": "Added",
+            "version": "v1"
+          },
+          {
+            "state": "Beta",
+            "version": "v1"
+          },
+          {
+            "state": "Stable",
+            "version": "v2"
+          }
+        ],
+        "x-immich-permission": "tag.asset",
+        "x-immich-state": "Stable"
+      }
+    }
+  }
+}

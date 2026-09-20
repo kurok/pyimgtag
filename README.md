@@ -770,6 +770,58 @@ runs, so a diff means something changed.
 > hierarchical-keyword writing; treat this format as provisional until it is
 > done.
 
+#### `pyimgtag immich-sync` — push tags to immich *(experimental)*
+
+[immich](https://immich.app) is a self-hosted photo server. This pushes what
+pyimgtag worked out — tags, and optionally a favourite flag — onto the matching
+assets there, so a library you tagged locally arrives searchable in immich.
+
+```bash
+export IMMICH_API_KEY=...                                    # not --api-key
+pyimgtag immich-sync --url https://immich.example.com        # dry run
+pyimgtag immich-sync --url https://immich.example.com --apply
+pyimgtag immich-sync --url ... --apply --favorite-min-score 8 --tag-prefix pyimgtag/
+```
+
+**Dry run by default.** Nothing is written until you pass `--apply`; `--dry-run`
+says so explicitly, and passing both is an error rather than a silent write.
+The dry run prints what would be pushed and names every photo it could not
+match, with the reason.
+
+**One-way.** pyimgtag writes to immich and never reads edits back. Two-way sync
+needs a conflict model, and a tagger that silently overwrites your own edits is
+worse than one that does nothing.
+
+**Matching is conservative.** A photo is matched only when its filename *and*
+its capture date (within one minute) resolve to exactly one immich asset. A
+filename alone is not evidence — every phone in the world produces
+`IMG_0001.JPG` — so a photo with no capture date is never matched, and a
+filename matching several assets is reported as ambiguous rather than resolved
+by picking one. Unmatched photos are listed, never guessed at.
+
+Prefer `IMMICH_API_KEY` in the environment over `--api-key`: an argument is
+visible in `ps aux` to every other user on the machine, and an immich key is a
+credential for the whole photo library.
+
+`--tag-prefix pyimgtag/` nests everything under one immich parent tag, which
+makes the whole import reviewable — and removable — as a unit.
+
+> **Experimental: written against the immich API, not yet run against a
+> server.** Every request this command builds is validated in the test suite
+> against a pinned slice of immich's own published OpenAPI specification for
+> **3.2.0** (`tests/fixtures/immich_openapi_subset.json`), so the payload
+> shapes, required fields and timestamp formats are the ones immich documents.
+> What that does *not* prove is that a running server behaves the way its
+> specification says. Use `--apply` on a library you can afford to re-tag
+> first.
+>
+> Two consequences of targeting 3.2.0 specifically: the command uses the nested
+> `filter` search object rather than the flat `originalFileName` / `takenAfter`
+> fields, which 3.2.0 deprecates — so **servers older than 3.2.0 will not
+> understand the search request**. And tags are resolved through `PUT /tags`
+> (upsert) rather than `POST /tags`, because the create endpoint's `name` is
+> constrained to `^[^/]*$` and so cannot express a nested tag at all.
+
 #### `pyimgtag events` — events, trips, and albums
 
 The DB already knows *when* and *where* every photo was taken. `events` composes
@@ -1707,6 +1759,7 @@ a default server cannot see them at all. No tool deletes anything.
 | `ANTHROPIC_API_KEY` | `--backend anthropic` | Auth for Claude. Overridden by `--api-key`. |
 | `OPENAI_API_KEY` | `--backend openai` | Auth for OpenAI. Overridden by `--api-key`. |
 | `GOOGLE_API_KEY` / `GEMINI_API_KEY` | `--backend gemini` | Auth for Gemini (either name accepted). Overridden by `--api-key`. |
+| `IMMICH_API_KEY` | `pyimgtag immich-sync` | Auth for the immich server. Overridden by `--api-key`. |
 
 > **API key security:** Prefer env vars over `--api-key`. The `--api-key` argument is
 > visible to other users in `ps aux` process listings on shared machines.

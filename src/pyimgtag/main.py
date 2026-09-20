@@ -233,6 +233,20 @@ Examples:
   pyimgtag export --format digikam --output tags.xml
 """,
     ),
+    "immich-sync": (
+        "Push tags and favourites to an immich server (experimental)",
+        "Match each local photo to an immich asset by filename and capture date,\n"
+        "then push its tags and, above --favorite-min-score, mark it a favourite.\n"
+        "One-way: nothing is ever read back from immich into the database.\n"
+        "Dry run by default -- nothing is written until you pass --apply.",
+        """\
+Examples:
+  export IMMICH_API_KEY=...
+  pyimgtag immich-sync --url https://immich.example.com            # dry run
+  pyimgtag immich-sync --url https://immich.example.com --apply
+  pyimgtag immich-sync --url ... --favorite-min-score 8 --apply
+""",
+    ),
     "judge": (
         "Score photos with the professional photo-judge rubric",
         "Score photos 1-10 with the photo-judge rubric and print a ranked list.\n"
@@ -1303,6 +1317,47 @@ def _add_export_subcommand(subparsers: Any) -> None:
     )
 
 
+def _add_immich_sync_subcommand(subparsers: Any) -> None:
+    immich_p = _sub(subparsers, "immich-sync")
+    immich_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    immich_p.add_argument("--url", required=True, metavar="URL", help="Immich server base URL")
+    immich_p.add_argument(
+        "--api-key",
+        metavar="KEY",
+        help=(
+            "API key. Prefer IMMICH_API_KEY in the environment: an argument is "
+            "visible in `ps aux` to every other user on the machine"
+        ),
+    )
+    # --dry-run is already the default; it exists so a script can say what it
+    # means, and so that passing both is an argparse error rather than a
+    # silent write.
+    immich_mode = immich_p.add_mutually_exclusive_group()
+    immich_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually write to immich. Without it this is a dry run",
+    )
+    immich_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the plan and write nothing (the default)",
+    )
+    immich_p.add_argument(
+        "--favorite-min-score",
+        type=int,
+        metavar="N",
+        help="Mark photos with a judge score of at least N as immich favourites",
+    )
+    immich_p.add_argument(
+        "--tag-prefix",
+        default="",
+        metavar="PREFIX",
+        help="Prefix every pushed tag, e.g. 'pyimgtag/' to keep them separable",
+    )
+    immich_p.add_argument("--limit", type=int, metavar="N", help="Sync at most N photos")
+
+
 def _add_judge_subcommand(subparsers: Any) -> None:
     judge_p = _sub(subparsers, "judge")
     judge_src = judge_p.add_mutually_exclusive_group(required=False)
@@ -1620,6 +1675,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_search_subcommand(subparsers)
     _add_events_subcommand(subparsers)
     _add_export_subcommand(subparsers)
+    _add_immich_sync_subcommand(subparsers)
     _add_judge_subcommand(subparsers)
     _add_tags_subcommand(subparsers)
     _add_dedup_subcommand(subparsers)
@@ -1708,6 +1764,7 @@ def main(argv: list[str] | None = None) -> int:
     from pyimgtag.commands.events import cmd_events
     from pyimgtag.commands.export import cmd_export
     from pyimgtag.commands.faces import cmd_faces
+    from pyimgtag.commands.immich import cmd_immich_sync
     from pyimgtag.commands.insights import cmd_insights
     from pyimgtag.commands.judge import cmd_judge
     from pyimgtag.commands.mcp_cmd import cmd_mcp
@@ -1746,6 +1803,7 @@ def main(argv: list[str] | None = None) -> int:
         "search": lambda: cmd_search(args),
         "events": lambda: cmd_events(args),
         "export": lambda: cmd_export(args),
+        "immich-sync": lambda: cmd_immich_sync(args),
         "judge": lambda: cmd_judge(args, progress_db),
         "tags": lambda: cmd_tags(args),
         "dedup": lambda: cmd_dedup(args),
