@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Lightroom Classic / digiKam verification fixture and checklist** (#357): `python -m pyimgtag.interop_fixture` writes an embedded-metadata image, a sidecar image and its `.xmp`, all carrying one sample that exercises every branch the taxonomy can emit — two people, a three-level place with a non-ASCII city, a plain tag, a controlled-vocabulary tag, an event and a star rating. `docs/interop-verification.md` states the exact tree to expect and walks through the import in both applications. This is the half of #357's remaining acceptance criterion that can be done without the applications; the other half is someone running the import and adding the screenshots. The sample is built by calling `pyimgtag.hierarchy`, and a test parses the checklist and compares it to what the fixture writes, so the page cannot quietly go stale.
+
 ## [0.29.2] - 2026-07-29
 
 ### Security
