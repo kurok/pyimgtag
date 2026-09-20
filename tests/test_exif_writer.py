@@ -46,12 +46,19 @@ def _make_completed_process(returncode: int = 0, stdout: str = "", stderr: str =
 
 
 class TestIsExiftoolAvailable:
+    """The name stays here; the answer now lives in `pyimgtag.exiftool`.
+
+    Patched there rather than here on purpose: `exif_writer` no longer imports
+    shutil at all, and a patch target that resolves to nothing would make these
+    pass for the wrong reason.
+    """
+
     def test_returns_true_when_found(self):
-        with patch("pyimgtag.exif_writer.shutil.which", return_value="/usr/local/bin/exiftool"):
+        with patch("pyimgtag.exiftool.shutil.which", return_value="/usr/local/bin/exiftool"):
             assert is_exiftool_available() is True
 
     def test_returns_false_when_not_found(self):
-        with patch("pyimgtag.exif_writer.shutil.which", return_value=None):
+        with patch("pyimgtag.exiftool.shutil.which", return_value=None):
             assert is_exiftool_available() is False
 
 
