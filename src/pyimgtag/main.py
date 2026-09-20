@@ -523,6 +523,15 @@ def _add_run_flags(run_p: argparse.ArgumentParser) -> None:
     run_p.add_argument("--date-from", help="Process images from this date (YYYY-MM-DD)")
     run_p.add_argument("--date-to", help="Process images up to this date (YYYY-MM-DD)")
     run_p.add_argument(
+        "--hierarchical-keywords",
+        action="store_true",
+        help=(
+            "Also write hierarchical keyword trees (XMP-lr:HierarchicalSubject and "
+            "XMP-digiKam:TagsList) for Lightroom and digiKam, alongside the flat "
+            "keywords every other tool reads"
+        ),
+    )
+    run_p.add_argument(
         "--include-video",
         action="store_true",
         help=(
@@ -866,6 +875,15 @@ def _add_faces_subcommand(subparsers: Any) -> None:
 
     faces_apply = faces_sub.add_parser("apply", help="Write person keywords to image metadata")
     faces_apply.add_argument("--db", help=_DEFAULT_DB_HELP)
+    faces_apply.add_argument(
+        "--hierarchical-keywords",
+        action="store_true",
+        help=(
+            "Also write hierarchical keyword trees (XMP-lr:HierarchicalSubject and "
+            "XMP-digiKam:TagsList) for Lightroom and digiKam, alongside the flat "
+            "keywords every other tool reads"
+        ),
+    )
     faces_apply.add_argument(
         "--write-exif",
         action="store_true",
@@ -1251,6 +1269,15 @@ def _add_events_subcommand(subparsers: Any) -> None:
         "--write-keywords",
         action="store_true",
         help="Write an Event/<name> keyword into each file's metadata",
+    )
+    apply_p.add_argument(
+        "--hierarchical-keywords",
+        action="store_true",
+        help=(
+            "Also write hierarchical keyword trees (XMP-lr:HierarchicalSubject and "
+            "XMP-digiKam:TagsList) for Lightroom and digiKam, alongside the flat "
+            "keywords every other tool reads"
+        ),
     )
     apply_p.add_argument(
         "--copy",

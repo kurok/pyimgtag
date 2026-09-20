@@ -98,16 +98,18 @@ jobs:
         enable-cache: "true"
         cache-dependency-glob: "pyproject.toml"
         cache-suffix: ${{ github.job }}-${{ matrix.os }}-${{ matrix.python-version }}
-    - name: Install ffmpeg
-      # The video tests build a tiny synthetic clip and decode it. Without
-      # ffmpeg they skip with a reason rather than fail, so this is what makes
-      # them actually run on all three runners.
+    - name: Install ffmpeg and exiftool
+      # Both are external tools pyimgtag shells out to, and both gate tests
+      # that skip with a reason rather than fail when absent -- so installing
+      # them here is what makes those tests actually run. ffmpeg decodes the
+      # synthetic clip the video tests build; exiftool is what the metadata
+      # round-trip writes and reads back.
       shell: bash
       run: |
         case "${{ matrix.os }}" in
-          ubuntu-latest)  sudo apt-get update && sudo apt-get install -y ffmpeg ;;
-          macos-latest)   brew install ffmpeg ;;
-          windows-latest) choco install ffmpeg --no-progress -y ;;
+          ubuntu-latest)  sudo apt-get update && sudo apt-get install -y ffmpeg libimage-exiftool-perl ;;
+          macos-latest)   brew install ffmpeg exiftool ;;
+          windows-latest) choco install ffmpeg exiftool --no-progress -y ;;
         esac
     - name: Install dependencies
       run: uv pip install -e ".[dev,lint,review]"

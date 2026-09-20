@@ -679,6 +679,57 @@ That is a documented v1 heuristic. A photo judge scores composition and
 exposure, which one representative frame carries better than an average over
 three would — averaging three compositions describes none of them.
 
+#### Hierarchical keywords (`--hierarchical-keywords`)
+
+Flat keywords arrive in Lightroom Classic or digiKam as an unstructured pile.
+Those tools organize by **keyword trees**, and pyimgtag already knows the
+structure — who is in the photo, where it was taken, which event it belongs to
+— so it can write the tree instead of flattening it away.
+
+```bash
+pyimgtag run --input-dir ~/Pictures --write-exif --hierarchical-keywords
+pyimgtag faces apply --write-exif --hierarchical-keywords
+pyimgtag events apply --write-keywords --hierarchical-keywords
+```
+
+Writes `XMP-lr:HierarchicalSubject` (Lightroom) and `XMP-digiKam:TagsList`
+(digiKam) — **alongside** the flat `XMP-dc:Subject`, never instead of it.
+Dropping the flat list to gain a tree would trade every other tool for two.
+Both namespaces go out in the same exiftool pass.
+
+```
+People|Alice
+Places|Portugal|Lisboa|Óbidos
+Tags|sunset
+Events|Italy 2025
+```
+
+Places nest country → region → city. A photo geocoded to a country but no city
+becomes `Places|Spain` — never `Places|Spain||Madrid`, which would import as a
+nameless tag. With a controlled vocabulary loaded, a tag's own hierarchy is
+used: `beach` under `Nature|Coast` writes `Tags|Nature|Coast|beach`.
+
+Sidecars get the same treatment (`--sidecar-only`), which matters because RAW
+workflows live in sidecars — a tree that only reached embedded metadata would
+miss exactly the people who most want one. Re-running is idempotent: paths are
+sorted and de-duplicated, and merge mode uses exiftool's remove-then-add idiom.
+
+**Star ratings.** `--write-rating` maps the 1–10 judge score onto the XMP
+standard's 1–5 stars, two points per star:
+
+| Judge | 1–2 | 3–4 | 5–6 | 7–8 | 9–10 |
+|---|---|---|---|---|---|
+| Stars | ★ | ★★ | ★★★ | ★★★★ | ★★★★★ |
+
+A photo the judge never scored gets no rating, rather than one star.
+
+> **Verified against exiftool, not yet against the applications.** The tags are
+> written and read back with exiftool in CI, which proves they land in the
+> right namespaces with the right values. Nobody has yet imported a
+> pyimgtag-tagged file into a real Lightroom Classic or digiKam and confirmed
+> the tree appears as expected. That round-trip is the one open item on the
+> interop work.
+
 #### `pyimgtag export` — take the library somewhere else
 
 Everything the database knows, in a format another tool reads. Metadata

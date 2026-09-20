@@ -83,6 +83,8 @@ def write_exif_description(
     *,
     fmt: str = "auto",
     merge: bool = False,
+    hierarchical: list[str] | None = None,
+    rating: int | None = None,
 ) -> str | None:
     """Write description and/or keywords to image EXIF using exiftool.
 
@@ -103,11 +105,21 @@ def write_exif_description(
             semicolon-joined string that cannot be merged without reading
             it first). When False (default), existing keywords are cleared
             before writing.
+        hierarchical: ``A|B|C`` keyword paths written to
+            ``XMP-lr:HierarchicalSubject`` (Lightroom) and
+            ``XMP-digiKam:TagsList`` (digiKam). Written alongside the flat
+            ``keywords``, never instead of them: flat Subject is what every
+            other tool reads, and dropping it to gain a tree would trade
+            universal compatibility for two applications. Requires a format
+            that includes XMP.
+        rating: XMP star rating, 1-5. Skipped when None. See
+            :func:`pyimgtag.hierarchy.stars_from_score` for the mapping from
+            a 1-10 judge score.
 
     Returns:
         None on success, or an error message string on failure.
     """
-    if description is None and not keywords:
+    if description is None and not keywords and not hierarchical and rating is None:
         return None
 
     if not is_exiftool_available():
@@ -160,6 +172,25 @@ def write_exif_description(
             args.append("-XPKeywords=")
             args.append(f"-XPKeywords={';'.join(keywords)}")
 
+    if hierarchical and _write_xmp:
+        # Both tags in the same pass. They are separate namespaces -- Lightroom
+        # reads lr:HierarchicalSubject, digiKam reads digiKam:TagsList -- and
+        # writing only one leaves the other application with a flat pile.
+        for tag in ("XMP-lr:HierarchicalSubject", "XMP-digiKam:TagsList"):
+            if merge:
+                # Same remove-then-add idiom as the flat keywords above, so a
+                # re-run does not accumulate duplicates.
+                for path in hierarchical:
+                    args.append(f"-{tag}-={path}")
+                    args.append(f"-{tag}+={path}")
+            else:
+                args.append(f"-{tag}=")
+                for path in hierarchical:
+                    args.append(f"-{tag}={path}")
+
+    if rating is not None and _write_xmp:
+        args.append(f"-XMP:Rating={rating}")
+
     # Restore date fields to prevent silent timestamp changes
     if saved_dates:
         for tag, value in saved_dates.items():
@@ -194,6 +225,9 @@ def write_xmp_sidecar(
     file_path: str,
     description: str | None = None,
     keywords: list[str] | None = None,
+    *,
+    hierarchical: list[str] | None = None,
+    rating: int | None = None,
 ) -> str | None:
     """Write description and keywords to an XMP sidecar file.
 
@@ -209,11 +243,16 @@ def write_xmp_sidecar(
         file_path: Path to the source image file.
         description: Description text to write. Skipped when None.
         keywords: List of keyword strings. Skipped when None or empty.
+        hierarchical: ``A|B|C`` keyword paths, written alongside the flat
+            ``keywords``. RAW workflows live in sidecars, so a tree that only
+            reached embedded metadata would miss exactly the users who care
+            most about it.
+        rating: XMP star rating, 1-5. Skipped when None.
 
     Returns:
         None on success, or an error message string on failure.
     """
-    if description is None and not keywords:
+    if description is None and not keywords and not hierarchical and rating is None:
         return None
 
     if not is_exiftool_available():
@@ -231,6 +270,15 @@ def write_xmp_sidecar(
         args.append("-XMP:Subject=")
         for kw in keywords:
             args.append(f"-XMP:Subject={kw}")
+
+    if hierarchical:
+        for tag in ("XMP-lr:HierarchicalSubject", "XMP-digiKam:TagsList"):
+            args.append(f"-{tag}=")
+            for path in hierarchical:
+                args.append(f"-{tag}={path}")
+
+    if rating is not None:
+        args.append(f"-XMP:Rating={rating}")
 
     if sidecar_path.exists():
         # Update existing sidecar in-place

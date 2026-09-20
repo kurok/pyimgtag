@@ -956,8 +956,15 @@ def _write_metadata(
         write_xmp_sidecar,
     )
 
+    hierarchical = _hierarchical_for(result, args)
+
     if args.sidecar_only:
-        err = write_xmp_sidecar(result.file_path, description=rich_desc, keywords=result.tags)
+        err = write_xmp_sidecar(
+            result.file_path,
+            description=rich_desc,
+            keywords=result.tags,
+            hierarchical=hierarchical,
+        )
         if err:
             print(f"  Sidecar write failed: {err}", file=sys.stderr)
         return
@@ -969,7 +976,12 @@ def _write_metadata(
             f"  [{ext}] not supported for direct write; falling back to XMP sidecar",
             file=sys.stderr,
         )
-        err = write_xmp_sidecar(result.file_path, description=rich_desc, keywords=result.tags)
+        err = write_xmp_sidecar(
+            result.file_path,
+            description=rich_desc,
+            keywords=result.tags,
+            hierarchical=hierarchical,
+        )
         if err:
             print(f"  Sidecar write failed: {err}", file=sys.stderr)
         return
@@ -979,9 +991,41 @@ def _write_metadata(
         description=rich_desc,
         keywords=result.tags,
         fmt=args.metadata_format,
+        hierarchical=hierarchical,
     )
     if err:
         print(f"  EXIF write failed: {err}", file=sys.stderr)
+
+
+def _hierarchical_for(result: ImageResult, args: argparse.Namespace) -> list[str] | None:
+    """The hierarchical keyword paths for one result, or None when not asked for.
+
+    The vocabulary hierarchy is used when one is loaded, so a controlled
+    vocabulary's own tree is what reaches Lightroom rather than a flat
+    ``Tags|`` child per term.
+    """
+    if not getattr(args, "hierarchical_keywords", False):
+        return None
+    from pyimgtag.hierarchy import keyword_paths
+    from pyimgtag.vocabulary import Vocabulary
+
+    vocabulary = getattr(args, "_vocabulary", None)
+    vocabulary_paths: dict[str, str] = {}
+    if isinstance(vocabulary, Vocabulary):
+        for tag in result.tags:
+            # Vocabulary.path() is the root-to-tag chain, inclusive. A tag with
+            # no parent comes back as [tag], which needs no mapping.
+            chain = vocabulary.path(tag)
+            if len(chain) > 1:
+                vocabulary_paths[tag] = "|".join(chain)
+
+    return keyword_paths(
+        result.tags,
+        country=result.nearest_country,
+        region=result.nearest_region,
+        city=result.nearest_city,
+        vocabulary_paths=vocabulary_paths,
+    )
 
 
 def _hydrate_from_db(
