@@ -32,12 +32,12 @@ EMBEDDED_NAME = "pyimgtag-interop-embedded.jpg"
 #: Written with the tree in a companion ``.xmp`` instead -- the RAW workflow.
 SIDECAR_NAME = "pyimgtag-interop-sidecar.jpg"
 
-#: ASCII on purpose. The description also goes into IPTC, and pyimgtag does not
-#: declare ``IPTC:CodedCharacterSet``, so non-ASCII text there arrives with an
-#: undeclared encoding and could display mangled for reasons that have nothing
-#: to do with the keyword tree. Every value this fixture puts into IPTC is
-#: therefore ASCII, and the non-ASCII case it exists to exercise lives in the
-#: city name, which travels in XMP only.
+#: ASCII, though no longer because it has to be: #364 made pyimgtag declare
+#: ``IPTC:CodedCharacterSet``, so non-ASCII text in IPTC is safe now. It stays
+#: ASCII because the non-ASCII case this fixture exists to exercise belongs in
+#: the city name under ``Places``, where the applications actually render the
+#: tree -- a second accented string in the description would add a way for the
+#: check to fail without adding anything it can tell you.
 DESCRIPTION = "pyimgtag interop fixture: sunset over the castle at Obidos"
 
 #: The pretend result. Field names match what `run`, `faces apply` and

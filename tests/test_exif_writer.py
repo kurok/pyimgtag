@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
+import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from pyimgtag.exif_writer import (
     RAW_SIDECAR_ONLY_EXTENSIONS,
@@ -16,6 +20,22 @@ from pyimgtag.exif_writer import (
     write_exif_description,
     write_xmp_sidecar,
 )
+
+
+def _exiftool_json(path, *tags) -> dict:
+    """Read tags back as JSON, decoded as UTF-8 rather than by locale.
+
+    ``text=True`` decodes the pipe with the locale encoding, which is not
+    UTF-8 on every runner; exiftool writes its JSON as UTF-8 everywhere.
+    """
+    proc = subprocess.run(  # noqa: S603  # nosec B603
+        [shutil.which("exiftool"), "-json", *tags, str(path)],
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    return json.loads(proc.stdout.decode("utf-8"))[0]
 
 
 def _make_completed_process(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
@@ -628,3 +648,121 @@ class TestSupportedExtensions:
     def test_raw_types_not_in_supported(self):
         for ext in (".cr2", ".nef", ".raf", ".arw"):
             assert ext not in SUPPORTED_DIRECT_WRITE_EXTENSIONS
+
+
+class TestIptcCharsetDeclaration:
+    """IPTC IIM has no default encoding, so UTF-8 has to be declared.
+
+    A record with no CodedCharacterSet is undeclared, and readers fall back to
+    Latin-1 -- so an accented city written without it arrives as mojibake in
+    anything that follows the spec. exiftool's own default read assumes UTF-8
+    and hides that, which is why the round-trip below forces the Latin-1
+    reading rather than trusting a plain read.
+    """
+
+    def _patch_run(self, *side_effects):
+        return patch(
+            "pyimgtag.exif_writer.subprocess.run",
+            side_effect=list(side_effects),
+        )
+
+    def _date_read_result(self):
+        return _make_completed_process(0, stdout=json.dumps([{}]))
+
+    def _cmd_for(self, **kwargs):
+        with patch("pyimgtag.exif_writer.is_exiftool_available", return_value=True):
+            with self._patch_run(self._date_read_result(), _make_completed_process(0)) as mock_run:
+                write_exif_description("/p/photo.jpg", **kwargs)
+                return mock_run.call_args_list[1][0][0]
+
+    def test_declared_when_a_description_goes_to_iptc(self):
+        assert "-codedcharacterset=utf8" in self._cmd_for(description="desc")
+
+    def test_declared_when_keywords_go_to_iptc(self):
+        assert "-codedcharacterset=utf8" in self._cmd_for(keywords=["Óbidos"])
+
+    def test_declared_in_merge_mode(self):
+        """Existing undeclared content plus a new declaration is the risky case."""
+        cmd = self._cmd_for(keywords=["Óbidos"], merge=True)
+        assert "-codedcharacterset=utf8" in cmd
+        assert "-IPTC:Keywords+=Óbidos" in cmd
+
+    def test_declared_for_fmt_iptc(self):
+        assert "-codedcharacterset=utf8" in self._cmd_for(description="desc", fmt="iptc")
+
+    def test_not_declared_for_fmt_xmp(self):
+        """No IPTC text is going out, so a charset record would be noise."""
+        assert "-codedcharacterset=utf8" not in self._cmd_for(description="desc", fmt="xmp")
+
+    def test_not_declared_for_fmt_exif(self):
+        assert "-codedcharacterset=utf8" not in self._cmd_for(description="desc", fmt="exif")
+
+    def test_not_declared_for_an_unrecognized_fmt(self):
+        assert "-codedcharacterset=utf8" not in self._cmd_for(description="desc", fmt="nonsense")
+
+    def test_not_declared_when_only_xmp_only_fields_are_written(self):
+        """Hierarchical tags and the rating never reach IPTC."""
+        cmd = self._cmd_for(hierarchical=["Places|Portugal"], rating=4)
+        assert "-codedcharacterset=utf8" not in cmd
+
+    @staticmethod
+    def _write_accented(tmp_path, name: str) -> "object":
+        from PIL import Image
+
+        photo = tmp_path / name
+        Image.new("RGB", (16, 16), (9, 9, 9)).save(photo)
+        assert (
+            write_exif_description(
+                str(photo), description="Sunset at Óbidos", keywords=["Óbidos", "José"]
+            )
+            is None
+        )
+        return photo
+
+    @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
+    def test_the_declaration_reaches_the_file(self, tmp_path):
+        """The regression guard: without this arg the record has no charset.
+
+        exiftool cannot stand in for a strict IPTC reader here -- it
+        auto-detects valid UTF-8 in the record and decodes it correctly whether
+        or not anything was declared, which is exactly why this went unnoticed.
+        What can be asserted is that the declaration is present, which is what
+        a reader that does *not* guess needs in order to get it right. That
+        assertion is ASCII, so it holds on every platform including the one
+        where #366 destroys the values themselves.
+        """
+        photo = self._write_accented(tmp_path, "a.jpg")
+        data = _exiftool_json(photo, "-IPTC:CodedCharacterSet")
+        assert data["CodedCharacterSet"] == "UTF8"
+
+    @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
+    @pytest.mark.xfail(
+        sys.platform == "win32",
+        reason="#366: non-ASCII metadata values are written as '?' on Windows",
+        strict=True,
+    )
+    def test_the_declared_values_survive(self, tmp_path):
+        """Declaring the charset is worth nothing if the bytes arrive broken.
+
+        On Windows they do, for an unrelated reason: the values are destroyed
+        in the argv code-page conversion before exiftool sees them (#366), so
+        the record correctly declares UTF-8 over content that is already
+        '?bidos'. Marked strict, so this fails once #366 is fixed and the
+        marker comes off.
+        """
+        photo = self._write_accented(tmp_path, "a.jpg")
+        data = _exiftool_json(photo, "-IPTC:Keywords", "-IPTC:Caption-Abstract")
+        assert data["Keywords"] == ["Óbidos", "José"]
+        assert data["Caption-Abstract"] == "Sunset at Óbidos"
+
+    @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
+    def test_no_declaration_for_an_xmp_only_write(self, tmp_path):
+        from PIL import Image
+
+        photo = tmp_path / "b.jpg"
+        Image.new("RGB", (16, 16), (9, 9, 9)).save(photo)
+
+        assert write_exif_description(str(photo), description="desc", fmt="xmp") is None
+
+        data = _exiftool_json(photo, "-IPTC:CodedCharacterSet")
+        assert "CodedCharacterSet" not in data
