@@ -611,3 +611,106 @@ class TestJudgeVideo(unittest.TestCase):
         args = argparse.Namespace(include_video=True, video_extensions=None)
         with mock.patch("pyimgtag.video.extract_frames", side_effect=VideoToolError("no ffmpeg")):
             self.assertIsNone(_judge_path(_Client(), Path("/v/clip.mp4"), args))
+
+
+class TestNonAsciiPaths(unittest.TestCase):
+    """Does the video path have the problem #366/#372 had?
+
+    exiftool lost non-ASCII because its Perl runtime reads argv through the
+    Windows ANSI API. ffmpeg and ffprobe are handed paths on argv by the same
+    `subprocess.run`, so the question is whether they decode the command line
+    the same way. This is a probe, not an accusation: if it passes everywhere,
+    ffmpeg handles Unicode argv properly and there is nothing to fix.
+
+    `Łódź` is chosen because CP1252 cannot represent the L-stroke or z-acute.
+    An accented Latin-1 name like `Óbidos` round-trips through that code page
+    losslessly and would prove nothing -- the mistake made the first time on
+    #372.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(__import__("tempfile").mkdtemp())
+        cls.folder = cls.tmp / "Łódź"
+        cls.folder.mkdir()
+        cls.clip = cls.folder / "wideó.mp4"
+        if not ffmpeg_available():
+            return
+        subprocess.run(  # noqa: S603  # nosec B603
+            [
+                shutil.which("ffmpeg"),
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=160x120:rate=10",
+                "-pix_fmt",
+                "yuv420p",
+                "-y",
+                str(cls.clip),
+            ],
+            capture_output=True,
+            timeout=120,
+            check=False,
+        )
+
+    @requires_ffmpeg
+    def test_the_clip_was_written_where_we_asked(self):
+        """If this fails, ffmpeg lost the path on the way in, not on the way out."""
+        self.assertTrue(self.clip.exists(), f"ffmpeg did not create {self.clip}")
+
+    @requires_ffmpeg
+    def test_probe_reads_a_clip_under_a_non_ascii_path(self):
+        info = probe(self.clip)
+        self.assertAlmostEqual(info.duration_sec, 2.0, delta=0.5)
+        self.assertEqual((info.width, info.height), (160, 120))
+
+    @requires_ffmpeg
+    def test_frames_extract_to_a_non_ascii_destination(self):
+        frames = extract_frames(self.clip, count=2, dest_dir=self.folder / "klatki")
+        self.assertEqual(len(frames), 2)
+        for frame in frames:
+            self.assertGreater(frame.stat().st_size, 0)
+
+
+class TestRunDecoding(unittest.TestCase):
+    """#375: `text=True` decodes with the locale encoding, and that loses output.
+
+    ffprobe's JSON carries the filename, so a path outside the active code
+    page puts bytes on stdout that the locale codec cannot map. The decode
+    raises inside subprocess's reader thread, where nothing can catch it, and
+    the output disappears rather than erroring.
+    """
+
+    def _run_with(self, stdout: bytes, stderr: bytes = b""):
+        from unittest.mock import patch
+
+        from pyimgtag.video import _run
+
+        proc = subprocess.CompletedProcess([], 0, stdout, stderr)
+        with patch("pyimgtag.video.subprocess.run", return_value=proc) as mock_run:
+            result = _run(["ffprobe", "x"])
+        return result, mock_run
+
+    def test_output_is_decoded_as_utf8_not_by_locale(self):
+        result, mock_run = self._run_with('{"filename": "Łódź"}'.encode())
+        assert result.stdout == '{"filename": "Łódź"}'
+        # text=True is the bug; capturing bytes is the fix.
+        assert mock_run.call_args.kwargs.get("text") is not True
+
+    def test_the_byte_cp1252_cannot_map_survives(self):
+        """0x81, the second byte of Ł in UTF-8, is undefined in cp1252."""
+        result, _ = self._run_with("Ł".encode())
+        assert b"\x81" in "Ł".encode()
+        assert result.stdout == "Ł"
+
+    def test_undecodable_stderr_degrades_instead_of_raising(self):
+        """ffmpeg's stderr is diagnostics; one bad byte must not end a run."""
+        result, _ = self._run_with(b"", b"\xff\xfe broken")
+        assert isinstance(result.stderr, str)
+
+    def test_the_return_code_is_preserved(self):
+        result, _ = self._run_with(b"", b"")
+        assert result.returncode == 0
