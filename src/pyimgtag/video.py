@@ -75,9 +75,28 @@ def ffmpeg_available() -> bool:
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess:
-    """Run a fixed argument vector, never a shell string."""
-    return subprocess.run(  # noqa: S603  # nosec B603
-        argv, capture_output=True, text=True, timeout=_TIMEOUT_SECONDS, check=False
+    """Run a fixed argument vector, never a shell string.
+
+    Output is captured as bytes and decoded as UTF-8 here rather than through
+    ``text=True``, which decodes with the locale encoding. On Windows that is
+    cp1252, and ffprobe's JSON carries the filename: a path containing ``Ł``
+    puts byte 0x81 on stdout, which cp1252 has no mapping for. The decode then
+    raises inside subprocess's reader thread, where it cannot be caught -- it
+    surfaces as an unraisable exception and the output is simply gone, so
+    probe() reports no duration and extract_frames() returns fewer frames than
+    it was asked for, both without an error.
+
+    errors="replace" because ffmpeg's stderr is diagnostics rather than data,
+    and one unmappable character in a log line must not end a run.
+    """
+    proc = subprocess.run(  # noqa: S603  # nosec B603
+        argv, capture_output=True, timeout=_TIMEOUT_SECONDS, check=False
+    )
+    return subprocess.CompletedProcess(
+        proc.args,
+        proc.returncode,
+        proc.stdout.decode("utf-8", "replace"),
+        proc.stderr.decode("utf-8", "replace"),
     )
 
 

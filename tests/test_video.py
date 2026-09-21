@@ -673,3 +673,44 @@ class TestNonAsciiPaths(unittest.TestCase):
         self.assertEqual(len(frames), 2)
         for frame in frames:
             self.assertGreater(frame.stat().st_size, 0)
+
+
+class TestRunDecoding(unittest.TestCase):
+    """#375: `text=True` decodes with the locale encoding, and that loses output.
+
+    ffprobe's JSON carries the filename, so a path outside the active code
+    page puts bytes on stdout that the locale codec cannot map. The decode
+    raises inside subprocess's reader thread, where nothing can catch it, and
+    the output disappears rather than erroring.
+    """
+
+    def _run_with(self, stdout: bytes, stderr: bytes = b""):
+        from unittest.mock import patch
+
+        from pyimgtag.video import _run
+
+        proc = subprocess.CompletedProcess([], 0, stdout, stderr)
+        with patch("pyimgtag.video.subprocess.run", return_value=proc) as mock_run:
+            result = _run(["ffprobe", "x"])
+        return result, mock_run
+
+    def test_output_is_decoded_as_utf8_not_by_locale(self):
+        result, mock_run = self._run_with('{"filename": "Łódź"}'.encode())
+        assert result.stdout == '{"filename": "Łódź"}'
+        # text=True is the bug; capturing bytes is the fix.
+        assert mock_run.call_args.kwargs.get("text") is not True
+
+    def test_the_byte_cp1252_cannot_map_survives(self):
+        """0x81, the second byte of Ł in UTF-8, is undefined in cp1252."""
+        result, _ = self._run_with("Ł".encode())
+        assert b"\x81" in "Ł".encode()
+        assert result.stdout == "Ł"
+
+    def test_undecodable_stderr_degrades_instead_of_raising(self):
+        """ffmpeg's stderr is diagnostics; one bad byte must not end a run."""
+        result, _ = self._run_with(b"", b"\xff\xfe broken")
+        assert isinstance(result.stderr, str)
+
+    def test_the_return_code_is_preserved(self):
+        result, _ = self._run_with(b"", b"")
+        assert result.returncode == 0
