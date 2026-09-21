@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pyimgtag import exiftool
 from pyimgtag.exif_reader import (
     _dms_to_decimal,
     _exifread_dms_to_decimal,
@@ -645,11 +646,13 @@ class TestNonAsciiPaths:
         photo = folder / "praça.jpg"
         Image.new("RGB", (16, 16), (9, 9, 9)).save(photo)
 
-        # Written through exif_writer's handover, which #371 made safe, so a
-        # failure here is the read and not the write.
-        write = subprocess.run(  # noqa: S603  # nosec B603
+        # Written through the shared helper. The setup is not what is under
+        # test, and a raw subprocess call fails here on Windows for the very
+        # reason this test exists -- which is what it did on the first
+        # attempt, before the read was ever reached.
+        write = exiftool.run(
             [
-                shutil.which("exiftool"),
+                "exiftool",
                 "-overwrite_original",
                 "-GPSLatitude=39.3606",
                 "-GPSLatitudeRef=N",
@@ -658,11 +661,9 @@ class TestNonAsciiPaths:
                 "-DateTimeOriginal=2026:04:01 14:30:00",
                 str(photo),
             ],
-            capture_output=True,
             timeout=60,
-            check=False,
         )
-        assert write.returncode == 0, write.stderr.decode("utf-8", "replace")
+        assert write.returncode == 0, write.stderr
 
         result = _read_exiftool(photo)
 

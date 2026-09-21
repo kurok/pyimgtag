@@ -54,7 +54,12 @@ class TestRun:
             ["exiftool", "-overwrite_original", "-XMP:Subject=Óbidos", "/p/a.jpg"]
         )
 
-        assert seen["cmd"][:4] == ["exiftool", "-charset", "UTF8", "-@"]
+        assert seen["cmd"][0] == "exiftool"
+        # Both charsets: one for the argument file's contents, one for how the
+        # file names in it are opened. Either alone leaves half the problem,
+        # which is what windows-latest showed when only the first was set.
+        assert seen["cmd"][1:5] == ["-charset", "UTF8", "-charset", "filename=utf8"]
+        assert seen["cmd"][5] == "-@"
         assert "Óbidos" not in " ".join(seen["cmd"])
         assert seen["text"].splitlines() == [
             "-overwrite_original",

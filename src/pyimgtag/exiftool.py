@@ -7,8 +7,12 @@ argv, and every character that code page cannot represent becomes a literal
 same way -- a photo under ``~/Fotos/\u00d3bidos`` becomes a file that does not
 exist, and the caller sees a non-zero exit it has no way to attribute.
 
-An argument file is read as UTF-8 while ``-charset UTF8`` is in force, so
-values and paths both arrive intact on every platform.
+An argument file is read as UTF-8 while ``-charset UTF8`` is in force, so both
+arrive intact. Arriving intact is not sufficient for a path: ``-charset
+filename=utf8`` is a separate setting deciding how exiftool *opens* what it
+was handed, and without it a correctly received path is still resolved through
+the Windows ANSI API and still not found. Both are set here, because either
+alone leaves half the problem.
 """
 
 from __future__ import annotations
@@ -74,7 +78,22 @@ def run(args: list[str], *, timeout: int = 30, text: bool = True) -> subprocess.
         argfile.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="")
 
         proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            [args[0], "-charset", "UTF8", "-@", str(argfile)],
+            [
+                args[0],
+                # How to decode the argument file's contents...
+                "-charset",
+                "UTF8",
+                # ...and how to treat the file names inside it. A separate
+                # setting with a separate default: on Windows exiftool
+                # otherwise takes file names to be in the system code page and
+                # opens them through the ANSI API, so a path it received
+                # perfectly well still resolves to a file that is not there.
+                # UTF8 switches it to the wide-character calls.
+                "-charset",
+                "filename=utf8",
+                "-@",
+                str(argfile),
+            ],
             capture_output=True,
             timeout=timeout,
         )
