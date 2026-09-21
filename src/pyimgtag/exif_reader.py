@@ -15,6 +15,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from pyimgtag import exiftool
 from pyimgtag.models import ExifData
 
 try:
@@ -59,7 +60,7 @@ def read_exif(file_path: str | Path) -> ExifData:
 
 def _read_exiftool(path: Path) -> ExifData | None:
     try:
-        proc = subprocess.run(  # nosec B603 B607
+        proc = exiftool.run(
             [
                 "exiftool",
                 "-json",
@@ -70,8 +71,6 @@ def _read_exiftool(path: Path) -> ExifData | None:
                 "-CreateDate",
                 str(path),
             ],
-            capture_output=True,
-            text=True,
             timeout=10,
         )
         if proc.returncode != 0:

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import subprocess
+import shutil
+import subprocess  # nosec B404
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pyimgtag import exiftool
 from pyimgtag.exif_reader import (
     _dms_to_decimal,
     _exifread_dms_to_decimal,
@@ -280,7 +282,7 @@ class TestReadExiftool:
                 }
             ]
         )
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             result = _read_exiftool(fake_img)
         assert result is not None
         assert result.has_gps
@@ -300,7 +302,7 @@ class TestReadExiftool:
         mock_proc.returncode = 0
         mock_proc.stdout = json.dumps([{"SourceFile": str(fake_img)}])
         with (
-            patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc),
+            patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc),
             patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
         ):
             result = _read_exiftool(fake_img)
@@ -316,7 +318,7 @@ class TestReadExiftool:
         mock_proc = MagicMock()
         mock_proc.returncode = 1
         mock_proc.stdout = ""
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             result = _read_exiftool(fake_img)
         assert result is None
 
@@ -329,7 +331,7 @@ class TestReadExiftool:
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = "[]"
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             result = _read_exiftool(fake_img)
         assert result is None
 
@@ -337,7 +339,7 @@ class TestReadExiftool:
         fake_img = tmp_path / "photo.jpg"
         fake_img.write_bytes(b"fake")
         with patch(
-            "pyimgtag.exif_reader.subprocess.run",
+            "pyimgtag.exif_reader.exiftool.run",
             side_effect=subprocess.TimeoutExpired(cmd="exiftool", timeout=10),
         ):
             from pyimgtag.exif_reader import _read_exiftool
@@ -351,7 +353,7 @@ class TestReadExiftool:
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = "not valid json {{{"
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             from pyimgtag.exif_reader import _read_exiftool
 
             result = _read_exiftool(fake_img)
@@ -366,7 +368,7 @@ class TestReadExiftool:
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = json.dumps([{"GPSLatitude": "N/A", "GPSLongitude": "W/A"}])
-        with patch("pyimgtag.exif_reader.subprocess.run", return_value=mock_proc):
+        with patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc):
             from pyimgtag.exif_reader import _read_exiftool
 
             result = _read_exiftool(fake_img)
@@ -604,3 +606,68 @@ class TestReadPillowGpsPath:
 
         assert result.has_gps
         assert result.gps_lat is not None and result.gps_lat > 51
+
+
+class TestNonAsciiPaths:
+    """#372: a path is an argument too, and argv is where #366 lost them.
+
+    #371 fixed the handover inside `exif_writer`. `exif_reader` still builds
+    its own exiftool command line, so a photo under an accented directory is
+    handed over the way values used to be. The failure is quiet: a non-zero
+    exit makes `_read_exiftool` return None and the caller falls back to
+    Pillow, so GPS and dates come from the weaker source for exactly those
+    photos and nothing says so.
+    """
+
+    @pytest.mark.skipif(not shutil.which("exiftool"), reason="requires exiftool on PATH")
+    @pytest.mark.parametrize(
+        "folder_name",
+        [
+            # Every character here is representable in CP1252, the usual
+            # Windows ANSI code page, so the path survives the conversion
+            # losslessly even though a *value* made of the same characters does
+            # not -- exiftool decodes values as UTF-8 and never decodes paths.
+            pytest.param("Óbidos", id="in-the-code-page"),
+            # These are not in CP1252. A lossy conversion replaces them with
+            # '?', and exiftool is handed a path to a file that does not exist.
+            pytest.param("Łódź", id="outside-the-code-page"),
+            pytest.param("日本", id="outside-any-latin-code-page"),
+        ],
+    )
+    def test_gps_is_read_from_a_photo_under_an_accented_directory(
+        self, tmp_path: Path, folder_name: str
+    ):
+        from PIL import Image
+
+        from pyimgtag.exif_reader import _read_exiftool
+
+        folder = tmp_path / folder_name
+        folder.mkdir()
+        photo = folder / "praça.jpg"
+        Image.new("RGB", (16, 16), (9, 9, 9)).save(photo)
+
+        # Written through the shared helper. The setup is not what is under
+        # test, and a raw subprocess call fails here on Windows for the very
+        # reason this test exists -- which is what it did on the first
+        # attempt, before the read was ever reached.
+        write = exiftool.run(
+            [
+                "exiftool",
+                "-overwrite_original",
+                "-GPSLatitude=39.3606",
+                "-GPSLatitudeRef=N",
+                "-GPSLongitude=9.1568",
+                "-GPSLongitudeRef=W",
+                "-DateTimeOriginal=2026:04:01 14:30:00",
+                str(photo),
+            ],
+            timeout=60,
+        )
+        assert write.returncode == 0, write.stderr
+
+        result = _read_exiftool(photo)
+
+        assert result is not None, "exiftool could not read the file at this path"
+        assert result.has_gps
+        assert abs(result.gps_lat - 39.3606) < 1e-3
+        assert result.date_original == "2026-04-01 14:30:00"
