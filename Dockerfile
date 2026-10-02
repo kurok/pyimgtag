@@ -3,7 +3,7 @@
 # ecosystem or manually when a security patch is needed.
 
 # ---- base: system deps + unprivileged user (shared by all targets) ----
-FROM python:3.14-slim@sha256:caaf356f40667c496d405780745b9ac25771c189a51dfcc42430d531ea09f8a2 AS base
+FROM python:3.14-slim@sha256:0741d101873c12ab927e6f8653feb8862b9bd58771177acb1b885b95141f91b4 AS base
 
 # Install system dependencies
 # libimage-exiftool-perl = exiftool (cross-platform Perl wrapper)
