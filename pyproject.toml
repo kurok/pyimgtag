@@ -218,4 +218,10 @@ constraint-dependencies = [
     # GHSA-j934-xhv5-fg8f and GHSA-gjv8-xp57-g29c, two polynomial-time ReDoS
     # holes in the CSS-selector parser, both fixed in soupsieve 2.9.0.
     "soupsieve>=2.9.0",
+    # Transitive via requests. GHSA-8988-9cw3-xx77, GHSA-vxq7-64xx-v4gw and
+    # GHSA-gh4c-6fx4-qh6g, all fixed in urllib3 2.8.0.
+    "urllib3>=2.8.0",
+    # Transitive via mcp[crypto] (the `mcp` extra). Thirteen advisories against
+    # PyJWT <= 2.14.0, including GHSA-ffc3-869f-jxw9; the last fixed in 2.15.0.
+    "pyjwt>=2.15.0",
 ]
