@@ -244,7 +244,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 1. lint — ruff format check + ruff check (uv install)
 2. typecheck — mypy (uv install)
 3. pre-commit — hooks
-4. test — matrix: ubuntu/macos/windows x Python 3.14 only; coverage uploaded only from ubuntu
+4. test — matrix: ubuntu/macos/windows x Python 3.14 and 3.15; coverage uploaded only from ubuntu
 5. security — bandit + pip-audit
 6. docker — build + smoke tests
 
