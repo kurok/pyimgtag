@@ -195,7 +195,7 @@ Enforced by GitHub ruleset:
 - Stale reviews dismissed on new push — re-approval needed
 - All review threads resolved before merge
 - Required linear history — squash or rebase only, no merge commits
-- Status check: `test (ubuntu-latest, 3.14)` must pass
+- Status checks: `test (ubuntu-latest, 3.14)`, `test (macos-latest, 3.15)` and `test (windows-latest, 3.15)` must pass
 - CodeQL analysis must pass
 
 PR description must use the repo template (`.github/pull_request_template.md`):
@@ -244,7 +244,7 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 1. lint — ruff format check + ruff check (uv install)
 2. typecheck — mypy (uv install)
 3. pre-commit — hooks
-4. test — matrix: ubuntu/macos/windows x Python 3.14 only; coverage uploaded only from ubuntu
+4. test — each OS with the Python its users get: ubuntu-latest x 3.14 (Ubuntu 26.04 LTS python3), macos-latest x 3.15 (Homebrew python3 on macOS 27), windows-latest x 3.15 (python.org install manager default); coverage uploaded only from ubuntu
 5. security — bandit + pip-audit
 6. docker — build + smoke tests
 
