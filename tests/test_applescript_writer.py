@@ -1671,3 +1671,43 @@ def test_public_functions_keep_their_timeouts_and_messages(func, timeout, messag
     assert err == message
     assert isinstance(err, _aw.PhotosError) and err.category == "photos_timeout"
     assert run.call_args.kwargs["timeout"] == timeout
+
+
+class TestFailureKindNotWording:
+    """Callers branch on how a call failed, not on what its text says (#398)."""
+
+    @staticmethod
+    def _membership(**run_kwargs):
+        with (
+            patch.object(_aw, "_IS_MACOS", True),
+            patch.object(_aw, "is_applescript_available", return_value=True),
+            patch("pyimgtag.applescript_writer.subprocess.run", **run_kwargs),
+        ):
+            return _aw.fetch_photos_membership(timeout=60)
+
+    def test_an_appleevent_timeout_in_stderr_is_not_a_runner_timeout(self):
+        done = MagicMock(
+            returncode=1, stdout="", stderr="Photos got an error: AppleEvent timed out. (-1712)"
+        )
+        assert self._membership(return_value=done) == (set(), "applescript_failed")
+
+    def test_an_os_error_mentioning_time_out_is_a_launch_failure(self):
+        assert self._membership(side_effect=OSError(60, "Operation timed out")) == (
+            set(),
+            "osascript_missing",
+        )
+
+    def test_a_real_timeout_is_a_timeout(self):
+        expired = subprocess.TimeoutExpired(cmd="osascript", timeout=60)
+        assert self._membership(side_effect=expired) == (set(), "timeout")
+
+    def test_kinds(self):
+        expired = subprocess.TimeoutExpired(cmd="osascript", timeout=1)
+        with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=expired):
+            assert _aw._run_osascript("x", 1)[1].kind == "timeout"
+        with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=OSError("x")):
+            assert _aw._run_osascript("x", 1)[1].kind == "launch"
+        done = MagicMock(returncode=2, stdout="", stderr="")
+        with patch("pyimgtag.applescript_writer.subprocess.run", return_value=done):
+            assert _aw._run_osascript("x", 1)[1].kind == "exit"
+        assert _aw.PhotosError("osascript is not available on this system").kind == "other"

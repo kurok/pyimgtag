@@ -255,17 +255,23 @@ class PhotosError(str):
             (what the web UI shows instead of raw AppleScript text).
         detail: The underlying stderr or exception text, without the
             "AppleScript error (exit N):" framing; may be empty.
+        kind: How the failure happened, set by :func:`_run_osascript`:
+            ``"timeout"``, ``"launch"`` (osascript could not be started) or
+            ``"exit"`` (non-zero exit); ``"other"`` for errors raised before
+            osascript runs. Callers branch on this, never on the wording.
     """
 
     category: str
     detail: str
+    kind: str
 
-    def __new__(cls, message: str, detail: str = "", category: str | None = None) -> PhotosError:
+    def __new__(cls, message: str, detail: str = "", kind: str = "other") -> PhotosError:
         obj = super().__new__(cls, message)
-        # The runner knows a timeout is a timeout whatever the wording;
-        # everything else is classified from the message.
-        obj.category = category or categorise_error(message)
+        # A timeout is a timeout whatever its wording; everything else is
+        # classified from the message.
+        obj.category = "photos_timeout" if kind == "timeout" else categorise_error(message)
         obj.detail = detail
+        obj.kind = kind
         return obj
 
 
@@ -324,9 +330,9 @@ def _run_osascript(
         )
     except subprocess.TimeoutExpired:
         message = timeout_message or f"osascript timed out after {timeout:g} seconds"
-        return "", PhotosError(message, category="photos_timeout")
+        return "", PhotosError(message, kind="timeout")
     except OSError as exc:
-        return "", PhotosError(f"Failed to launch osascript: {exc}", detail=str(exc))
+        return "", PhotosError(f"Failed to launch osascript: {exc}", detail=str(exc), kind="launch")
     stdout = proc.stdout or ""
     if proc.returncode != 0:
         stderr = (proc.stderr or "").strip()
@@ -335,7 +341,7 @@ def _run_osascript(
             if stderr
             else f"AppleScript failed with exit code {proc.returncode}"
         )
-        return stdout, PhotosError(message, detail=stderr)
+        return stdout, PhotosError(message, detail=stderr, kind="exit")
     return stdout, None
 
 
@@ -582,7 +588,7 @@ def add_to_album(
         script, 120, timeout_message=f"osascript timed out adding to album {album_name!r}"
     )
     if err is not None:
-        if err.startswith("AppleScript"):
+        if err.kind == "exit":
             print(f"AppleScript error for album {album_name!r}: {err.detail}", file=sys.stderr)
         else:
             print(err, file=sys.stderr)
@@ -712,9 +718,9 @@ def fetch_photos_membership(
     script = _build_membership_applescript()
 
     out, err = _run_osascript(script, timeout)
-    if err is not None and err.category == "photos_timeout":
+    if err is not None and err.kind == "timeout":
         return set(), "timeout"
-    if err is not None and err.startswith("Failed to launch"):
+    if err is not None and err.kind == "launch":
         return set(), "osascript_missing"
     if err is not None:
         stderr = err.detail
