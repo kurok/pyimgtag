@@ -1153,6 +1153,17 @@ class TestWriteBackMode:
         assert args.write_back is False
 
     def test_judge_db_arg_passed_to_progress_db(self, tmp_path):
+        import importlib
+        import pkgutil
+
+        import pyimgtag.commands
+
+        # main() imports the command modules lazily, and each binds
+        # ``ProgressDB`` at import time. Import them before patching, or a
+        # worker whose first main() call is this test keeps the mock in every
+        # command module for the rest of the session.
+        for mod in pkgutil.iter_modules(pyimgtag.commands.__path__):
+            importlib.import_module(f"pyimgtag.commands.{mod.name}")
         db_path = str(tmp_path / "judge.db")
         with (
             patch("pyimgtag.progress_db.ProgressDB") as MockDB,
