@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from pyimgtag import __version__
+from pyimgtag.ollama_defaults import DEFAULT_OLLAMA_MODEL, ollama_url_from_env
 
 _DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
 
@@ -71,7 +72,9 @@ Examples:
         """\
 Examples:
   pyimgtag preflight
-  pyimgtag preflight --model gemma4:e4b --input-dir ~/Pictures/export
+  pyimgtag preflight --model """
+        + DEFAULT_OLLAMA_MODEL
+        + """ --input-dir ~/Pictures/export
 """,
     ),
     "cleanup": (
@@ -502,13 +505,13 @@ def _add_run_flags(run_p: argparse.ArgumentParser) -> None:
         "--model",
         default=None,
         help=(
-            "Model name. Backend-specific defaults: ollama=gemma4:e4b, "
+            f"Model name. Backend-specific defaults: ollama={DEFAULT_OLLAMA_MODEL}, "
             "anthropic=claude-sonnet-4-6, openai=gpt-4o-mini, gemini=gemini-1.5-flash."
         ),
     )
     run_p.add_argument(
         "--ollama-url",
-        default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+        default=ollama_url_from_env(),
         help="Ollama base URL (used when --backend=ollama; supports remote Ollama too)",
     )
     run_p.add_argument(
@@ -754,11 +757,13 @@ def _add_status_reprocess_preflight_subcommands(subparsers: Any) -> None:
     preflight_p = _sub(subparsers, "preflight")
     preflight_p.add_argument(
         "--ollama-url",
-        default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+        default=ollama_url_from_env(),
         help="Ollama base URL",
     )
     preflight_p.add_argument(
-        "--model", default="gemma4:e4b", help="Ollama model (default: gemma4:e4b)"
+        "--model",
+        default=DEFAULT_OLLAMA_MODEL,
+        help=f"Ollama model (default: {DEFAULT_OLLAMA_MODEL})",
     )
     src_pre = preflight_p.add_mutually_exclusive_group(required=False)
     src_pre.add_argument("--input-dir", help="Path to an exported image folder")
@@ -1482,13 +1487,13 @@ def _add_judge_subcommand(subparsers: Any) -> None:
         "--model",
         default=None,
         help=(
-            "Model name. Backend-specific defaults: ollama=gemma4:e4b, "
+            f"Model name. Backend-specific defaults: ollama={DEFAULT_OLLAMA_MODEL}, "
             "anthropic=claude-sonnet-4-6, openai=gpt-4o-mini, gemini=gemini-1.5-flash."
         ),
     )
     judge_p.add_argument(
         "--ollama-url",
-        default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
+        default=ollama_url_from_env(),
         metavar="URL",
         help="Ollama API base URL (used when --backend=ollama; supports remote Ollama)",
     )

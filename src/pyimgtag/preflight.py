@@ -9,6 +9,8 @@ from pathlib import Path
 
 import requests
 
+from pyimgtag.ollama_defaults import DEFAULT_OLLAMA_URL
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +45,7 @@ def _same_model(wanted: str, available: str) -> bool:
     return _canonical_model(wanted) == _canonical_model(available)
 
 
-def check_ollama(base_url: str = "http://localhost:11434") -> tuple[bool, str]:
+def check_ollama(base_url: str = DEFAULT_OLLAMA_URL) -> tuple[bool, str]:
     """Check that the Ollama server is reachable.
 
     Args:
@@ -90,7 +92,7 @@ def check_cloud_backend(backend: str) -> tuple[bool, str]:
     return (False, f"{backend}: no API key — set {joined}")
 
 
-def check_ollama_model(model: str, base_url: str = "http://localhost:11434") -> tuple[bool, str]:
+def check_ollama_model(model: str, base_url: str = DEFAULT_OLLAMA_URL) -> tuple[bool, str]:
     """Check that a specific model is available in Ollama.
 
     Args:

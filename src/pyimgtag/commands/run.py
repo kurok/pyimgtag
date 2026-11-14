@@ -28,7 +28,7 @@ from pyimgtag.exit_codes import exit_code_for
 from pyimgtag.filters import passes_date_filter
 from pyimgtag.geocoder import ReverseGeocoder
 from pyimgtag.models import ExifData, ImageResult
-from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
+from pyimgtag.ollama_client import DEFAULT_OLLAMA_MODEL, OllamaClient
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
 from pyimgtag.preflight import check_ollama, check_ollama_model
 from pyimgtag.progress_db import ProgressDB
@@ -320,28 +320,20 @@ def _create_image_client(
 ) -> ImageClient | None:
     """Create and return the image tagging client, or None on error."""
     client: Any
-    if backend == "ollama":
-        # Constructed directly so tests that patch
-        # ``pyimgtag.commands.run.OllamaClient`` keep working.
-        client = OllamaClient(
-            model=args.model or "gemma4:e4b",
-            base_url=args.ollama_url,
+    try:
+        client = make_image_client(
+            backend,
+            model=args.model,
             max_dim=args.max_dim,
             timeout=args.timeout,
+            api_key=getattr(args, "api_key", None),
+            api_base=args.ollama_url if backend == "ollama" else getattr(args, "api_base", None),
+            # The name imported here, so tests patching it keep working.
+            ollama_class=OllamaClient,
         )
-    else:
-        try:
-            client = make_image_client(
-                backend,
-                model=args.model,
-                max_dim=args.max_dim,
-                timeout=args.timeout,
-                api_key=getattr(args, "api_key", None),
-                api_base=getattr(args, "api_base", None),
-            )
-        except CloudClientError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return None
+    except CloudClientError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return None
     if prompt_builder is not None:
         client.prompt_builder = prompt_builder
     return client
@@ -596,7 +588,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         # error. --dry-run only warns, since it writes nothing.
         ok, msg = check_ollama(args.ollama_url)
         if ok:
-            ok, msg = check_ollama_model(args.model or "gemma4:e4b", args.ollama_url)
+            ok, msg = check_ollama_model(args.model or DEFAULT_OLLAMA_MODEL, args.ollama_url)
         if not ok:
             if args.dry_run:
                 print(f"Warning: {msg}", file=sys.stderr)
