@@ -1507,3 +1507,38 @@ class TestSubcommandHelp:
         out = capsys.readouterr().out
         assert "Tag images (default workhorse)" in out
         assert "Manage tags across the image database" in out
+
+
+# --- a database from a newer pyimgtag is refused with a message (#394) -------
+
+
+def _too_new_db(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "progress.db"
+    ProgressDB(db_path).close()
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA user_version = 99")
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["status"],
+        ["tags", "list"],
+        ["judge", "--input-dir", "."],
+    ],
+)
+def test_cli_reports_a_too_new_database(tmp_path, capsys, monkeypatch, argv):
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    db_path = _too_new_db(tmp_path)
+
+    rc = main([*argv, "--db", str(db_path)])
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert err.startswith("Error: database ")
+    assert "schema v99" in err and "Upgrade pyimgtag" in err

@@ -1467,6 +1467,24 @@ run's "Artifacts" panel on GitHub.
 the `pr-tests` workflow passes (alongside the existing `Python
 package` matrix and CodeQL).
 
+## Database upgrades
+
+The progress database carries a schema version. When a newer pyimgtag opens an
+older database, it first copies the file to `<db>.bak-v<old version>` (for
+example `progress.db.bak-v15`), then applies the pending migrations. Only the
+most recent backup is kept, and a new or already-current database gets none.
+Set `PYIMGTAG_NO_MIGRATION_BACKUP=1` to skip the copy.
+
+An older pyimgtag refuses a database written by a newer one rather than
+running against a schema it does not know:
+
+```text
+Error: database ~/.cache/pyimgtag/progress.db has schema v18, but this pyimgtag supports up to v17. Upgrade pyimgtag, or point --db at another file.
+```
+
+To go back to an older release, restore the backup:
+`cp progress.db.bak-v15 progress.db`.
+
 ## Resume and Enrichment
 
 Rerunning `pyimgtag run` on an already-processed library normally skips unchanged files.
@@ -1773,6 +1791,7 @@ a default server cannot see them at all. No tool deletes anything.
 | `PYIMGTAG_MAP_TILES_ATTRIBUTION` | `/map` page | Attribution line drawn on the map (default `© OpenStreetMap contributors`). |
 | `PYIMGTAG_SEARCH_MODEL_DIR` | `pyimgtag index` / `search` / `/search` | Directory holding the CLIP ONNX files. Point it at pre-downloaded models for an air-gapped install (default `~/.cache/pyimgtag/search_models/`). Overridden by `--model-dir`. |
 | `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
+| `PYIMGTAG_NO_MIGRATION_BACKUP` | Anything that opens the progress DB | `1` skips the `<db>.bak-v<N>` copy written before an existing database is migrated to a newer schema (see [Database upgrades](#database-upgrades)). |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |
 | `PYIMGTAG_PARSE_ERROR_LOG` | `pyimgtag run` | Path to write JSON-parse error log (opt-in; disabled by default). May contain photo descriptions — do not store in a synced or shared directory. |
 | `PYIMGTAG_DB` | `python -m pyimgtag.webapp` | Override the progress-DB path the standalone webapp opens. |
