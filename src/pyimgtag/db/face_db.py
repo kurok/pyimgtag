@@ -227,6 +227,14 @@ class FaceDB:
         self._conn.execute("UPDATE faces SET person_id = ? WHERE id = ?", (person_id, face_id))
         self._conn.commit()
 
+    def set_person_id_many(self, face_ids: list[int], person_id: int) -> None:
+        """Assign several faces to a person in one all-or-nothing transaction."""
+        with self._conn:
+            self._conn.executemany(
+                "UPDATE faces SET person_id = ? WHERE id = ?",
+                [(person_id, face_id) for face_id in face_ids],
+            )
+
     def create_person(
         self,
         label: str = "",
@@ -243,6 +251,50 @@ class FaceDB:
         if cur.lastrowid is None:
             raise RuntimeError("INSERT into persons did not return a row id")
         return cur.lastrowid
+
+    def get_person(self, person_id: int) -> PersonCluster | None:
+        """Return one person with their face ids, or ``None`` if unknown."""
+        row = self._conn.execute(
+            "SELECT id, label, confirmed, source, trusted FROM persons WHERE id = ?",
+            (person_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        face_ids = [
+            r[0]
+            for r in self._conn.execute(
+                "SELECT id FROM faces WHERE person_id = ? ORDER BY id", (person_id,)
+            ).fetchall()
+        ]
+        pid, label, confirmed, source, trusted = row
+        return PersonCluster(
+            person_id=pid,
+            label=label,
+            confirmed=bool(confirmed),
+            face_ids=face_ids,
+            source=source or "auto",
+            trusted=bool(trusted),
+        )
+
+    def person_exists(self, person_id: int) -> bool:
+        """Whether a person row with this id exists."""
+        return (
+            self._conn.execute("SELECT 1 FROM persons WHERE id = ?", (person_id,)).fetchone()
+            is not None
+        )
+
+    def largest_other_person(self, person_id: int) -> tuple[int, str] | None:
+        """``(id, label)`` of the person with the most faces, other than *person_id*.
+
+        Ties go to the lowest id, as ``max()`` over :meth:`get_persons` did.
+        ``None`` when no other person has a face.
+        """
+        row = self._conn.execute(
+            "SELECT p.id, p.label FROM persons p JOIN faces f ON f.person_id = p.id "
+            "WHERE p.id != ? GROUP BY p.id ORDER BY COUNT(*) DESC, p.id LIMIT 1",
+            (person_id,),
+        ).fetchone()
+        return None if row is None else (int(row[0]), row[1] or "")
 
     def get_persons(self) -> list[PersonCluster]:
         """Return all persons with their assigned face ids."""
@@ -514,12 +566,11 @@ class FaceDB:
         self._conn.execute("UPDATE faces SET ignored = 0 WHERE id = ?", (face_id,))
         self._conn.commit()
 
-    def get_ignored_faces(self) -> list[dict]:
-        """Return all faces marked as ignored (the trash bin)."""
-        rows = self._conn.execute(
-            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
-            "FROM faces WHERE ignored = 1"
-        ).fetchall()
+    # Face rows as the UI consumes them; one column list for every query.
+    _FACE_COLUMNS = "id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence"
+
+    @staticmethod
+    def _face_dicts(rows: list[tuple]) -> list[dict]:
         return [
             {
                 "id": r[0],
@@ -533,49 +584,85 @@ class FaceDB:
             for r in rows
         ]
 
-    def get_unassigned_faces(self) -> list[dict]:
-        """Return faces that have no person assignment and are not ignored."""
-        rows = self._conn.execute(
-            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
-            "FROM faces WHERE person_id IS NULL AND ignored = 0"
-        ).fetchall()
-        return [
-            {
-                "id": r[0],
-                "image_path": r[1],
-                "bbox_x": r[2],
-                "bbox_y": r[3],
-                "bbox_w": r[4],
-                "bbox_h": r[5],
-                "confidence": r[6],
-            }
-            for r in rows
-        ]
+    def _page_of_faces(
+        self, where: str, params: tuple, order: str, limit: int | None, offset: int
+    ) -> list[dict]:
+        """``SELECT`` faces with *where* / *order*, then ``LIMIT`` / ``OFFSET`` in SQL.
+
+        *where* and *order* are fixed fragments from this class, never user
+        input; values always go through *params*.
+        """
+        sql = f"SELECT {self._FACE_COLUMNS} FROM faces WHERE {where} ORDER BY {order}"  # nosec B608
+        args: tuple = params
+        if limit is not None or offset:
+            # SQLite needs a LIMIT before OFFSET; -1 means "no limit". Both are
+            # clamped to SQLite's 64-bit range: a huge offset is simply past
+            # the end (an empty page), as the old Python slice was.
+            sql += " LIMIT ? OFFSET ?"
+            top = 2**63 - 1
+            page_size = -1 if limit is None else min(max(int(limit), 0), top)
+            args = (*params, page_size, min(max(int(offset), 0), top))
+        return self._face_dicts(self._conn.execute(sql, args).fetchall())
+
+    def _count_faces(self, where: str, params: tuple = ()) -> int:
+        sql = f"SELECT COUNT(*) FROM faces WHERE {where}"  # nosec B608
+        return int(self._conn.execute(sql, params).fetchone()[0])
+
+    def get_ignored_faces(self, limit: int | None = None, offset: int = 0) -> list[dict]:
+        """Return faces marked as ignored (the trash bin), oldest first.
+
+        With no arguments, every ignored face; *limit* / *offset* page in SQL.
+        """
+        return self._page_of_faces("ignored = 1", (), "id", limit, offset)
+
+    def count_ignored_faces(self) -> int:
+        """Number of faces in the trash bin."""
+        return self._count_faces("ignored = 1")
+
+    def get_unassigned_faces(
+        self, limit: int | None = None, offset: int = 0, order_by_confidence: bool = False
+    ) -> list[dict]:
+        """Return faces with no person assignment that are not ignored.
+
+        With no arguments, every such face, oldest first; *limit* / *offset*
+        page in SQL, and *order_by_confidence* puts the highest first (ties
+        by id).
+        """
+        order = "COALESCE(confidence, 0.0) DESC, id" if order_by_confidence else "id"
+        return self._page_of_faces("person_id IS NULL AND ignored = 0", (), order, limit, offset)
+
+    def count_unassigned_faces(self) -> int:
+        """Number of faces with no person assignment that are not ignored."""
+        return self._count_faces("person_id IS NULL AND ignored = 0")
 
     def unassign_face(self, face_id: int) -> None:
         """Remove the person assignment from a face."""
         self._conn.execute("UPDATE faces SET person_id = NULL WHERE id = ?", (face_id,))
         self._conn.commit()
 
-    def get_faces_for_person(self, person_id: int) -> list[dict]:
-        """Return all faces assigned to a person."""
-        rows = self._conn.execute(
-            "SELECT id, image_path, bbox_x, bbox_y, bbox_w, bbox_h, confidence "
-            "FROM faces WHERE person_id = ?",
-            (person_id,),
-        ).fetchall()
-        return [
-            {
-                "id": r[0],
-                "image_path": r[1],
-                "bbox_x": r[2],
-                "bbox_y": r[3],
-                "bbox_w": r[4],
-                "bbox_h": r[5],
-                "confidence": r[6],
-            }
-            for r in rows
-        ]
+    def get_faces_for_person(
+        self,
+        person_id: int,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by_confidence: bool = False,
+    ) -> list[dict]:
+        """Return the faces assigned to a person.
+
+        Args:
+            person_id: The person.
+            limit: Page size; ``None`` returns every face.
+            offset: Faces to skip before the page.
+            order_by_confidence: Highest confidence first (a missing
+                confidence counts as 0), ties by id, the order the UI pages
+                in; otherwise by id.
+        """
+        order = "COALESCE(confidence, 0.0) DESC, id" if order_by_confidence else "id"
+        return self._page_of_faces("person_id = ?", (person_id,), order, limit, offset)
+
+    def count_faces_for_person(self, person_id: int) -> int:
+        """Number of faces assigned to a person."""
+        return self._count_faces("person_id = ?", (person_id,))
 
     def get_assigned_faces(self) -> list[dict]:
         """Return all faces that have a person assignment."""

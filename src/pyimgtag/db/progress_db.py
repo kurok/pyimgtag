@@ -862,6 +862,22 @@ class ProgressDB:
         """Delegate to :meth:`FaceDB.set_person_id`."""
         self._faces.set_person_id(face_id, person_id)
 
+    def set_person_id_many(self, face_ids: list[int], person_id: int) -> None:
+        """Delegate to :meth:`FaceDB.set_person_id_many`."""
+        self._faces.set_person_id_many(face_ids, person_id)
+
+    def get_person(self, person_id: int) -> PersonCluster | None:
+        """Delegate to :meth:`FaceDB.get_person`."""
+        return self._faces.get_person(person_id)
+
+    def person_exists(self, person_id: int) -> bool:
+        """Delegate to :meth:`FaceDB.person_exists`."""
+        return self._faces.person_exists(person_id)
+
+    def largest_other_person(self, person_id: int) -> tuple[int, str] | None:
+        """Delegate to :meth:`FaceDB.largest_other_person`."""
+        return self._faces.largest_other_person(person_id)
+
     def create_person(
         self,
         label: str = "",
@@ -932,21 +948,41 @@ class ProgressDB:
         """Delegate to :meth:`FaceDB.restore_face`."""
         self._faces.restore_face(face_id)
 
-    def get_ignored_faces(self) -> list[dict]:
+    def get_ignored_faces(self, limit: int | None = None, offset: int = 0) -> list[dict]:
         """Delegate to :meth:`FaceDB.get_ignored_faces`."""
-        return self._faces.get_ignored_faces()
+        return self._faces.get_ignored_faces(limit, offset)
 
-    def get_unassigned_faces(self) -> list[dict]:
+    def count_ignored_faces(self) -> int:
+        """Delegate to :meth:`FaceDB.count_ignored_faces`."""
+        return self._faces.count_ignored_faces()
+
+    def get_unassigned_faces(
+        self, limit: int | None = None, offset: int = 0, order_by_confidence: bool = False
+    ) -> list[dict]:
         """Delegate to :meth:`FaceDB.get_unassigned_faces`."""
-        return self._faces.get_unassigned_faces()
+        return self._faces.get_unassigned_faces(limit, offset, order_by_confidence)
+
+    def count_unassigned_faces(self) -> int:
+        """Delegate to :meth:`FaceDB.count_unassigned_faces`."""
+        return self._faces.count_unassigned_faces()
 
     def unassign_face(self, face_id: int) -> None:
         """Delegate to :meth:`FaceDB.unassign_face`."""
         self._faces.unassign_face(face_id)
 
-    def get_faces_for_person(self, person_id: int) -> list[dict]:
+    def get_faces_for_person(
+        self,
+        person_id: int,
+        limit: int | None = None,
+        offset: int = 0,
+        order_by_confidence: bool = False,
+    ) -> list[dict]:
         """Delegate to :meth:`FaceDB.get_faces_for_person`."""
-        return self._faces.get_faces_for_person(person_id)
+        return self._faces.get_faces_for_person(person_id, limit, offset, order_by_confidence)
+
+    def count_faces_for_person(self, person_id: int) -> int:
+        """Delegate to :meth:`FaceDB.count_faces_for_person`."""
+        return self._faces.count_faces_for_person(person_id)
 
     def get_assigned_faces(self) -> list[dict]:
         """Delegate to :meth:`FaceDB.get_assigned_faces`."""
