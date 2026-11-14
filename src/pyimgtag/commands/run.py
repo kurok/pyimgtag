@@ -10,6 +10,8 @@ import subprocess  # nosec B404
 import sys
 import threading as _threading
 from collections.abc import Iterator
+from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from platform import system as get_platform_name
 from typing import Any
@@ -117,10 +119,12 @@ class _HydrationQueue:
         source_type: str,
         args: argparse.Namespace,
         stats: dict,
+        vocabulary: Vocabulary | None = None,
     ) -> None:
         self._cached_files = cached_files
         self._source_type = source_type
         self._args = args
+        self._vocabulary = vocabulary
         self._result_q: _queue.Queue = _queue.Queue()
         self._thread_stats: dict = {k: 0 for k in stats if k != "scanned"}
         self._stop_event = _threading.Event()
@@ -165,7 +169,14 @@ class _HydrationQueue:
                 self._sentinel_seen = True
             else:
                 _finalize_result(
-                    item, Path(item.file_path), args, progress_db, phash_map, results, stats
+                    item,
+                    Path(item.file_path),
+                    args,
+                    progress_db,
+                    phash_map,
+                    results,
+                    stats,
+                    vocabulary=self._vocabulary,
                 )
 
     def stop(self) -> None:
@@ -207,11 +218,14 @@ def _vocabulary_report_path(output_json: str) -> Path:
     return p.with_name(f"{p.stem}.vocabulary.json")
 
 
-def _write_run_outputs(results: list[ImageResult], args: argparse.Namespace) -> None:
+def _write_run_outputs(
+    results: list[ImageResult],
+    args: argparse.Namespace,
+    vocabulary: Vocabulary | None = None,
+) -> None:
     if args.output_json:
         write_json(results, args.output_json)
         print(f"Wrote {len(results)} results to {args.output_json}", file=sys.stderr)
-        vocabulary = getattr(args, "_vocabulary", None)
         if isinstance(vocabulary, Vocabulary):
             import json as _json
 
@@ -344,20 +358,55 @@ def _backend_name(args: argparse.Namespace) -> str:
     return backend if isinstance(backend, str) else "ollama"
 
 
-def _concurrent_tagging(
-    files: list[Path],
-    source_type: str,
-    args: argparse.Namespace,
-    ollama: ImageClient,
-    geocoder: ReverseGeocoder,
-    progress_db: ProgressDB | None,
-    phash_map: dict,
-    skipped_dedup: set[str],
-    results: list[ImageResult],
-    stats: dict,
-    session: Any,
-    jobs: int,
-) -> bool:
+@dataclass
+class _RunContext:
+    """Everything one tagging pass needs, built once by its caller.
+
+    The caller (``cmd_run`` or a ``watch`` cycle) creates ``client``,
+    ``geocoder`` and ``progress_db`` and is the one that closes them; the
+    tagging paths only use them.
+    """
+
+    files: list[Path]
+    source_type: str
+    args: argparse.Namespace
+    client: ImageClient
+    geocoder: ReverseGeocoder
+    progress_db: ProgressDB | None
+    phash_map: dict
+    skipped_dedup: set[str]
+    results: list[ImageResult]
+    stats: dict
+    session: Any
+    use_threaded: bool
+    vocabulary: Vocabulary | None = None
+
+
+def _record_to_session(ctx: _RunContext, file_path: Path, result: ImageResult) -> None:
+    """Report one finished image and the current counters to the dashboard."""
+    if ctx.session is None:
+        return
+    status = "ok" if result.processing_status == "ok" else "error"
+    tags = ", ".join(result.tags) if result.tags else None
+    ctx.session.record_item(str(file_path), status, error=result.error_message, detail=tags)
+    for key, value in ctx.stats.items():
+        ctx.session.set_counter(key, value)
+
+
+def _finalize(ctx: _RunContext, result: ImageResult, file_path: Path) -> None:
+    _finalize_result(
+        result,
+        file_path,
+        ctx.args,
+        ctx.progress_db,
+        ctx.phash_map,
+        ctx.results,
+        ctx.stats,
+        vocabulary=ctx.vocabulary,
+    )
+
+
+def _concurrent_tagging(ctx: _RunContext, jobs: int) -> bool:
     """Tag with ``jobs`` concurrent model calls. Returns True if interrupted.
 
     Worker threads run :func:`_prepare_one` only; this thread keeps every
@@ -367,14 +416,15 @@ def _concurrent_tagging(
     ``-j > 1``: cached rows are hydrated inline, in order, by this thread.
     """
     stats_lock = _threading.Lock()
+    args, stats = ctx.args, ctx.stats
 
     def _items() -> Iterator[tuple[Path, ImageResult | None]]:
-        for file_path in files:
-            if str(file_path) in skipped_dedup:
+        for file_path in ctx.files:
+            if str(file_path) in ctx.skipped_dedup:
                 stats["skipped_dedup"] += 1
                 continue
             proceed, cached = _pre_submit_decision(
-                file_path, source_type, args, geocoder, stats, progress_db
+                file_path, ctx.source_type, args, ctx.geocoder, stats, ctx.progress_db
             )
             if proceed:
                 yield file_path, None
@@ -385,36 +435,147 @@ def _concurrent_tagging(
         file_path, cached = item
         if cached is not None:
             return cached  # hydrated on the main thread; nothing left to compute
-        return _prepare_one(file_path, source_type, args, ollama, geocoder, stats, stats_lock)
+        return _prepare_one(
+            file_path,
+            ctx.source_type,
+            args,
+            ctx.client,
+            ctx.geocoder,
+            stats,
+            stats_lock,
+            vocabulary=ctx.vocabulary,
+        )
 
-    def _finalize(_seq: int, item: tuple[Path, ImageResult | None], result: ImageResult) -> None:
-        file_path = item[0]
-        _finalize_result(result, file_path, args, progress_db, phash_map, results, stats)
-        if session is not None:
-            status = "ok" if result.processing_status == "ok" else "error"
-            tags = ", ".join(result.tags) if result.tags else None
-            session.record_item(str(file_path), status, error=result.error_message, detail=tags)
-            for key, value in stats.items():
-                session.set_counter(key, value)
+    def _finalize_item(
+        _seq: int, item: tuple[Path, ImageResult | None], result: ImageResult
+    ) -> None:
+        _finalize(ctx, result, item[0])
+        _record_to_session(ctx, item[0], result)
 
     def _should_stop() -> bool:
         return bool(args.limit and stats["processed"] >= args.limit)
 
     def _on_interrupt() -> None:
-        if session is not None:
-            session.mark_interrupted()
+        if ctx.session is not None:
+            ctx.session.mark_interrupted()
         print("\nInterrupted.", file=sys.stderr)
 
     return run_pipeline(
         _items(),
         _prepare,
-        _finalize,
+        _finalize_item,
         jobs=jobs,
-        session=session,
+        session=ctx.session,
         on_interrupt=_on_interrupt,
         should_stop=_should_stop,
         describe=lambda item: str(item[0]),
     )
+
+
+def _resume_threaded_tagging(ctx: _RunContext) -> bool:
+    """``--resume-threaded``: hydrate cached rows in the background, tag the rest."""
+    assert ctx.progress_db is not None  # nosec B101 — checked by the caller
+    args, stats, db = ctx.args, ctx.stats, ctx.progress_db
+    cached = [
+        f for f in ctx.files if str(f) not in ctx.skipped_dedup and db.has_usable_model_result(f)
+    ]
+    cached_set = {str(f) for f in cached}
+    fresh = [f for f in ctx.files if str(f) not in ctx.skipped_dedup and str(f) not in cached_set]
+    stats["skipped_dedup"] = sum(1 for f in ctx.files if str(f) in ctx.skipped_dedup)
+    hq = _HydrationQueue(cached, ctx.source_type, args, stats, vocabulary=ctx.vocabulary)
+    hq.start()
+    interrupted = False
+    try:
+        for file_path in fresh:
+            if args.limit and stats["processed"] >= args.limit:
+                break
+            if ctx.session is not None:
+                ctx.session.wait_if_paused()
+                ctx.session.set_current(str(file_path))
+            hq.drain(db, ctx.phash_map, ctx.results, stats, args)
+            result = _process_one(
+                file_path,
+                ctx.source_type,
+                args,
+                ctx.client,
+                ctx.geocoder,
+                stats,
+                db,
+                vocabulary=ctx.vocabulary,
+            )
+            if result is not None:
+                _finalize(ctx, result, file_path)
+                _record_to_session(ctx, file_path, result)
+            if ctx.session is not None:
+                ctx.session.set_current(None)
+    except KeyboardInterrupt:
+        interrupted = True
+        hq.stop()
+        if ctx.session is not None:
+            ctx.session.mark_interrupted()
+        print("\nInterrupted.", file=sys.stderr)
+    finally:
+        hq.join(db, ctx.phash_map, ctx.results, stats, args)
+        for k, v in hq.thread_stats.items():
+            stats[k] += v
+    return interrupted
+
+
+def _serial_tagging(ctx: _RunContext) -> bool:
+    """The default ``-j 1`` loop. Returns True if interrupted."""
+    args, stats = ctx.args, ctx.stats
+    try:
+        for file_path in ctx.files:
+            if args.limit and stats["processed"] >= args.limit:
+                break
+            if ctx.session is not None:
+                ctx.session.wait_if_paused()
+                ctx.session.set_current(str(file_path))
+            if str(file_path) in ctx.skipped_dedup:
+                stats["skipped_dedup"] += 1
+                continue
+            result = _process_one(
+                file_path,
+                ctx.source_type,
+                args,
+                ctx.client,
+                ctx.geocoder,
+                stats,
+                ctx.progress_db,
+                vocabulary=ctx.vocabulary,
+            )
+            if result is None:
+                if ctx.session is not None:
+                    ctx.session.set_current(None)
+                continue
+            _finalize(ctx, result, file_path)
+            _record_to_session(ctx, file_path, result)
+            if ctx.session is not None:
+                ctx.session.set_current(None)
+    except KeyboardInterrupt:
+        if ctx.session is not None:
+            ctx.session.mark_interrupted()
+        print("\nInterrupted.", file=sys.stderr)
+        return True
+    return False
+
+
+def _tag(ctx: _RunContext) -> bool:
+    """Run one tagging pass over ``ctx.files``. Returns True if interrupted.
+
+    ``-j/--jobs`` (read off ``args``, so ``watch`` inherits it) selects the
+    path: anything above 1 goes through :func:`_concurrent_tagging`; at
+    ``-j 1``, ``--resume-threaded`` with a DB uses the hydration worker and
+    everything else the serial loop. Closes nothing: the caller owns
+    ``client``, ``geocoder`` and ``progress_db``.
+    """
+    set_global_rate_limit(resolve_max_rps(getattr(ctx.args, "max_rps", None)))
+    jobs = resolve_jobs(getattr(ctx.args, "jobs", 1), _backend_name(ctx.args))
+    if jobs > 1:
+        return _concurrent_tagging(ctx, jobs)
+    if ctx.use_threaded and ctx.progress_db is not None:
+        return _resume_threaded_tagging(ctx)
+    return _serial_tagging(ctx)
 
 
 def _run_tagging(
@@ -430,128 +591,30 @@ def _run_tagging(
     stats: dict,
     session: Any,
     use_threaded: bool,
+    vocabulary: Vocabulary | None = None,
 ) -> bool:
-    """Run the tagging loop (concurrent, threaded-resume, or linear).
+    """Compatibility wrapper: build a :class:`_RunContext` and :func:`_tag` it.
 
-    ``-j/--jobs`` (read off ``args``, so ``watch`` inherits it) selects the
-    path: anything above 1 goes through :func:`_concurrent_tagging`, while the
-    default ``-j 1`` keeps the original serial loops untouched.
-
-    Returns True if interrupted.
+    Unlike the old version it closes nothing; whoever created the client,
+    geocoder and database closes them.
     """
-    set_global_rate_limit(resolve_max_rps(getattr(args, "max_rps", None)))
-    jobs = resolve_jobs(getattr(args, "jobs", 1), _backend_name(args))
-    if jobs > 1:
-        try:
-            return _concurrent_tagging(
-                files,
-                source_type,
-                args,
-                ollama,
-                geocoder,
-                progress_db,
-                phash_map,
-                skipped_dedup,
-                results,
-                stats,
-                session,
-                jobs,
-            )
-        finally:
-            ollama.close()
-            geocoder.close()
-            if progress_db is not None:
-                progress_db.close()
-
-    interrupted = False
-    try:
-        if use_threaded and progress_db is not None:
-            cached = [
-                f
-                for f in files
-                if str(f) not in skipped_dedup and progress_db.has_usable_model_result(f)
-            ]
-            cached_set = {str(f) for f in cached}
-            fresh = [f for f in files if str(f) not in skipped_dedup and str(f) not in cached_set]
-            stats["skipped_dedup"] = sum(1 for f in files if str(f) in skipped_dedup)
-            hq = _HydrationQueue(cached, source_type, args, stats)
-            hq.start()
-            try:
-                for file_path in fresh:
-                    if args.limit and stats["processed"] >= args.limit:
-                        break
-                    if session is not None:
-                        session.wait_if_paused()
-                        session.set_current(str(file_path))
-                    hq.drain(progress_db, phash_map, results, stats, args)
-                    result = _process_one(
-                        file_path, source_type, args, ollama, geocoder, stats, progress_db
-                    )
-                    if result is not None:
-                        _finalize_result(
-                            result, file_path, args, progress_db, phash_map, results, stats
-                        )
-                        if session is not None:
-                            status = "ok" if result.processing_status == "ok" else "error"
-                            tags = ", ".join(result.tags) if result.tags else None
-                            session.record_item(
-                                str(file_path), status, error=result.error_message, detail=tags
-                            )
-                            for k, v in stats.items():
-                                session.set_counter(k, v)
-                    if session is not None:
-                        session.set_current(None)
-            except KeyboardInterrupt:
-                interrupted = True
-                hq.stop()
-                if session is not None:
-                    session.mark_interrupted()
-                print("\nInterrupted.", file=sys.stderr)
-            finally:
-                hq.join(progress_db, phash_map, results, stats, args)
-                for k, v in hq.thread_stats.items():
-                    stats[k] += v
-        else:
-            try:
-                for file_path in files:
-                    if args.limit and stats["processed"] >= args.limit:
-                        break
-                    if session is not None:
-                        session.wait_if_paused()
-                        session.set_current(str(file_path))
-                    if str(file_path) in skipped_dedup:
-                        stats["skipped_dedup"] += 1
-                        continue
-                    result = _process_one(
-                        file_path, source_type, args, ollama, geocoder, stats, progress_db
-                    )
-                    if result is None:
-                        if session is not None:
-                            session.set_current(None)
-                        continue
-                    _finalize_result(
-                        result, file_path, args, progress_db, phash_map, results, stats
-                    )
-                    if session is not None:
-                        status = "ok" if result.processing_status == "ok" else "error"
-                        tags = ", ".join(result.tags) if result.tags else None
-                        session.record_item(
-                            str(file_path), status, error=result.error_message, detail=tags
-                        )
-                        for k, v in stats.items():
-                            session.set_counter(k, v)
-                        session.set_current(None)
-            except KeyboardInterrupt:
-                interrupted = True
-                if session is not None:
-                    session.mark_interrupted()
-                print("\nInterrupted.", file=sys.stderr)
-    finally:
-        ollama.close()
-        geocoder.close()
-        if progress_db is not None:
-            progress_db.close()
-    return interrupted
+    return _tag(
+        _RunContext(
+            files=files,
+            source_type=source_type,
+            args=args,
+            client=ollama,
+            geocoder=geocoder,
+            progress_db=progress_db,
+            phash_map=phash_map,
+            skipped_dedup=skipped_dedup,
+            results=results,
+            stats=stats,
+            session=session,
+            use_threaded=use_threaded,
+            vocabulary=vocabulary,
+        )
+    )
 
 
 def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
@@ -631,9 +694,6 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     except (VocabularyError, PromptTemplateError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    # Stash the loaded vocabulary on the namespace so _process_one (which
-    # only receives ``args``) can canonicalize and the summary can report.
-    args._vocabulary = vocabulary
     if vocabulary is not None:
         mode = "strict" if vocabulary.strict else "non-strict"
         print(
@@ -642,61 +702,70 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             file=sys.stderr,
         )
 
-    ollama = _create_image_client(args, backend, prompt_builder)
-    if ollama is None:
-        return 1
-    geocoder = ReverseGeocoder(cache_dir=args.cache_dir)
-    progress_db: ProgressDB | None = None
-    if not args.no_cache and not args.dry_run:
-        progress_db = ProgressDB(db_path=args.db)
+    with ExitStack() as owned:
+        # This function creates the client, geocoder and database, so it is
+        # the one that closes them, also when anything below raises (e.g.
+        # the dashboard failing to start).
+        client = _create_image_client(args, backend, prompt_builder)
+        if client is None:
+            return 1
+        owned.callback(client.close)
+        geocoder = ReverseGeocoder(cache_dir=args.cache_dir)
+        owned.callback(geocoder.close)
+        progress_db: ProgressDB | None = None
+        if not args.no_cache and not args.dry_run:
+            progress_db = ProgressDB(db_path=args.db)
+            owned.callback(progress_db.close)
 
-    results: list[ImageResult] = []
-    stats = _new_stats(len(files))
-    from pyimgtag.webapp.bootstrap import start_dashboard_for
+        results: list[ImageResult] = []
+        stats = _new_stats(len(files))
+        from pyimgtag.webapp.bootstrap import start_dashboard_for
 
-    session, dashboard = start_dashboard_for(args, command="run")
-    jobs = resolve_jobs(getattr(args, "jobs", 1), backend)
-    if jobs > 1:
-        print(f"Concurrency: {jobs} in-flight model requests", file=sys.stderr)
-    if session is not None:
-        session.set_counter("scanned", stats["scanned"])
-        session.set_counter("jobs", jobs)
-        session.mark_running()
-
-    use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
-    skip_existing = getattr(args, "skip_existing", False) and not args.no_cache
-    # --skip-existing fully skips complete rows in the linear path, so the
-    # threaded re-hydration worker (which exists only to enrich cached
-    # rows) must not run — skip wins.
-    use_threaded = use_resume and getattr(args, "resume_threaded", False) and not skip_existing
-    try:
-        interrupted = _run_tagging(
-            files,
-            source_type,
-            args,
-            ollama,
-            geocoder,
-            progress_db,
-            phash_map,
-            skipped_dedup,
-            results,
-            stats,
-            session,
-            use_threaded,
-        )
-        _write_run_outputs(results, args)
-        _print_summary(stats)
-        if vocabulary is not None:
-            _print_vocabulary_summary(vocabulary)
+        session, dashboard = start_dashboard_for(args, command="run")
+        jobs = resolve_jobs(getattr(args, "jobs", 1), backend)
+        if jobs > 1:
+            print(f"Concurrency: {jobs} in-flight model requests", file=sys.stderr)
         if session is not None:
-            for k, v in stats.items():
-                session.set_counter(k, v)
-            if not interrupted:
-                session.mark_completed()
-    finally:
-        if dashboard is not None:
-            dashboard.stop()
-        run_registry.set_current(None)
+            session.set_counter("scanned", stats["scanned"])
+            session.set_counter("jobs", jobs)
+            session.mark_running()
+
+        use_resume = getattr(args, "resume_from_db", False) and not args.no_cache
+        skip_existing = getattr(args, "skip_existing", False) and not args.no_cache
+        # --skip-existing fully skips complete rows in the linear path, so the
+        # threaded re-hydration worker (which exists only to enrich cached
+        # rows) must not run — skip wins.
+        use_threaded = use_resume and getattr(args, "resume_threaded", False) and not skip_existing
+        ctx = _RunContext(
+            files=files,
+            source_type=source_type,
+            args=args,
+            client=client,
+            geocoder=geocoder,
+            progress_db=progress_db,
+            phash_map=phash_map,
+            skipped_dedup=skipped_dedup,
+            results=results,
+            stats=stats,
+            session=session,
+            use_threaded=use_threaded,
+            vocabulary=vocabulary,
+        )
+        try:
+            interrupted = _tag(ctx)
+            _write_run_outputs(results, args, vocabulary)
+            _print_summary(stats)
+            if vocabulary is not None:
+                _print_vocabulary_summary(vocabulary)
+            if session is not None:
+                for k, v in stats.items():
+                    session.set_counter(k, v)
+                if not interrupted:
+                    session.mark_completed()
+        finally:
+            if dashboard is not None:
+                dashboard.stop()
+            run_registry.set_current(None)
     if interrupted:
         return 1
     return exit_code_for(stats["model_calls"], stats["model_failures"])
@@ -766,6 +835,7 @@ def _process_one(
     geocoder: ReverseGeocoder,
     stats: dict,
     progress_db: ProgressDB | None = None,
+    vocabulary: Vocabulary | None = None,
 ) -> ImageResult | None:
     """Process one image, serially.  Returns ``None`` when filtered out.
 
@@ -779,7 +849,9 @@ def _process_one(
     )
     if not proceed:
         return cached
-    return _prepare_one(file_path, source_type, args, ollama, geocoder, stats)
+    return _prepare_one(
+        file_path, source_type, args, ollama, geocoder, stats, vocabulary=vocabulary
+    )
 
 
 def _pre_submit_decision(
@@ -842,6 +914,7 @@ def _prepare_one(
     geocoder: ReverseGeocoder,
     stats: dict,
     stats_lock: _threading.Lock | None = None,
+    vocabulary: Vocabulary | None = None,
 ) -> ImageResult | None:
     """Worker-safe half of processing: EXIF, filters, geocode, model call.
 
@@ -926,7 +999,6 @@ def _prepare_one(
         result.error_message = tag_result.error
         bump("model_failures")
     else:
-        vocabulary = getattr(args, "_vocabulary", None)
         if isinstance(vocabulary, Vocabulary):
             # canonicalize() bumps the shared mapping Counters, so it shares
             # the stats lock with the counter bumps above.
@@ -953,6 +1025,7 @@ def _write_metadata(
     result: ImageResult,
     rich_desc: str | None,
     args: argparse.Namespace,
+    vocabulary: Vocabulary | None = None,
 ) -> None:
     """Write metadata for one image: sidecar-only, direct, or auto-fallback."""
     from pyimgtag.exif_writer import (
@@ -961,7 +1034,7 @@ def _write_metadata(
         write_xmp_sidecar,
     )
 
-    hierarchical = _hierarchical_for(result, args)
+    hierarchical = _hierarchical_for(result, args, vocabulary)
 
     if args.sidecar_only:
         err = write_xmp_sidecar(
@@ -1002,7 +1075,9 @@ def _write_metadata(
         print(f"  EXIF write failed: {err}", file=sys.stderr)
 
 
-def _hierarchical_for(result: ImageResult, args: argparse.Namespace) -> list[str] | None:
+def _hierarchical_for(
+    result: ImageResult, args: argparse.Namespace, vocabulary: Vocabulary | None = None
+) -> list[str] | None:
     """The hierarchical keyword paths for one result, or None when not asked for.
 
     The vocabulary hierarchy is used when one is loaded, so a controlled
@@ -1014,7 +1089,6 @@ def _hierarchical_for(result: ImageResult, args: argparse.Namespace) -> list[str
     from pyimgtag.hierarchy import keyword_paths
     from pyimgtag.vocabulary import Vocabulary
 
-    vocabulary = getattr(args, "_vocabulary", None)
     vocabulary_paths: dict[str, str] = {}
     if isinstance(vocabulary, Vocabulary):
         for tag in result.tags:
@@ -1091,6 +1165,7 @@ def _finalize_result(
     phash_map: dict,
     results: list,
     stats: dict,
+    vocabulary: Vocabulary | None = None,
 ) -> None:
     """Mark done in DB, handle write-back, append to results list, print progress."""
     if progress_db is not None:
@@ -1125,7 +1200,7 @@ def _finalize_result(
                     print(f"    description: {rich_desc[:80]}", file=sys.stderr)
                 print(f"    keywords: {', '.join(result.tags)}", file=sys.stderr)
         else:
-            _write_metadata(result, rich_desc, args)
+            _write_metadata(result, rich_desc, args, vocabulary)
 
     result.phash = phash_map.get(str(file_path))
     results.append(result)

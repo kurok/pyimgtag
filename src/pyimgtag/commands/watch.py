@@ -4,7 +4,7 @@
 ``--interval`` seconds it re-scans the source, waits for files to be
 *stable* (same size + mtime across two consecutive polls, so half-copied
 imports are never tagged), and feeds only the files that are new or changed
-into :func:`pyimgtag.commands.run._run_tagging` with ``--skip-existing``
+into :func:`pyimgtag.commands.run._tag` with ``--skip-existing``
 semantics. Nominatim rate limiting, write-back gating, dedup, and the
 dashboard therefore behave exactly as in ``run`` — this module adds the
 loop, the stability gate, a single-instance lock, and graceful shutdown.
@@ -17,6 +17,7 @@ import os
 import signal
 import sys
 import threading
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,7 @@ from pyimgtag.models import ImageResult
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.prompt_template import PromptTemplateError
 from pyimgtag.run_session import RunSession
-from pyimgtag.vocabulary import VocabularyError
+from pyimgtag.vocabulary import Vocabulary, VocabularyError
 
 __all__ = ["WatchLock", "WatchLockHeld", "cmd_watch", "lock_path_for_db"]
 
@@ -156,12 +157,14 @@ class _Watcher:
         stop: threading.Event,
         prompt_builder: Any,
         extensions: set[str],
+        vocabulary: Vocabulary | None = None,
     ) -> None:
         self.args = args
         self.session = session
         self.stop = stop
         self.prompt_builder = prompt_builder
         self.extensions = extensions
+        self.vocabulary = vocabulary
         self.previous: dict[str, Signature] = {}
         # Files that errored, keyed by the signature that errored — skipped
         # until they change so a persistently failing file does not hit the
@@ -205,28 +208,36 @@ class _Watcher:
         if client is None:
             stats["model_failures"] = len(todo)
             return stats
-        geocoder = ReverseGeocoder(cache_dir=self.args.cache_dir)
-        progress_db = ProgressDB(db_path=self.args.db)
-        phash_map: dict[str, str] = {}
-        skipped_dedup: set[str] = set()
-        if self.args.dedup:
-            phash_map, skipped_dedup = _run._compute_dedup_map(todo, self.args.dedup_threshold)
         results: list[ImageResult] = []
-        # _run_tagging closes client/geocoder/progress_db itself.
-        self.interrupted = _run._run_tagging(
-            todo,
-            source_type,
-            self.args,
-            client,
-            geocoder,
-            progress_db,
-            phash_map,
-            skipped_dedup,
-            results,
-            stats,
-            self.session,
-            False,
-        )
+        # This cycle created the client, geocoder and database, so it closes
+        # them, exactly once, whatever happens in between.
+        with ExitStack() as owned:
+            owned.callback(client.close)
+            geocoder = ReverseGeocoder(cache_dir=self.args.cache_dir)
+            owned.callback(geocoder.close)
+            progress_db = ProgressDB(db_path=self.args.db)
+            owned.callback(progress_db.close)
+            phash_map: dict[str, str] = {}
+            skipped_dedup: set[str] = set()
+            if self.args.dedup:
+                phash_map, skipped_dedup = _run._compute_dedup_map(todo, self.args.dedup_threshold)
+            self.interrupted = _run._tag(
+                _run._RunContext(
+                    files=todo,
+                    source_type=source_type,
+                    args=self.args,
+                    client=client,
+                    geocoder=geocoder,
+                    progress_db=progress_db,
+                    phash_map=phash_map,
+                    skipped_dedup=skipped_dedup,
+                    results=results,
+                    stats=stats,
+                    session=self.session,
+                    use_threaded=False,
+                    vocabulary=self.vocabulary,
+                )
+            )
         for r in results:
             if r.processing_status != "ok":
                 sig = self.previous.get(r.file_path)
@@ -295,7 +306,6 @@ def cmd_watch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     except (VocabularyError, PromptTemplateError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-    args._vocabulary = vocabulary
 
     lock = WatchLock(lock_path_for_db(args.db))
     try:
@@ -328,7 +338,7 @@ def cmd_watch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         except (ValueError, OSError):  # not on the main thread / unsupported
             pass
 
-    watcher = _Watcher(args, session, stop, prompt_builder, extensions)
+    watcher = _Watcher(args, session, stop, prompt_builder, extensions, vocabulary)
     _log(
         f"watching {args.input_dir or args.photos_library} every {args.interval:g}s "
         f"(lock {lock.path})"
