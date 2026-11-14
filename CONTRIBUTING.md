@@ -237,7 +237,7 @@ A separate `pr-tests` workflow runs a Playwright Chromium smoke against the dash
 
 ### Style
 
-- **Formatter/linter:** ruff (line length: 100, target Python 3.11)
+- **Formatter/linter:** ruff (line length: 100, target Python 3.12)
 - Follow existing patterns in the codebase
 - Keep functions focused -- one function, one job
 - No unnecessary abstractions; simple and direct is better
