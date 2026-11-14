@@ -18,6 +18,16 @@ def _parse_error_log_in_tmp(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_ambient_pyimgtag_db(monkeypatch):
+    """Ignore a PYIMGTAG_DB exported in the developer's shell.
+
+    The CLI honours the variable, so without this an in-process ``main([...])``
+    call with no ``--db`` would read, or write to, that database.
+    """
+    monkeypatch.delenv("PYIMGTAG_DB", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _reset_shared_throttles(monkeypatch):
     """Clear the process-wide Nominatim schedule and ``--max-rps`` bucket.
 

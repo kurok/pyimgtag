@@ -68,6 +68,7 @@ src/pyimgtag/
                        parsers shared by the CLI and the query/map web APIs
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
+  db_location.py       resolve_db_path(): --db, then PYIMGTAG_DB, then the default
   db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
                        versioned migrations via PRAGMA user_version — latest is v17, which
                        adds media_type/duration_sec for video),

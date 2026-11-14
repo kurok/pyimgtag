@@ -289,6 +289,10 @@ def cmd_watch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         raw_argv = getattr(args, "_argv", None)
         if not isinstance(raw_argv, list):
             raw_argv = sys.argv[1:]
+        named_db = any(a == "--db" or a.startswith("--db=") for a in raw_argv)
+        if args.db and not named_db:
+            # The service will not see this shell's PYIMGTAG_DB: bake it in.
+            raw_argv = [*raw_argv, "--db", args.db]
         return service_units.install_service(raw_argv, force=getattr(args, "force", False))
 
     _validate_watch_args(args, parser)

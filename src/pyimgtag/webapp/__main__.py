@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import os
 
+from pyimgtag.db_location import resolve_db_path
+
 
 def main() -> None:
     from pyimgtag.webapp.serve import serve_unified
@@ -29,7 +31,7 @@ def main() -> None:
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8000"))
     log_level = os.environ.get("PYIMGTAG_LOG_LEVEL", "info")
-    db_path = os.environ.get("PYIMGTAG_DB") or None
+    db_path = resolve_db_path(None)
 
     code = serve_unified(
         db_path,
