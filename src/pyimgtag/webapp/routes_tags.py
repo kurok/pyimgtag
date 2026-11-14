@@ -89,6 +89,14 @@ async function load() {
 function render(tags) {
   const el = document.getElementById('list');
   el.innerHTML = '';
+  if (!allTags.length) {
+    renderEmpty(el, 'No tags yet', 'Tag your photos first:', 'pyimgtag run --input-dir <folder>');
+    return;
+  }
+  if (!tags.length) {
+    renderEmpty(el, 'No tags match this filter');
+    return;
+  }
   for (const t of tags) {
     const row = document.createElement('div');
     row.className = 'row';

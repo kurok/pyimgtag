@@ -165,7 +165,18 @@ async function load() {
   document.getElementById('prevBtnTop').disabled = atFirst;
   document.getElementById('nextBtn').disabled = atLast;
   document.getElementById('nextBtnTop').disabled = atLast;
-  renderGrid(d.items || []);
+  const items = d.items || [];
+  renderGrid(items);
+  if (!items.length) {
+    // Filters (cleanup / status pills, ?file=) narrowed an existing library
+    // to nothing, or there is nothing tagged at all.
+    if (_cleanup || _status || _singleFile) {
+      renderEmpty('grid', 'No photos match these filters', 'Clear a filter to see the rest.');
+    } else {
+      renderEmpty('grid', 'No photos tagged yet', 'Tag a folder of photos first:',
+                  'pyimgtag run --input-dir <folder>');
+    }
+  }
 }
 
 function setFilter(val, btn) {
