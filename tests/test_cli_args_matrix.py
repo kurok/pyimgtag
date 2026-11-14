@@ -629,3 +629,76 @@ class TestJudgeAlwaysOpensProgressDb:
         assert isinstance(captured["db"], ProgressDB), (
             "cmd_judge received None — main() failed to open the default DB"
         )
+
+
+# ---------------------------------------------------------------------------
+# Bad values fail at parse time with exit 2 and a named flag (#393)
+# ---------------------------------------------------------------------------
+
+_REJECTED = [
+    (["run", "--input-dir", "x", "--date", "2026-13-45"], "--date", "expected YYYY-MM-DD"),
+    (["run", "--input-dir", "x", "--date-from", "x"], "--date-from", "expected YYYY-MM-DD"),
+    (["run", "--input-dir", "x", "--date-to", "2026-02-30"], "--date-to", "expected YYYY-MM-DD"),
+    (["watch", "--input-dir", "x", "--date", "26-1-1"], "--date", "expected YYYY-MM-DD"),
+    (["run", "--input-dir", "x", "--limit", "-5"], "--limit", "0 or more"),
+    (["run", "--input-dir", "x", "--timeout", "0"], "--timeout", "1 or more"),
+    (["run", "--input-dir", "x", "--timeout", "abc"], "--timeout", "1 or more"),
+    (["run", "--input-dir", "x", "--jobs", "-1"], "--jobs", "0 or more"),
+    (["judge", "--input-dir", "x", "-j", "-2"], "--jobs", "0 or more"),
+    (["judge", "--input-dir", "x", "--timeout", "-1"], "--timeout", "1 or more"),
+    (["judge", "--input-dir", "x", "--limit", "-1"], "--limit", "0 or more"),
+    (["query", "--limit", "-1"], "--limit", "0 or more"),
+    (["faces", "scan", "--input-dir", "x", "--limit", "-1"], "--limit", "0 or more"),
+    (["faces", "scan", "--input-dir", "x", "-j", "-1"], "--jobs", "0 or more"),
+    (["index", "--limit", "-1"], "--limit", "0 or more"),
+    (["events", "list", "--limit", "-1"], "--limit", "0 or more"),
+    (["search", "q", "--top", "0"], "--top", "1 or more"),
+    (["insights", "--top", "0"], "--top", "1 or more"),
+]
+
+
+@pytest.mark.parametrize(
+    ("argv", "flag", "message"), _REJECTED, ids=[" ".join(a) for a, _, _ in _REJECTED]
+)
+def test_bad_values_exit_2_naming_the_flag(argv, flag, message, capsys):
+    with pytest.raises(SystemExit) as exc:
+        _parse(*argv)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert f"argument {flag}" in err
+    assert message in err
+    assert "Traceback" not in err
+
+
+def test_immich_limit_rejects_negatives(capsys):
+    with pytest.raises(SystemExit) as exc:
+        _parse("immich-sync", "--url", "http://x", "--limit", "-1")
+    assert exc.value.code == 2
+    assert "argument --limit" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("argv", "attr", "value"),
+    [
+        (["run", "--input-dir", "x", "-j", "0"], "jobs", 0),
+        (["judge", "--input-dir", "x", "-j", "0"], "jobs", 0),
+        (["faces", "scan", "--input-dir", "x", "-j", "0"], "jobs", 0),
+        (["run", "--input-dir", "x", "--limit", "0"], "limit", 0),
+        (["run", "--input-dir", "x", "--timeout", "1"], "timeout", 1),
+        (["search", "q", "--top", "1"], "top", 1),
+        (["run", "--input-dir", "x", "--date", "2026-02-28"], "date", "2026-02-28"),
+        (["run", "--input-dir", "x", "--date-from", "2024-02-29"], "date_from", "2024-02-29"),
+        (["run", "--input-dir", "x", "--date-to", "2026-12-31"], "date_to", "2026-12-31"),
+    ],
+)
+def test_boundary_values_stay_valid(argv, attr, value):
+    ns = _parse(*argv)
+    assert getattr(ns, attr) == value
+    if attr.startswith("date"):
+        assert isinstance(getattr(ns, attr), str)
+
+
+def test_run_limit_help_says_zero_means_no_limit(capsys):
+    with pytest.raises(SystemExit):
+        _parse("run", "--help")
+    assert "0 = no limit" in capsys.readouterr().out

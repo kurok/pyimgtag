@@ -531,11 +531,19 @@ def _add_run_flags(run_p: argparse.ArgumentParser) -> None:
         default=1280,
         help="Max image dimension sent to model (default: 1280)",
     )
-    run_p.add_argument("--timeout", type=int, default=120, help="Model request timeout in seconds")
-    run_p.add_argument("--limit", type=int, help="Max images to process")
-    run_p.add_argument("--date", help="Process only this date (YYYY-MM-DD)")
-    run_p.add_argument("--date-from", help="Process images from this date (YYYY-MM-DD)")
-    run_p.add_argument("--date-to", help="Process images up to this date (YYYY-MM-DD)")
+    run_p.add_argument(
+        "--timeout", type=_positive_int, default=120, help="Model request timeout in seconds"
+    )
+    run_p.add_argument(
+        "--limit", type=_non_negative_int, help="Max images to process (0 = no limit)"
+    )
+    run_p.add_argument("--date", type=_date_arg, help="Process only this date (YYYY-MM-DD)")
+    run_p.add_argument(
+        "--date-from", type=_date_arg, help="Process images from this date (YYYY-MM-DD)"
+    )
+    run_p.add_argument(
+        "--date-to", type=_date_arg, help="Process images up to this date (YYYY-MM-DD)"
+    )
     run_p.add_argument(
         "--hierarchical-keywords",
         action="store_true",
@@ -702,7 +710,7 @@ def _add_concurrency_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--jobs",
         "-j",
-        type=int,
+        type=_non_negative_int,
         default=1,
         metavar="N",
         help=(
@@ -860,11 +868,11 @@ def _add_faces_subcommand(subparsers: Any) -> None:
     faces_scan.add_argument(
         "--extensions", default="jpg,jpeg,heic,png", help="Comma-separated extensions"
     )
-    faces_scan.add_argument("--limit", type=int, help="Max images to scan")
+    faces_scan.add_argument("--limit", type=_non_negative_int, help="Max images to scan")
     faces_scan.add_argument(
         "--jobs",
         "-j",
-        type=int,
+        type=_non_negative_int,
         default=1,
         help="Worker processes for detection+embedding (default 1 = serial). "
         "Use e.g. -j 8 to detect across CPU cores — the big speedup for large "
@@ -1045,6 +1053,40 @@ def _arg_type(parser: Any) -> Any:
     return convert
 
 
+def _int_at_least(minimum: int, what: str) -> Any:
+    def convert(value: str) -> int:
+        try:
+            number = int(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"expected {what}, got {value!r}") from None
+        if number < minimum:
+            raise argparse.ArgumentTypeError(f"expected {what}, got {value!r}")
+        return number
+
+    return convert
+
+
+#: argparse ``type=`` for counts that must be 1 or more (``--timeout``, ``--top``).
+_positive_int = _int_at_least(1, "a whole number of 1 or more")
+#: argparse ``type=`` for counts where 0 has a meaning (``--limit``: none, ``-j``: auto).
+_non_negative_int = _int_at_least(0, "a whole number of 0 or more")
+
+
+def _date_arg(value: str) -> str:
+    """Validate a ``YYYY-MM-DD`` flag at parse time and keep the original string.
+
+    The run loop parses the string again with :func:`filters.parse_date`, so
+    the namespace keeps the value exactly as typed.
+    """
+    from pyimgtag.filters import parse_date
+
+    try:
+        parse_date(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"expected YYYY-MM-DD, got {value!r}") from None
+    return value
+
+
 def _add_query_subcommand(subparsers: Any) -> None:
     from pyimgtag.filters import parse_bbox, parse_month, parse_year
 
@@ -1091,7 +1133,7 @@ def _add_query_subcommand(subparsers: Any) -> None:
         default="table",
         help="Output format (default: table)",
     )
-    query_p.add_argument("--limit", type=int, help="Max results to return")
+    query_p.add_argument("--limit", type=_non_negative_int, help="Max results to return")
     query_p.add_argument(
         "--type",
         dest="media_type",
@@ -1138,7 +1180,9 @@ def _add_index_subcommand(subparsers: Any) -> None:
         action="store_true",
         help="Re-embed every image, discarding the existing index",
     )
-    index_p.add_argument("--limit", type=int, metavar="N", help="Embed at most N new images")
+    index_p.add_argument(
+        "--limit", type=_non_negative_int, metavar="N", help="Embed at most N new images"
+    )
     index_p.add_argument(
         "--model-dir",
         metavar="DIR",
@@ -1169,7 +1213,7 @@ def _add_search_subcommand(subparsers: Any) -> None:
     )
     search_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     search_p.add_argument(
-        "--top", type=int, default=20, metavar="N", help="Number of results (default: 20)"
+        "--top", type=_positive_int, default=20, metavar="N", help="Number of results (default: 20)"
     )
     search_p.add_argument(
         "--min-similarity",
@@ -1235,7 +1279,7 @@ def _add_events_subcommand(subparsers: Any) -> None:
 
     listing = events_sub.add_parser("list", help="List detected events")
     listing.add_argument("--db", help=_DEFAULT_DB_HELP)
-    listing.add_argument("--limit", type=int, help="Show at most N events")
+    listing.add_argument("--limit", type=_non_negative_int, help="Show at most N events")
     listing.add_argument(
         "--unassigned",
         action="store_true",
@@ -1355,7 +1399,9 @@ def _add_immich_sync_subcommand(subparsers: Any) -> None:
         metavar="PREFIX",
         help="Prefix every pushed tag, e.g. 'pyimgtag/' to keep them separable",
     )
-    immich_p.add_argument("--limit", type=int, metavar="N", help="Sync at most N photos")
+    immich_p.add_argument(
+        "--limit", type=_non_negative_int, metavar="N", help="Sync at most N photos"
+    )
 
 
 def _add_judge_subcommand(subparsers: Any) -> None:
@@ -1370,7 +1416,9 @@ def _add_judge_subcommand(subparsers: Any) -> None:
         default="jpg,jpeg,heic,png,tiff,webp",
         help="Comma-separated file extensions (default: jpg,jpeg,heic,png,tiff,webp)",
     )
-    judge_p.add_argument("--limit", type=int, metavar="N", help="Process at most N images")
+    judge_p.add_argument(
+        "--limit", type=_non_negative_int, metavar="N", help="Process at most N images"
+    )
     judge_p.add_argument(
         "--include-video",
         action="store_true",
@@ -1463,7 +1511,7 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     )
     judge_p.add_argument(
         "--timeout",
-        type=int,
+        type=_positive_int,
         default=120,
         metavar="SEC",
         help="Model request timeout in seconds",
@@ -1527,7 +1575,7 @@ def _add_insights_subcommand(subparsers: Any) -> None:
     )
     insights_p.add_argument(
         "--top",
-        type=int,
+        type=_positive_int,
         default=10,
         help="Length of every top-N list: tags, places, people, photos (default: 10)",
     )
