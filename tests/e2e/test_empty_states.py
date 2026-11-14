@@ -60,7 +60,15 @@ def test_a_query_with_no_matches_says_so(page, empty_base_url: str) -> None:
 
 
 def test_a_filter_that_matches_nothing_is_not_an_empty_library(page, base_url: str) -> None:
+    # A library with photos, whatever the server's own database holds.
+    page.route(
+        "**/review/api/stats",
+        lambda route: route.fulfill(
+            status=200, content_type="application/json", body=json.dumps({"total": 5, "error": 0})
+        ),
+    )
     page.goto(base_url + "/review/")
+    expect(page.locator("#stats")).to_contain_text("5 images")
     page.route(
         "**/review/api/images?*",
         lambda route: route.fulfill(
@@ -74,3 +82,57 @@ def test_a_filter_that_matches_nothing_is_not_an_empty_library(page, base_url: s
     expect(empty).to_contain_text("No photos match these filters")
     expect(empty).not_to_contain_text("No photos tagged yet")
     expect(empty.locator("code")).to_have_count(0)
+
+
+@pytest.mark.parametrize("path", ["/review/", "/judge/"])
+def test_the_card_spans_the_whole_grid(page, empty_base_url: str, path: str) -> None:
+    """Not squeezed into the first 220 px grid cell (the command must not wrap)."""
+    page.goto(empty_base_url + path)
+    card = page.locator("#grid .empty")
+    expect(card).to_be_visible()
+    grid_box = page.locator("#grid").bounding_box()
+    card_box = card.bounding_box()
+    assert grid_box and card_box
+    assert card_box["width"] > 0.9 * grid_box["width"]
+
+
+def test_an_empty_library_wins_over_filter_copy(page, empty_base_url: str) -> None:
+    page.goto(empty_base_url + "/review/")
+    expect(page.locator("#stats")).to_contain_text("0 images")
+    page.get_by_role("button", name="Errors").click()
+    expect(page.locator("#grid .empty")).to_contain_text("No photos tagged yet")
+
+
+def test_the_idle_card_replaces_the_no_active_item_line(page, empty_base_url: str) -> None:
+    page.goto(empty_base_url + "/")
+    expect(page.locator(".empty")).to_be_visible()
+    expect(page.locator("#current")).to_be_hidden()
+
+
+def test_a_page_past_the_end_steps_back_instead_of_saying_empty(page, base_url: str) -> None:
+    calls: list[str] = []
+
+    def images(route):
+        calls.append(route.request.url)
+        offset = int(route.request.url.split("offset=")[1].split("&")[0])
+        items = (
+            []
+            if offset >= 50
+            else [
+                {"file_path": f"/p/{i}.jpg", "file_name": f"{i}.jpg", "tags": [], "status": "ok"}
+                for i in range(3)
+            ]
+        )
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"total": 3, "items": items}),
+        )
+
+    page.route("**/review/api/images?*", images)
+    page.goto(base_url + "/review/")
+    expect(page.locator("#grid .img-card")).to_have_count(3)
+    page.evaluate("() => { _offset = 50; return load(); }")
+    expect(page.locator("#grid .img-card")).to_have_count(3)
+    expect(page.locator("#grid .empty")).to_have_count(0)
+    assert any("offset=0" in url for url in calls[1:])

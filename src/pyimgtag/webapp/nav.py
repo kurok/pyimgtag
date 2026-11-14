@@ -118,7 +118,8 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .load-error-text{flex:1}
 .modal-sub.modal-error{color:var(--danger)}
 .empty-state{background:var(--surface);border-radius:var(--radius-md);padding:48px;
-             margin:16px 0;text-align:center;color:var(--muted);box-shadow:var(--shadow-sm)}
+             margin:16px 0;text-align:center;color:var(--muted);box-shadow:var(--shadow-sm);
+             grid-column:1/-1}
 .empty-state p:first-child{font-size:17px;color:var(--text);margin-bottom:8px}
 .empty-state code{font-family:ui-monospace,'SF Mono',monospace;font-size:12px;
                   background:var(--bg);padding:2px 6px;border-radius:4px}

@@ -67,6 +67,7 @@
   async function showIdle() {
     if (idleShown) return;
     idleShown = true;
+    currentEl.style.display = 'none';  // the card says it; no "(no active item)" too
     const box = renderEmpty(idleEl, 'No run in progress',
                             'Start one from the terminal, for example',
                             'pyimgtag run --input-dir <folder>');
@@ -95,6 +96,7 @@
     if (!idleShown) return;
     idleShown = false;
     idleEl.innerHTML = '';
+    currentEl.style.display = '';
   }
 
   async function refresh() {
