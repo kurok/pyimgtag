@@ -261,7 +261,14 @@ async function load() {
   document.getElementById('status').textContent = 'Loading…';
   const url = '{{ api_base }}/api/persons/with-faces?offset=' + _offset
     + '&limit=' + PAGE_SIZE + '&filter=' + _filter + '&sort=' + _sort;
-  const data = await fetch(url).then(r => r.json());
+  let data;
+  try {
+    data = await apiFetch(url);
+  } catch (err) {
+    document.getElementById('status').textContent = 'Could not load persons';
+    showLoadError('persons', err.message, retryFor(err, load));
+    return;
+  }
   _total = data.total;
   const persons = data.items;
 
@@ -313,7 +320,14 @@ async function loadUnassigned() {
   _syncUrl();
   document.getElementById('status').textContent = 'Loading…';
   const url = '{{ api_base }}/api/faces/unassigned?offset=' + _uaOffset + '&limit=' + UA_PAGE_SIZE;
-  const data = await fetch(url).then(r => r.json());
+  let data;
+  try {
+    data = await apiFetch(url);
+  } catch (err) {
+    document.getElementById('status').textContent = 'Could not load unassigned faces';
+    showLoadError('unassigned-grid', err.message, retryFor(err, loadUnassigned));
+    return;
+  }
   _uaTotal = data.total;
   document.getElementById('status').textContent = _uaTotal + ' unassigned face(s)';
 
@@ -383,7 +397,13 @@ function updateSelectionUI() {
 }
 
 async function openAssignModal() {
-  const persons = await fetch('{{ api_base }}/api/persons').then(r => r.json());
+  let persons;
+  try {
+    persons = await apiFetch('{{ api_base }}/api/persons');
+  } catch (err) {
+    alert('Could not load persons: ' + err.message);
+    return;
+  }
   if (!persons.length) { alert('No persons yet — use "New person from selected" instead.'); return; }
   const opts = persons.map(p =>
     '<option value="' + p.id + '">' +
@@ -398,11 +418,13 @@ async function openAssignModal() {
     'Assign', 'btn-primary',
     async () => {
       const personId = Number(document.getElementById('m-person-sel').value);
-      await fetch('{{ api_base }}/api/faces/assign-batch', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({face_ids: [..._selected], person_id: personId}),
-      });
+      try {
+        await apiFetch('{{ api_base }}/api/faces/assign-batch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({face_ids: [..._selected], person_id: personId}),
+        });
+      } catch (err) { showModalError(err.message); return; }
       closeModal();
       _selected.clear();
       loadUnassigned();
@@ -412,7 +434,13 @@ async function openAssignModal() {
 
 // ── Rename / merge modal ─────────────────────────────────────────────────────
 async function openRenameModal(personId, currentLabel, onDone) {
-  const allPersons = await fetch('{{ api_base }}/api/persons').then(r => r.json());
+  let allPersons;
+  try {
+    allPersons = await apiFetch('{{ api_base }}/api/persons');
+  } catch (err) {
+    alert('Could not load persons: ' + err.message);
+    return;
+  }
   const targets = allPersons.filter(p => p.trusted && p.label && p.id !== personId)
     .sort((a, b) => (a.label || '').localeCompare(b.label || ''));
 
@@ -433,18 +461,22 @@ async function openRenameModal(personId, currentLabel, onDone) {
       const _raw = sel && sel.value ? Number(sel.value) : null;
       const targetId = (_raw && !isNaN(_raw)) ? _raw : null;
       if (targetId) {
-        await fetch('{{ api_base }}/api/persons/' + personId + '/merge/' + targetId,
-          {method: 'POST'});
+        try {
+          await apiFetch('{{ api_base }}/api/persons/' + personId + '/merge/' + targetId,
+            {method: 'POST'});
+        } catch (err) { showModalError(err.message); return; }
         closeModal();
         if (typeof onDone === 'function') onDone(targetId);
       } else {
         const val = document.getElementById('m-inp').value.trim();
         if (!val) return;
-        await fetch('{{ api_base }}/api/persons/' + personId + '/label', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({label: val}),
-        });
+        try {
+          await apiFetch('{{ api_base }}/api/persons/' + personId + '/label', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({label: val}),
+          });
+        } catch (err) { showModalError(err.message); return; }
         closeModal();
         if (typeof onDone === 'function') onDone(null);
       }
@@ -479,11 +511,13 @@ async function createNewPerson() {
     'Create', 'btn-primary',
     async () => {
       const label = document.getElementById('m-inp').value.trim();
-      await fetch('{{ api_base }}/api/faces/assign-batch', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({face_ids: [..._selected], person_id: null, label}),
-      });
+      try {
+        await apiFetch('{{ api_base }}/api/faces/assign-batch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({face_ids: [..._selected], person_id: null, label}),
+        });
+      } catch (err) { showModalError(err.message); return; }
       closeModal();
       _selected.clear();
       loadUnassigned();
@@ -494,11 +528,15 @@ async function createNewPerson() {
 
 async function dismissSelected() {
   if (!_selected.size) return;
-  await Promise.all([..._selected].map(id =>
-    fetch('{{ api_base }}/api/faces/' + id + '/ignore', {method: 'POST'})
+  const results = await Promise.allSettled([..._selected].map(id =>
+    apiFetch('{{ api_base }}/api/faces/' + id + '/ignore', {method: 'POST'})
   ));
+  const failed = results.filter(r => r.status === 'rejected');
   _selected.clear();
   loadUnassigned();
+  if (failed.length) {
+    alert(failed.length + ' of ' + results.length + ' face(s) failed: ' + failed[0].reason.message);
+  }
 }
 
 // ── Trash ────────────────────────────────────────────────────────────────────
@@ -512,7 +550,14 @@ async function loadTrash() {
   _syncUrl();
   document.getElementById('status').textContent = 'Loading…';
   const url = '{{ api_base }}/api/faces/ignored?offset=' + _trOffset + '&limit=' + UA_PAGE_SIZE;
-  const data = await fetch(url).then(r => r.json());
+  let data;
+  try {
+    data = await apiFetch(url);
+  } catch (err) {
+    document.getElementById('status').textContent = 'Could not load dismissed faces';
+    showLoadError('trash-grid', err.message, retryFor(err, loadTrash));
+    return;
+  }
   _trTotal = data.total;
   document.getElementById('status').textContent = _trTotal + ' dismissed face(s)';
   document.getElementById('trash-count').textContent = '0 selected';
@@ -554,11 +599,15 @@ async function loadTrash() {
 
 async function restoreSelected() {
   if (!_selected.size) return;
-  await Promise.all([..._selected].map(id =>
-    fetch('{{ api_base }}/api/faces/' + id + '/restore', {method: 'POST'})
+  const results = await Promise.allSettled([..._selected].map(id =>
+    apiFetch('{{ api_base }}/api/faces/' + id + '/restore', {method: 'POST'})
   ));
+  const failed = results.filter(r => r.status === 'rejected');
   _selected.clear();
   loadTrash();
+  if (failed.length) {
+    alert(failed.length + ' of ' + results.length + ' face(s) failed: ' + failed[0].reason.message);
+  }
 }
 
 function renderPerson(p, faces) {
@@ -625,7 +674,9 @@ function renderPerson(p, faces) {
     img.addEventListener('mouseleave', hidePreview);
     img.addEventListener('click', async () => {
       hidePreview();
-      await fetch('{{ api_base }}/api/faces/' + f.id + '/unassign', {method: 'POST'});
+      try {
+        await apiFetch('{{ api_base }}/api/faces/' + f.id + '/unassign', {method: 'POST'});
+      } catch (err) { alert('Could not unassign the face: ' + err.message); return; }
       load();
     });
     facesGrid.appendChild(img);
@@ -670,7 +721,9 @@ function renderPerson(p, faces) {
       '',
       'Delete', 'btn-danger-text',
       async () => {
-        await fetch('{{ api_base }}/api/persons/' + p.id, {method: 'DELETE'});
+        try {
+          await apiFetch('{{ api_base }}/api/persons/' + p.id, {method: 'DELETE'});
+        } catch (err) { showModalError(err.message); return; }
         closeModal();
         load();
       }
@@ -688,7 +741,14 @@ function renderPerson(p, faces) {
     cfmBtn.addEventListener('click', async () => {
       cfmBtn.disabled = true;
       cfmBtn.textContent = 'Confirming…';
-      await fetch('{{ api_base }}/api/persons/' + p.id + '/confirm', {method: 'POST'});
+      try {
+        await apiFetch('{{ api_base }}/api/persons/' + p.id + '/confirm', {method: 'POST'});
+      } catch (err) {
+        alert('Could not confirm: ' + err.message);
+        cfmBtn.disabled = false;
+        cfmBtn.textContent = 'Confirm';
+        return;
+      }
       load();
     });
     acts.appendChild(cfmBtn);
@@ -728,11 +788,13 @@ function clearPersonSelection() {
 async function confirmSelectedPersons() {
   const ids = [..._selectedPersons];
   if (!ids.length) return;
-  await fetch('{{ api_base }}/api/persons/confirm-batch', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({person_ids: ids}),
-  });
+  try {
+    await apiFetch('{{ api_base }}/api/persons/confirm-batch', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({person_ids: ids}),
+    });
+  } catch (err) { alert('Could not confirm the selected persons: ' + err.message); return; }
   load();
 }
 
@@ -745,11 +807,13 @@ function deleteSelectedPersons() {
     '',
     'Delete', 'btn-danger-text',
     async () => {
-      await fetch('{{ api_base }}/api/persons/delete-batch', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({person_ids: ids}),
-      });
+      try {
+        await apiFetch('{{ api_base }}/api/persons/delete-batch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({person_ids: ids}),
+        });
+      } catch (err) { showModalError(err.message); return; }
       closeModal();
       load();
     }

@@ -122,8 +122,14 @@ async function load() {
   params.set('sort', _sort);
   if (_minRating != null) params.set('min_rating', String(_minRating));
   if (_maxRating != null) params.set('max_rating', String(_maxRating));
-  const r = await fetch('{{ api_base }}/api/scores?' + params.toString());
-  const d = await r.json();
+  let d;
+  try {
+    d = await apiFetch('{{ api_base }}/api/scores?' + params.toString());
+  } catch (err) {
+    document.getElementById('count').textContent = '';
+    showLoadError('grid', err.message, retryFor(err, load));
+    return;
+  }
   _total = d.total || 0;
   document.getElementById('count').textContent = _total + ' scored';
   const pages = Math.max(1, Math.ceil(_total / PAGE));
