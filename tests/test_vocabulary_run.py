@@ -314,3 +314,106 @@ def test_query_images_tags_any_exact_and_empty(tmp_path):
         # Combinable with the substring filter.
         both = pdb.query_images(tag="rest", tags_any=["restaurant", "food"])
         assert [Path(r["file_path"]).name for r in both] == ["b.jpg"]
+
+
+# --- the vocabulary reaches every tagging path (#403) --------------------------
+
+
+@pytest.mark.parametrize(
+    "mode",
+    [["-j", "1"], ["-j", "4"], ["-j", "1", "--resume-from-db", "--resume-threaded"]],
+    ids=["j1", "j4", "resume-threaded"],
+)
+def test_every_path_canonicalizes_and_writes_back_with_the_vocabulary(tmp_path, mode):
+    """A dropped ``vocabulary=`` on any path would silently skip canonicalisation."""
+    from pyimgtag.commands.run import cmd_run
+    from pyimgtag.models import ImageResult
+
+    photos = _photos(tmp_path, n=4)
+    db = tmp_path / "p.db"
+    cached = photos / "p0.jpg"
+    if "--resume-threaded" in mode:
+        # One row the hydration worker re-emits instead of re-tagging.
+        with ProgressDB(db_path=db) as pdb:
+            pdb.mark_done(
+                cached,
+                ImageResult(
+                    file_path=str(cached), file_name="p0.jpg", tags=["beach"], scene_summary="s"
+                ),
+            )
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "run",
+            "--input-dir",
+            str(photos),
+            "--db",
+            str(db),
+            "--vocabulary",
+            str(_vocab_file(tmp_path)),
+            "--write-exif",
+            "--no-web",
+            *mode,
+        ]
+    )
+    written: dict[str, tuple] = {}
+
+    def spy(result, rich_desc, args_, vocabulary=None):
+        written[Path(result.file_path).name] = (list(result.tags), vocabulary)
+
+    with (
+        patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+        patch("pyimgtag.commands.run.OllamaClient") as cls,
+        patch("pyimgtag.commands.run._write_metadata", side_effect=spy),
+    ):
+        client = MagicMock()
+        client.tag_image.side_effect = lambda path, context=None: TagResult(
+            tags=["seaside", "Hiking"], summary="s"
+        )
+        client.prompt_builder = None
+        cls.return_value = client
+        assert cmd_run(args, parser) == 0
+
+    assert set(written) == {"p0.jpg", "p1.jpg", "p2.jpg", "p3.jpg"}
+    for name, (tags, vocabulary) in written.items():
+        assert vocabulary is not None, f"{name}: write-back got no vocabulary"
+        if not (name == "p0.jpg" and "--resume-threaded" in mode):
+            assert tags == ["beach", "hiking"], name
+    with ProgressDB(db_path=db) as pdb:
+        fresh = pdb.get_image(str(photos / "p3.jpg"))
+    assert fresh["tags"] == ["beach", "hiking"]
+
+
+def test_watch_canonicalizes_with_the_vocabulary(tmp_path):
+    from pyimgtag.main import main as cli
+
+    photos = _photos(tmp_path, n=1)
+    db = tmp_path / "p.db"
+    with (
+        patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+        patch("pyimgtag.commands.run.OllamaClient") as cls,
+    ):
+        client = MagicMock()
+        client.tag_image.side_effect = lambda path, context=None: TagResult(
+            tags=["shore"], summary="s"
+        )
+        client.prompt_builder = None
+        cls.return_value = client
+        rc = cli(
+            [
+                "watch",
+                "--input-dir",
+                str(photos),
+                "--db",
+                str(db),
+                "--vocabulary",
+                str(_vocab_file(tmp_path)),
+                "--interval",
+                "0.01",
+                "--max-cycles",
+                "3",
+            ]
+        )
+    assert rc == 0
+    with ProgressDB(db_path=db) as pdb:
+        assert pdb.get_image(str(photos / "p0.jpg"))["tags"] == ["beach"]

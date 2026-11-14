@@ -4,7 +4,7 @@
 ``--interval`` seconds it re-scans the source, waits for files to be
 *stable* (same size + mtime across two consecutive polls, so half-copied
 imports are never tagged), and feeds only the files that are new or changed
-into :func:`pyimgtag.commands.run._run_tagging` with ``--skip-existing``
+into :func:`pyimgtag.commands.run._tag` with ``--skip-existing``
 semantics. Nominatim rate limiting, write-back gating, dedup, and the
 dashboard therefore behave exactly as in ``run`` — this module adds the
 loop, the stability gate, a single-instance lock, and graceful shutdown.
@@ -28,7 +28,7 @@ from pyimgtag.models import ImageResult
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.prompt_template import PromptTemplateError
 from pyimgtag.run_session import RunSession
-from pyimgtag.vocabulary import VocabularyError
+from pyimgtag.vocabulary import Vocabulary, VocabularyError
 
 __all__ = ["WatchLock", "WatchLockHeld", "cmd_watch", "lock_path_for_db"]
 
@@ -157,7 +157,7 @@ class _Watcher:
         stop: threading.Event,
         prompt_builder: Any,
         extensions: set[str],
-        vocabulary: Any = None,
+        vocabulary: Vocabulary | None = None,
     ) -> None:
         self.args = args
         self.session = session

@@ -505,6 +505,4 @@ def test_each_cycle_closes_its_own_client_geocoder_and_db_once(tmp_path, monkeyp
     # its own DB with a ``with`` block, which closes it too).
     assert len(opened["geocoder"]) == passes
     assert all(g.close.call_count == 1 for g in opened["geocoder"])
-    assert all(d.close.call_count >= 1 for d in opened["db"])
-    cycle_dbs = [d for d in opened["db"] if d.close.call_count == 1]
-    assert len(cycle_dbs) == len(opened["db"])
+    assert all(d.close.call_count == 1 for d in opened["db"])
