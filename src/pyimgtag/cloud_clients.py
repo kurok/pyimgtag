@@ -30,16 +30,23 @@ from __future__ import annotations
 
 import logging
 import os
-import random
-import time
+import time  # noqa: F401 — tests patch pyimgtag.cloud_clients.time.sleep
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
 
 import requests
 
-from pyimgtag.concurrent_pipeline import acquire_global_rate_limit
+from pyimgtag._http_retry import (  # noqa: F401 — re-exported for callers and tests
+    _BACKOFF_BASE,
+    _BACKOFF_CAP,
+    _JITTER_FRACTION,
+    _MAX_ATTEMPTS,
+    _RETRY_STATUSES,
+    _backoff_delay,
+    _parse_retry_after,
+    _retry_after_seconds,
+    post_with_retry,
+)
 from pyimgtag.models import JudgeScores, TagResult
 from pyimgtag.ollama_client import (
     _JUDGE_PROMPT,
@@ -91,57 +98,8 @@ _CLOUD_MAX_TOKENS = 1024
 logger = logging.getLogger(__name__)
 
 # --- throttling -----------------------------------------------------------
-# Statuses worth retrying: 429 is the providers' rate-limit signal, 503 their
-# "overloaded, come back" signal. Anything else is a real failure.
-_RETRY_STATUSES = frozenset({429, 503})
-_MAX_ATTEMPTS = 5
-_BACKOFF_BASE = 1.0  # seconds
-_BACKOFF_CAP = 30.0  # seconds
-_JITTER_FRACTION = 0.25
-# SystemRandom keeps bandit's B311 quiet; the jitter only needs to be
-# uncorrelated across workers, not unpredictable.
-_jitter = random.SystemRandom()
-
-
-def _parse_retry_after(value: str | None) -> float | None:
-    """Parse a ``Retry-After`` header (delta-seconds or HTTP-date) to seconds."""
-    if not value:
-        return None
-    text = value.strip()
-    try:
-        return max(0.0, float(text))
-    except ValueError:
-        pass
-    try:
-        when = parsedate_to_datetime(text)
-    except (TypeError, ValueError):
-        return None
-    if when is None:
-        return None
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
-    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
-
-
-def _retry_after_seconds(resp: Any) -> float | None:
-    """Extract the ``Retry-After`` delay from *resp*, or ``None`` if absent."""
-    headers: Any = getattr(resp, "headers", None)
-    value = headers.get("Retry-After") if headers is not None and hasattr(headers, "get") else None
-    return _parse_retry_after(value) if isinstance(value, str) else None
-
-
-def _backoff_delay(attempt: int, retry_after: float | None = None) -> float:
-    """Seconds to wait before retry *attempt* (1-based).
-
-    A server-supplied ``Retry-After`` wins and is used as-is (capped); otherwise
-    the delay doubles per attempt from :data:`_BACKOFF_BASE` up to
-    :data:`_BACKOFF_CAP`, plus up to 25% jitter so parallel workers do not
-    re-collide in lockstep.
-    """
-    if retry_after is not None:
-        return min(retry_after, _BACKOFF_CAP)
-    base = min(_BACKOFF_CAP, _BACKOFF_BASE * (2 ** (attempt - 1)))
-    return base + _jitter.uniform(0.0, base * _JITTER_FRACTION)
+# 429/503 retry with backoff lives in pyimgtag._http_retry, shared with
+# OllamaClient; the names are re-imported here for existing callers and tests.
 
 
 class CloudClientError(RuntimeError):
@@ -297,68 +255,46 @@ class BaseCloudClient(JudgeErrorMixin, ABC):
         """
         payload = self._build_payload(prompt, img_b64)
         url = self._request_url()
-        status: Any = None
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
-            acquire_global_rate_limit()
-            try:
-                resp = self._session.post(url, json=payload, timeout=self.timeout)
-            except requests.RequestException as e:
-                if on_error_msg:
-                    return TagResult(error=f"{on_error_msg}: {e}")
-                self._judge_failed(short_request_error(e))
-                return None
+        try:
+            resp = post_with_retry(
+                self._session, url, json=payload, timeout=self.timeout, label=self._backend
+            )
+        except requests.RequestException as e:
+            if on_error_msg:
+                return TagResult(error=f"{on_error_msg}: {e}")
+            self._judge_failed(short_request_error(e))
+            return None
 
-            status = getattr(resp, "status_code", None)
-            if status in _RETRY_STATUSES and attempt < _MAX_ATTEMPTS:
-                delay = _backoff_delay(attempt, _retry_after_seconds(resp))
-                logger.debug(
-                    "%s HTTP %s on attempt %d/%d; retrying in %.2fs",
-                    self._backend,
-                    status,
-                    attempt,
-                    _MAX_ATTEMPTS,
-                    delay,
-                )
-                time.sleep(delay)
-                continue
-            if status in _RETRY_STATUSES:
-                detail = (
-                    f"{self._backend} rate limited (HTTP {status}) after {_MAX_ATTEMPTS} attempts"
-                )
-                if on_error_msg:
-                    return TagResult(error=detail)
-                self._judge_failed(
-                    f"request failed: rate limited (HTTP {status}) after {_MAX_ATTEMPTS} attempts"
-                )
-                return None
+        status = getattr(resp, "status_code", None)
+        if status in _RETRY_STATUSES:
+            detail = f"{self._backend} rate limited (HTTP {status}) after {_MAX_ATTEMPTS} attempts"
+            if on_error_msg:
+                return TagResult(error=detail)
+            self._judge_failed(
+                f"request failed: rate limited (HTTP {status}) after {_MAX_ATTEMPTS} attempts"
+            )
+            return None
 
-            try:
-                resp.raise_for_status()
-                data = resp.json()
-            except requests.RequestException as e:
-                if on_error_msg:
-                    return TagResult(error=f"{on_error_msg}: {e}")
-                # requests' JSONDecodeError is both a RequestException and a
-                # ValueError: a body that is not JSON is a parse failure.
-                self._judge_failed(
-                    JUDGE_UNPARSEABLE if isinstance(e, ValueError) else short_request_error(e)
-                )
-                return None
-            try:
-                return self._extract_text(data)
-            except (KeyError, IndexError, TypeError):
-                detail = f"{self._backend} response shape unexpected: {str(data)[:160]!r}"
-                if on_error_msg:
-                    return TagResult(error=detail)
-                self._judge_failed(JUDGE_UNPARSEABLE)
-                return None
-
-        # Unreachable: the loop's final attempt always returns.
-        detail = f"{self._backend} request failed (HTTP {status})"
-        if on_error_msg:
-            return TagResult(error=detail)
-        self._judge_failed(f"request failed: HTTP {status}")  # pragma: no cover
-        return None  # pragma: no cover
+        try:
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.RequestException as e:
+            if on_error_msg:
+                return TagResult(error=f"{on_error_msg}: {e}")
+            # requests' JSONDecodeError is both a RequestException and a
+            # ValueError: a body that is not JSON is a parse failure.
+            self._judge_failed(
+                JUDGE_UNPARSEABLE if isinstance(e, ValueError) else short_request_error(e)
+            )
+            return None
+        try:
+            return self._extract_text(data)
+        except (KeyError, IndexError, TypeError):
+            detail = f"{self._backend} response shape unexpected: {str(data)[:160]!r}"
+            if on_error_msg:
+                return TagResult(error=detail)
+            self._judge_failed(JUDGE_UNPARSEABLE)
+            return None
 
     def close(self) -> None:
         """Release the underlying HTTP session."""
@@ -546,6 +482,7 @@ def make_image_client(
     api_key: str | None = None,
     api_base: str | None = None,
     prompt_builder: Any = None,
+    ollama_class: Any = None,
 ) -> ImageClient:
     """Build a vision-model client for *backend*.
 
@@ -557,11 +494,15 @@ def make_image_client(
         api_key: Explicit API key (cloud backends only). ``None`` reads the
             provider-conventional environment variable.
         api_base: Override the base URL. For ``ollama`` this is the full
-            Ollama URL (default ``http://localhost:11434``); for cloud
+            Ollama URL (default :data:`DEFAULT_OLLAMA_URL`); for cloud
             backends it points at the API endpoint root.
         prompt_builder: Optional :class:`pyimgtag.prompt_template.PromptBuilder`
             that renders the tagging prompt (controlled vocabulary, custom
             template, output language). ``None`` keeps the built-in prompt.
+        ollama_class: Class to build for ``ollama``; defaults to
+            :class:`~pyimgtag.ollama_client.OllamaClient`. The commands pass
+            the name they import, so tests that patch
+            ``pyimgtag.commands.<cmd>.OllamaClient`` still take effect.
 
     Returns:
         An :class:`ImageClient` exposing ``tag_image``, ``judge_image``, and
@@ -574,11 +515,11 @@ def make_image_client(
     backend_norm = backend.lower().strip()
     client: Any
     if backend_norm == "ollama":
-        from pyimgtag.ollama_client import OllamaClient
+        from pyimgtag.ollama_client import DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, OllamaClient
 
-        client = OllamaClient(
-            model=model or "gemma4:e4b",
-            base_url=api_base or "http://localhost:11434",
+        client = (ollama_class or OllamaClient)(
+            model=model or DEFAULT_OLLAMA_MODEL,
+            base_url=api_base or DEFAULT_OLLAMA_URL,
             max_dim=max_dim,
             timeout=timeout,
         )

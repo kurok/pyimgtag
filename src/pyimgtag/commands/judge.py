@@ -21,7 +21,7 @@ from pyimgtag.concurrent_pipeline import (
 from pyimgtag.exit_codes import exit_code_for
 from pyimgtag.judge_scorer import compute_scores
 from pyimgtag.models import JudgeResult, JudgeScores
-from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
+from pyimgtag.ollama_client import DEFAULT_OLLAMA_MODEL, OllamaClient
 from pyimgtag.preflight import check_ollama, check_ollama_model
 from pyimgtag.scanner import scan_directory, scan_photos_library
 from pyimgtag.webapp.bootstrap import start_dashboard_for
@@ -204,7 +204,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
         # Same up-front checks and messages as `run`: server, then model.
         ok, msg = check_ollama(args.ollama_url)
         if ok:
-            ok, msg = check_ollama_model(args.model or "gemma4:e4b", args.ollama_url)
+            ok, msg = check_ollama_model(args.model or DEFAULT_OLLAMA_MODEL, args.ollama_url)
         if not ok:
             print(f"Error: {msg}", file=sys.stderr)
             return 1
@@ -245,28 +245,20 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
     if args.limit:
         files = files[: args.limit]
 
-    if backend == "ollama":
-        # Constructed directly so tests that patch
-        # ``pyimgtag.commands.judge.OllamaClient`` keep working.
-        ollama: ImageClient = OllamaClient(
-            model=args.model or "gemma4:e4b",
-            base_url=args.ollama_url,
+    try:
+        ollama: ImageClient = make_image_client(
+            backend,
+            model=args.model,
             max_dim=args.max_dim,
             timeout=args.timeout,
+            api_key=getattr(args, "api_key", None),
+            api_base=args.ollama_url if backend == "ollama" else getattr(args, "api_base", None),
+            # The name imported here, so tests patching it keep working.
+            ollama_class=OllamaClient,
         )
-    else:
-        try:
-            ollama = make_image_client(
-                backend,
-                model=args.model,
-                max_dim=args.max_dim,
-                timeout=args.timeout,
-                api_key=getattr(args, "api_key", None),
-                api_base=getattr(args, "api_base", None),
-            )
-        except CloudClientError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
+    except CloudClientError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     results: list[JudgeResult] = []
     total = len(files)

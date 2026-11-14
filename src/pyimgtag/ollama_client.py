@@ -18,9 +18,14 @@ from typing import Any
 import requests
 from PIL import Image
 
-from pyimgtag.concurrent_pipeline import acquire_global_rate_limit
+from pyimgtag._http_retry import RETRY_STATUSES, post_with_retry
 from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic, sips_available
 from pyimgtag.models import JudgeScores, TagResult, normalize_tags
+from pyimgtag.ollama_defaults import (  # noqa: F401 — re-exported
+    DEFAULT_OLLAMA_MODEL,
+    DEFAULT_OLLAMA_URL,
+    ollama_url_from_env,
+)
 from pyimgtag.raw_converter import (
     convert_raw_with_rawpy,
     extract_raw_thumbnail,
@@ -159,6 +164,15 @@ class JudgeErrorMixin:
         self._judge_error_slot.value = None
 
 
+def _raise_for_ollama_status(resp: requests.Response) -> None:
+    """``raise_for_status``, naming an exhausted 429/503 retry as a rate limit."""
+    if resp.status_code in RETRY_STATUSES:
+        raise requests.HTTPError(
+            f"ollama rate limited (HTTP {resp.status_code}) after retrying", response=resp
+        )
+    resp.raise_for_status()
+
+
 class OllamaClient(JudgeErrorMixin):
     """Client for local Ollama vision model."""
 
@@ -169,8 +183,8 @@ class OllamaClient(JudgeErrorMixin):
 
     def __init__(
         self,
-        model: str = "gemma4:e4b",
-        base_url: str = "http://localhost:11434",
+        model: str = DEFAULT_OLLAMA_MODEL,
+        base_url: str = DEFAULT_OLLAMA_URL,
         max_dim: int = 1280,
         timeout: int = 120,
     ) -> None:
@@ -247,12 +261,12 @@ class OllamaClient(JudgeErrorMixin):
 
         Raises :class:`requests.RequestException` on network/HTTP failure.
 
-        Honours the process-wide ``--max-rps`` bucket (a no-op when unset) so a
-        remote Ollama host can be protected the same way a cloud API is; the
-        in-flight cap itself is just ``-j``.
+        A busy or remote Ollama answering 429/503 is retried with the same
+        backoff as the cloud backends (:func:`post_with_retry`); every attempt
+        honours the process-wide ``--max-rps`` bucket (a no-op when unset).
         """
-        acquire_global_rate_limit()
-        resp = self._session.post(
+        resp = post_with_retry(
+            self._session,
             f"{self.base_url}/api/chat",
             json={
                 "model": self.model,
@@ -268,8 +282,9 @@ class OllamaClient(JudgeErrorMixin):
                 },
             },
             timeout=self.timeout,
+            label="ollama",
         )
-        resp.raise_for_status()
+        _raise_for_ollama_status(resp)
         return resp
 
     def generate_text(self, prompt: str, max_tokens: int = 60) -> str:
@@ -283,8 +298,8 @@ class OllamaClient(JudgeErrorMixin):
         Raises:
             requests.RequestException: On network or HTTP failure.
         """
-        acquire_global_rate_limit()
-        resp = self._session.post(
+        resp = post_with_retry(
+            self._session,
             f"{self.base_url}/api/chat",
             json={
                 "model": self.model,
@@ -295,8 +310,9 @@ class OllamaClient(JudgeErrorMixin):
                 "options": {"temperature": _MODEL_TEMPERATURE, "num_predict": max_tokens},
             },
             timeout=self.timeout,
+            label="ollama",
         )
-        resp.raise_for_status()
+        _raise_for_ollama_status(resp)
         payload = resp.json()
         return str(payload.get("message", {}).get("content", "")).strip()
 
