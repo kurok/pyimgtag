@@ -375,6 +375,13 @@ def test_the_raw_error_is_logged_at_debug(mock_get: MagicMock, caplog) -> None:
         ("gemma4:e4b", "gemma4:latest", False),
         ("gemma4", "gemma4:e4b", False),
         ("gemma", "gemma4:latest", False),
+        ("localhost:5000/gemma4", "localhost:5000/gemma4:latest", True),
+        ("localhost:5000/gemma4", "localhost:5000/gemma4:e4b", False),
+        ("library/gemma4", "gemma4:latest", True),
+        ("registry.ollama.ai/library/gemma4", "gemma4:latest", True),
+        ("Gemma4", "gemma4:latest", True),
+        ("hf.co/user/repo", "hf.co/user/repo:latest", True),
+        ("hf.co/user/repo:Q4", "hf.co/user/repo:latest", False),
     ],
 )
 @patch("pyimgtag.preflight.requests.get")
@@ -391,3 +398,15 @@ def test_a_missing_model_message_says_how_to_pull_it(mock_get: MagicMock) -> Non
     ok, msg = check_ollama_model("gemma4:e4b")
     assert ok is False
     assert "ollama pull gemma4:e4b" in msg
+
+
+@patch("pyimgtag.preflight.check_exiftool", return_value=(True, "ok"))
+@patch("pyimgtag.preflight.check_ffmpeg", return_value=(True, "ok"))
+@patch("pyimgtag.preflight.check_ollama_model")
+@patch("pyimgtag.preflight.check_ollama", return_value=(False, "Ollama is not reachable"))
+def test_preflight_skips_the_model_check_when_ollama_is_down(
+    _server: MagicMock, model: MagicMock, _ffmpeg: MagicMock, _exif: MagicMock
+) -> None:
+    results = {name: (ok, msg) for name, ok, msg in run_preflight("http://x", "gemma4")}
+    model.assert_not_called()
+    assert results["Ollama model"] == (False, "skipped: Ollama is not reachable")

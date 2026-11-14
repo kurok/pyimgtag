@@ -35,13 +35,13 @@ def _reset_shared_throttles(monkeypatch):
 def _ollama_model_is_pulled(monkeypatch):
     """Assume the configured model is pulled unless a test says otherwise.
 
-    ``cmd_run`` checks the server and then the model before any work. Tests
-    that fake a reachable server by patching ``check_ollama`` would otherwise
-    reach the real ``/api/tags`` for the model check. Tests of the model
-    check patch ``pyimgtag.commands.run.check_ollama_model`` themselves.
+    ``run`` and ``judge`` check the server and then the model before any work.
+    Tests that fake a reachable server by patching ``check_ollama`` would
+    otherwise reach the real ``/api/tags`` for the model check. Tests of the
+    model check patch ``pyimgtag.commands.<run|judge>.check_ollama_model``
+    themselves; ``pyimgtag.preflight.check_ollama_model`` is never patched.
     """
-    from pyimgtag.commands import run
+    from pyimgtag.commands import judge, run
 
-    monkeypatch.setattr(
-        run, "check_ollama_model", lambda *_a, **_k: (True, "model present"), raising=False
-    )
+    for module in (run, judge):
+        monkeypatch.setattr(module, "check_ollama_model", lambda *_a, **_k: (True, "present"))

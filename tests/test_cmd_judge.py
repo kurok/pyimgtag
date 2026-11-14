@@ -140,3 +140,51 @@ class TestCmdJudgeWriteBack:
 
         call_kwargs = mock_write.call_args[1]
         assert call_kwargs.get("mode") == "append"
+
+
+class TestJudgeOllamaChecksMatchRun:
+    """``judge`` stops before any work, with the same lines as ``run`` (#391)."""
+
+    def test_unreachable_server(self, tmp_path, capsys):
+        from pyimgtag.preflight import _unreachable_message
+
+        url = "http://localhost:11434"
+        with (
+            patch(
+                "pyimgtag.commands.judge.check_ollama",
+                return_value=(False, _unreachable_message(url)),
+            ),
+            patch("pyimgtag.commands.judge.scan_directory") as scan,
+        ):
+            rc = cmd_judge(_make_args(input_dir=str(tmp_path)), MagicMock())
+        assert rc == 1
+        assert capsys.readouterr().err.strip() == f"Error: {_unreachable_message(url)}"
+        scan.assert_not_called()
+
+    def test_model_not_pulled(self, tmp_path, capsys):
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "up")),
+            patch(
+                "pyimgtag.commands.judge.check_ollama_model",
+                return_value=(
+                    False,
+                    "model 'gemma4:e4b' is not pulled. Run 'ollama pull gemma4:e4b'.",
+                ),
+            ) as model_check,
+            patch("pyimgtag.commands.judge.scan_directory") as scan,
+        ):
+            rc = cmd_judge(_make_args(input_dir=str(tmp_path)), MagicMock())
+        assert rc == 1
+        assert "Error: model 'gemma4:e4b' is not pulled." in capsys.readouterr().err
+        model_check.assert_called_once_with("gemma4:e4b", "http://localhost:11434")
+        scan.assert_not_called()
+
+    def test_default_model_is_checked(self, tmp_path):
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "up")),
+            patch(
+                "pyimgtag.commands.judge.check_ollama_model", return_value=(False, "missing")
+            ) as model_check,
+        ):
+            cmd_judge(_make_args(input_dir=str(tmp_path), model=None), MagicMock())
+        model_check.assert_called_once_with("gemma4:e4b", "http://localhost:11434")

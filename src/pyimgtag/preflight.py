@@ -23,13 +23,24 @@ def _not_pulled_message(model: str) -> str:
     return f"model '{model}' is not pulled. Run 'ollama pull {model}'."
 
 
+def _canonical_model(name: str) -> str:
+    """Reduce an Ollama model reference to one comparable spelling.
+
+    Lower-cased; the default registry (``registry.ollama.ai/``) and namespace
+    (``library/``) are dropped; and ``:latest`` is added when the last path
+    segment has no tag, so ``localhost:5000/gemma4`` is not mistaken for a
+    tagged name because of the port's colon.
+    """
+    n = name.strip().lower()
+    n = n.removeprefix("registry.ollama.ai/").removeprefix("library/")
+    if ":" not in n.rsplit("/", 1)[-1]:
+        n += ":latest"
+    return n
+
+
 def _same_model(wanted: str, available: str) -> bool:
-    """Treat ``name`` and ``name:latest`` as the same Ollama model."""
-
-    def canonical(name: str) -> str:
-        return name if ":" in name else f"{name}:latest"
-
-    return canonical(wanted) == canonical(available)
+    """Treat ``name``, ``name:latest`` and their fully qualified forms as one model."""
+    return _canonical_model(wanted) == _canonical_model(available)
 
 
 def check_ollama(base_url: str = "http://localhost:11434") -> tuple[bool, str]:
@@ -241,7 +252,11 @@ def run_preflight(
     passed, msg = check_ollama(ollama_url)
     results.append(("Ollama", passed, msg))
 
-    passed, msg = check_ollama_model(model, ollama_url)
+    if passed:
+        passed, msg = check_ollama_model(model, ollama_url)
+    else:
+        # Same fix as the line above; repeating it would add nothing.
+        msg = "skipped: Ollama is not reachable"
     results.append(("Ollama model", passed, msg))
 
     passed, msg = check_exiftool()

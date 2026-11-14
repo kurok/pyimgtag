@@ -114,3 +114,28 @@ def test_preflight_gives_the_same_remediation(tmp_path: Path) -> None:
     with _fake_ollama("gemma4:latest") as url:
         present = run_cli("preflight", "--ollama-url", url, "--model", "gemma4", home=tmp_path)
     assert "Model 'gemma4' is available" in present.stdout + present.stderr
+
+
+def test_judge_stops_with_the_same_lines_as_run(tmp_path: Path) -> None:
+    photos = _photos(tmp_path)
+    down_url = f"http://127.0.0.1:{free_port()}"
+    down = run_cli(
+        "judge", "--input-dir", str(photos), "--ollama-url", down_url, "--no-web", home=tmp_path
+    )
+    assert down.returncode == 1
+    assert f"Error: Ollama is not reachable at {down_url}." in down.stderr
+
+    with _fake_ollama("llama3:8b") as url:
+        missing = run_cli(
+            "judge",
+            "--input-dir",
+            str(photos),
+            "--ollama-url",
+            url,
+            "--model",
+            "gemma4",
+            "--no-web",
+            home=tmp_path,
+        )
+    assert missing.returncode == 1
+    assert "Error: model 'gemma4' is not pulled. Run 'ollama pull gemma4'." in missing.stderr
