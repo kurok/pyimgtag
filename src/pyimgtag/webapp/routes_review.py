@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import io
@@ -388,12 +389,13 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         other AppleScript failure). Downstream JS branches on the
         sentinel; the verbose stderr never reaches the browser.
         """
-        safe_path = db.get_known_file_path(path)
+        safe_path = await asyncio.to_thread(db.get_known_file_path, path)
         if safe_path is None:
             return {"ok": False, "error": "image_not_found"}
         from pyimgtag.applescript_writer import reveal_in_photos
 
-        err = reveal_in_photos(safe_path)
+        # osascript can take up to its 15 s timeout: keep it off the loop.
+        err = await asyncio.to_thread(reveal_in_photos, safe_path)
         if err is None:
             return {"ok": True}
         logger.warning("open-in-photos failed for %s: %s", safe_path, err)

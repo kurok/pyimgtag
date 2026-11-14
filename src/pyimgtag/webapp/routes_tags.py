@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -221,25 +222,26 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
 
     @router.get("/api/tags")
     async def list_tags() -> list[dict]:
-        counts = db.get_tag_counts()
+        counts = await asyncio.to_thread(db.get_tag_counts)
         return [{"tag": t, "count": c} for t, c in counts]
 
     async def rename_tag(body: _RenameBody = Body(...)) -> dict:
-        count = db.rename_tag(body.old_tag, body.new_tag)
+        # Tag mutations rewrite every tagged row: run them off the event loop.
+        count = await asyncio.to_thread(db.rename_tag, body.old_tag, body.new_tag)
         return {"ok": True, "count": count}
 
     rename_tag.__annotations__["body"] = _RenameBody
     router.post("/api/tags/rename")(rename_tag)
 
     async def merge_tags(body: _MergeBody = Body(...)) -> dict:
-        count = db.merge_tags(body.source_tag, body.target_tag)
+        count = await asyncio.to_thread(db.merge_tags, body.source_tag, body.target_tag)
         return {"ok": True, "count": count}
 
     merge_tags.__annotations__["body"] = _MergeBody
     router.post("/api/tags/merge")(merge_tags)
 
     async def delete_tag(body: _DeleteBody = Body(...)) -> dict:
-        count = db.delete_tag(body.tag)
+        count = await asyncio.to_thread(db.delete_tag, body.tag)
         return {"ok": True, "count": count}
 
     delete_tag.__annotations__["body"] = _DeleteBody

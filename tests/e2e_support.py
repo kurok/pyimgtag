@@ -12,8 +12,9 @@ import os
 import socket
 import subprocess  # nosec B404 — the tests run the package's own entry points
 import sys
+import threading
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -109,3 +110,45 @@ def _start_dashboard(
             proc.wait(10)
             raise RuntimeError(f"dashboard did not start:\n{log.read_text('utf-8')}")
         time.sleep(0.1)
+
+
+def assert_health_stays_responsive(
+    app: object,
+    slow_request: Callable[[str], requests.Response],
+    entered: threading.Event,
+    release: threading.Event,
+) -> requests.Response:
+    """Serve *app* in a thread and check ``/health`` answers during a slow request.
+
+    *slow_request* gets the base URL and issues the request whose handler is
+    patched to set *entered* and then wait for *release*. While it is held,
+    ``GET /health`` must answer; afterwards the slow request is released and
+    its response returned.
+    """
+    from pyimgtag.webapp.server_thread import DashboardServer
+
+    # free_port() can race with a parallel xdist worker taking the same port
+    # before uvicorn binds it; a server that fails to start retries on another.
+    for _ in range(3):
+        server = DashboardServer(app, host="127.0.0.1", port=free_port())
+        if server.start(ready_timeout=15.0):
+            break
+        server.stop()
+    else:
+        raise AssertionError("dashboard thread did not start")
+    result: dict[str, requests.Response] = {}
+    worker = threading.Thread(
+        target=lambda: result.setdefault("r", slow_request(server.url)), daemon=True
+    )
+    try:
+        worker.start()
+        assert entered.wait(15.0), "the slow handler was never reached"
+        health = requests.get(f"{server.url}/health", timeout=5)
+        assert health.status_code == 200
+        assert worker.is_alive(), "the slow request finished before /health was checked"
+    finally:
+        release.set()
+        worker.join(15.0)
+        server.stop()
+    assert "r" in result, "the slow request never completed"
+    return result["r"]
