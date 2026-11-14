@@ -9,6 +9,7 @@ must be just as reachable as the image.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -87,7 +88,7 @@ def test_the_modal_takes_focus_closes_on_escape_and_gives_it_back(
         )
 
     page.keyboard.press("Escape")
-    expect(page.locator("#modal-overlay")).not_to_have_class("modal-overlay open")
+    expect(page.locator("#modal-overlay")).not_to_have_class(re.compile(r"\bopen\b"))
     expect(trigger).to_be_focused()
 
 
@@ -101,11 +102,11 @@ def test_the_lightbox_works_from_the_keyboard(page: Page, base_url: str, path: s
     page.keyboard.press("Enter")
 
     lightbox = page.locator("#lightbox")
-    expect(lightbox).to_have_class("lightbox open")
+    expect(lightbox).to_have_class(re.compile(r"\bopen\b"))
     close = page.get_by_role("button", name="Close")
     expect(close).to_be_focused()
     page.keyboard.press("Enter")
-    expect(lightbox).not_to_have_class("lightbox open")
+    expect(lightbox).not_to_have_class(re.compile(r"\bopen\b"))
     expect(page.get_by_role("button", name="Open a.jpg")).to_be_focused()
 
 
@@ -113,3 +114,34 @@ def test_tag_remove_buttons_say_which_tag(page: Page, base_url: str) -> None:
     _stub_lists(page)
     page.goto(base_url + "/review/")
     expect(page.get_by_role("button", name="Remove tag sunset")).to_have_count(2)
+
+
+@pytest.mark.parametrize("path", ["/review/", "/judge/"])
+def test_tab_stays_inside_the_open_lightbox(page: Page, base_url: str, path: str) -> None:
+    _stub_lists(page)
+    page.goto(base_url + path)
+    page.get_by_role("button", name="Open a.jpg").focus()
+    page.keyboard.press("Space")  # Space activates too
+    expect(page.locator("#lightbox")).to_have_class(re.compile(r"\bopen\b"))
+    for _ in range(5):
+        page.keyboard.press("Tab")
+        assert page.evaluate(
+            "() => document.getElementById('lightbox').contains(document.activeElement)"
+        )
+    for _ in range(3):
+        page.keyboard.press("Shift+Tab")
+        assert page.evaluate(
+            "() => document.getElementById('lightbox').contains(document.activeElement)"
+        )
+
+
+@pytest.mark.parametrize("path", ["/review/", "/judge/"])
+def test_a_backdrop_click_also_gives_focus_back(page: Page, base_url: str, path: str) -> None:
+    _stub_lists(page)
+    page.goto(base_url + path)
+    thumb = page.get_by_role("button", name="Open b.jpg")
+    thumb.focus()
+    page.keyboard.press("Enter")
+    page.locator("#lightbox").click(position={"x": 5, "y": 5})
+    expect(page.locator("#lightbox")).not_to_have_class(re.compile(r"\bopen\b"))
+    expect(page.get_by_role("button", name="Open b.jpg")).to_be_focused()

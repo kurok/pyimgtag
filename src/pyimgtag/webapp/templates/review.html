@@ -246,7 +246,7 @@ function openLightbox(path) {
     document.getElementById('lightboxSimilar').href =
       '/search?similar_to=' + encodeURIComponent(path);
     lb.classList.add('open');
-  _lightboxOpened();
+    _lightboxOpened();
     return;
   }
   video.style.display = 'none';
@@ -275,6 +275,16 @@ function closeLightbox(e) {
 }
 window.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeLightbox();
+  // The viewer is aria-modal: keep Tab on its own controls while it is open.
+  const lb = document.getElementById('lightbox');
+  if (e.key !== 'Tab' || !lb.classList.contains('open')) return;
+  const items = [...lb.querySelectorAll('button, [href], video[controls]')]
+    .filter(el => el.offsetParent !== null || getComputedStyle(el).position === 'fixed');
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (!lb.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+  else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 
 function renderGrid(items) {

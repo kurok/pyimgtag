@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 DESIGN_CSS = """
 :root{--bg:#f5f5f7;--surface:#fff;--border:rgba(0,0,0,.08);
       --accent:#0071e3;--accent-h:#0077ed;--danger:#ff3b30;--warn:#ff9f0a;--ok:#34c759;
@@ -156,7 +154,10 @@ function _modalFocusables() {
   )].filter(el => !el.disabled && el.offsetParent !== null) : [];
 }
 function openModal(title, sub, fieldHtml, confirmLabel, confirmCls, onConfirm) {
-  _modalReturnFocus = document.activeElement;
+  // Re-opening over an open dialog keeps the original trigger as the target.
+  if (!document.getElementById('modal-overlay').classList.contains('open')) {
+    _modalReturnFocus = document.activeElement;
+  }
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-sub').textContent = sub;
   document.getElementById('modal-sub').classList.remove('modal-error');
@@ -328,34 +329,34 @@ def render_nav(active: str, status_html: str = "") -> str:
     def cls(name: str) -> str:
         return "nav-link active" if name == active else "nav-link"
 
+    def cur(name: str) -> str:
+        # Screen readers announce the active link as the current page.
+        return ' aria-current="page"' if name == active else ""
+
     status = f'<span class="nav-status">{status_html}</span>' if status_html else ""
     version_link = (
         f'<a class="nav-version" href="/about" title="About / wiki / version" '
         f'data-version="{_ver}">v{_ver}</a>'
     )
-    html = (
+    return (
         '<nav class="nav">'
         '<span class="nav-logo">pyimgtag</span>'
-        f'<a class="{cls("dashboard")}" href="/">Dashboard</a>'
-        f'<a class="{cls("review")}" href="/review">Review</a>'
-        f'<a class="{cls("faces")}" href="/faces">Faces</a>'
-        f'<a class="{cls("tags")}" href="/tags">Tags</a>'
-        f'<a class="{cls("query")}" href="/query">Query</a>'
-        f'<a class="{cls("search")}" href="/search">Search</a>'
-        f'<a class="{cls("events")}" href="/events">Events</a>'
-        f'<a class="{cls("judge")}" href="/judge">Judge</a>'
-        f'<a class="{cls("insights")}" href="/insights">Insights</a>'
-        f'<a class="{cls("map")}" href="/map">Map</a>'
-        f'<a class="{cls("timeline")}" href="/timeline">Timeline</a>'
-        f'<a class="{cls("dedup")}" href="/dedup">Dedup</a>'
-        f'<a class="{cls("edit")}" href="/edit">Edit</a>'
-        f'<a class="{cls("about")}" href="/about">About</a>'
+        f'<a class="{cls("dashboard")}" href="/"{cur("dashboard")}>Dashboard</a>'
+        f'<a class="{cls("review")}" href="/review"{cur("review")}>Review</a>'
+        f'<a class="{cls("faces")}" href="/faces"{cur("faces")}>Faces</a>'
+        f'<a class="{cls("tags")}" href="/tags"{cur("tags")}>Tags</a>'
+        f'<a class="{cls("query")}" href="/query"{cur("query")}>Query</a>'
+        f'<a class="{cls("search")}" href="/search"{cur("search")}>Search</a>'
+        f'<a class="{cls("events")}" href="/events"{cur("events")}>Events</a>'
+        f'<a class="{cls("judge")}" href="/judge"{cur("judge")}>Judge</a>'
+        f'<a class="{cls("insights")}" href="/insights"{cur("insights")}>Insights</a>'
+        f'<a class="{cls("map")}" href="/map"{cur("map")}>Map</a>'
+        f'<a class="{cls("timeline")}" href="/timeline"{cur("timeline")}>Timeline</a>'
+        f'<a class="{cls("dedup")}" href="/dedup"{cur("dedup")}>Dedup</a>'
+        f'<a class="{cls("edit")}" href="/edit"{cur("edit")}>Edit</a>'
+        f'<a class="{cls("about")}" href="/about"{cur("about")}>About</a>'
         '<span class="nav-spacer"></span>'
         f"{status}"
         f"{version_link}"
         "</nav>" + API_JS
-    )
-    # Screen readers announce the active link as the current page.
-    return re.sub(
-        r'(class="nav-link active" href="[^"]*")', r'\1 aria-current="page"', html, count=1
     )
