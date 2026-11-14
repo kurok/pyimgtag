@@ -6,6 +6,24 @@ import argparse
 import sys
 
 from pyimgtag.progress_db import ProgressDB
+from pyimgtag.tag_changes import TagChangeError, check_tag_change
+
+
+def _refused(db: ProgressDB, source: str, target: str | None = None) -> int | None:
+    """Return an exit code if the change would be a no-op, else ``None``.
+
+    1 when the source tag does not exist; 2 for a request that can never
+    change anything (empty name, or source equal to target).
+    """
+    try:
+        check_tag_change(db.get_tag_counts(), source, target)
+    except TagChangeError as exc:
+        if exc.kind == "not_found":
+            print(f"Error: {exc} (see 'pyimgtag tags list')", file=sys.stderr)
+            return 1
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    return None
 
 
 def cmd_tags(args: argparse.Namespace) -> int:
@@ -47,6 +65,9 @@ def _handle_tags_list(args: argparse.Namespace) -> int:
 def _handle_tags_rename(args: argparse.Namespace) -> int:
     """Rename a tag across all images."""
     with ProgressDB(db_path=args.db) as db:
+        refused = _refused(db, args.old_tag, args.new_tag)
+        if refused is not None:
+            return refused
         if args.dry_run:
             tag_counts = db.get_tag_counts()
             count = next((c for t, c in tag_counts if t == args.old_tag.lower()), 0)
@@ -66,6 +87,9 @@ def _handle_tags_rename(args: argparse.Namespace) -> int:
 def _handle_tags_delete(args: argparse.Namespace) -> int:
     """Delete a tag from all images."""
     with ProgressDB(db_path=args.db) as db:
+        refused = _refused(db, args.tag, None)
+        if refused is not None:
+            return refused
         if args.dry_run:
             tag_counts = db.get_tag_counts()
             count = next((c for t, c in tag_counts if t == args.tag.lower()), 0)
@@ -79,6 +103,9 @@ def _handle_tags_delete(args: argparse.Namespace) -> int:
 def _handle_tags_merge(args: argparse.Namespace) -> int:
     """Merge source tag into target tag across all images."""
     with ProgressDB(db_path=args.db) as db:
+        refused = _refused(db, args.source_tag, args.target_tag)
+        if refused is not None:
+            return refused
         if args.dry_run:
             tag_counts = db.get_tag_counts()
             count = next((c for t, c in tag_counts if t == args.source_tag.lower()), 0)

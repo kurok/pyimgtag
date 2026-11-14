@@ -56,6 +56,22 @@ __MODAL_JS__
 <script>
 let allTags = [];
 
+// Sends a rename/merge/delete. On success the modal closes and the list
+// reloads; on a 404/422 the server's reason stays visible in the modal.
+async function postChange(path, body) {
+  const r = await fetch('__API_BASE__' + path, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (r.ok) { closeModal(); load(); return; }
+  let reason = 'Request failed (HTTP ' + r.status + ')';
+  try {
+    const data = await r.json();
+    if (typeof data.detail === 'string') reason = data.detail;
+  } catch (_e) { /* not JSON: keep the HTTP status */ }
+  document.getElementById('modal-sub').textContent = 'Error: ' + reason;
+}
+
 async function load() {
   const r = await fetch('__API_BASE__/api/tags');
   allTags = await r.json();
@@ -95,12 +111,7 @@ function render(tags) {
         'Rename', 'btn-primary',
         async () => {
           const val = document.getElementById('m-inp').value.trim();
-          if (!val || val === t.tag) return;
-          await fetch('__API_BASE__/api/tags/rename', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({old_tag: t.tag, new_tag: val}),
-          });
-          closeModal(); load();
+          await postChange('/api/tags/rename', {old_tag: t.tag, new_tag: val});
         }
       );
       document.getElementById('m-inp').value = t.tag;
@@ -118,12 +129,7 @@ function render(tags) {
         'Merge', 'btn-primary',
         async () => {
           const val = document.getElementById('m-inp').value.trim();
-          if (!val || val === t.tag) return;
-          await fetch('__API_BASE__/api/tags/merge', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({source_tag: t.tag, target_tag: val}),
-          });
-          closeModal(); load();
+          await postChange('/api/tags/merge', {source_tag: t.tag, target_tag: val});
         }
       );
       setTimeout(() => document.getElementById('m-inp').focus(), 50);
@@ -139,11 +145,7 @@ function render(tags) {
         '',
         'Delete', 'btn-danger-text',
         async () => {
-          await fetch('__API_BASE__/api/tags/delete', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({tag: t.tag}),
-          });
-          closeModal(); load();
+          await postChange('/api/tags/delete', {tag: t.tag});
         }
       );
     });
@@ -195,7 +197,7 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
         ImportError: If fastapi is not installed.
     """
     try:
-        from fastapi import APIRouter, Body
+        from fastapi import APIRouter, Body, HTTPException
         from fastapi.responses import HTMLResponse
         from pydantic import BaseModel
     except ImportError as exc:
@@ -216,6 +218,22 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
 
     router = APIRouter()
 
+    def _checked(write: Any, source: str, target: str | None = None) -> int:
+        """Check then write in one locked step; 404 unknown tag, 422 no-op.
+
+        Holding the DB lock across both keeps a concurrent delete from landing
+        between the check and the write and turning it into a silent 0.
+        """
+        from pyimgtag.tag_changes import TagChangeError, check_tag_change
+
+        with db._lock:
+            try:
+                check_tag_change(db.get_tag_counts(), source, target)
+            except TagChangeError as exc:
+                status = 404 if exc.kind == "not_found" else 422
+                raise HTTPException(status_code=status, detail=str(exc)) from None
+            return int(write())
+
     @router.get("/", response_class=HTMLResponse)
     async def index() -> str:
         return render_tags_html(api_base)
@@ -227,21 +245,28 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
 
     async def rename_tag(body: _RenameBody = Body(...)) -> dict:
         # Tag mutations rewrite every tagged row: run them off the event loop.
-        count = await asyncio.to_thread(db.rename_tag, body.old_tag, body.new_tag)
+        count = await asyncio.to_thread(
+            _checked, lambda: db.rename_tag(body.old_tag, body.new_tag), body.old_tag, body.new_tag
+        )
         return {"ok": True, "count": count}
 
     rename_tag.__annotations__["body"] = _RenameBody
     router.post("/api/tags/rename")(rename_tag)
 
     async def merge_tags(body: _MergeBody = Body(...)) -> dict:
-        count = await asyncio.to_thread(db.merge_tags, body.source_tag, body.target_tag)
+        count = await asyncio.to_thread(
+            _checked,
+            lambda: db.merge_tags(body.source_tag, body.target_tag),
+            body.source_tag,
+            body.target_tag,
+        )
         return {"ok": True, "count": count}
 
     merge_tags.__annotations__["body"] = _MergeBody
     router.post("/api/tags/merge")(merge_tags)
 
     async def delete_tag(body: _DeleteBody = Body(...)) -> dict:
-        count = await asyncio.to_thread(db.delete_tag, body.tag)
+        count = await asyncio.to_thread(_checked, lambda: db.delete_tag(body.tag), body.tag)
         return {"ok": True, "count": count}
 
     delete_tag.__annotations__["body"] = _DeleteBody
