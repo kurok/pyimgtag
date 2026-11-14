@@ -100,7 +100,7 @@ all = [
 # classic httpx/httpcore (which pins h11<0.15).
 # mcp is included so tests/test_mcp_server.py runs in CI (the workflow installs
 # `.[dev,lint,review]`); the runtime extra for users remains `[mcp]`.
-dev = ["pytest>=9.0", "pytest-xdist>=3.8", "pytest-cov>=7.0", "httpx2>=2.2", "mcp>=2.0"]
+dev = ["pytest>=9.2", "pytest-xdist>=3.8", "pytest-cov>=7.0", "httpx2>=2.2", "mcp>=2.0"]
 lint = ["mypy>=2.1", "ruff>=0.15", "types-requests>=2.31"]
 security = ["bandit>=1.9", "pip-audit>=2.10"]
 # Optional: install Playwright + Pillow for the local screenshot smoke
