@@ -131,7 +131,8 @@ NAV_STYLES = DESIGN_CSS
 
 MODAL_HTML = (
     '<div id="modal-overlay" class="modal-overlay" onclick="closeModal()">'
-    '<div class="modal-box" onclick="event.stopPropagation()">'
+    '<div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title" '
+    'aria-describedby="modal-sub" onclick="event.stopPropagation()">'
     '<div class="modal-title" id="modal-title"></div>'
     '<p class="modal-sub" id="modal-sub"></p>'
     '<div id="modal-field" style="margin-bottom:4px"></div>'
@@ -142,7 +143,21 @@ MODAL_HTML = (
 )
 
 MODAL_JS = """<script>
+// Keyboard and screen-reader behaviour: focus moves into the dialog when it
+// opens and back to whatever opened it when it closes; Escape closes it; Tab
+// stays inside it while it is open.
+let _modalReturnFocus = null;
+function _modalFocusables() {
+  const box = document.querySelector('#modal-overlay .modal-box');
+  return box ? [...box.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )].filter(el => !el.disabled && el.offsetParent !== null) : [];
+}
 function openModal(title, sub, fieldHtml, confirmLabel, confirmCls, onConfirm) {
+  // Re-opening over an open dialog keeps the original trigger as the target.
+  if (!document.getElementById('modal-overlay').classList.contains('open')) {
+    _modalReturnFocus = document.activeElement;
+  }
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-sub').textContent = sub;
   document.getElementById('modal-sub').classList.remove('modal-error');
@@ -152,10 +167,28 @@ function openModal(title, sub, fieldHtml, confirmLabel, confirmCls, onConfirm) {
   btn.className = 'btn btn-sm ' + (confirmCls || 'btn-primary');
   btn.onclick = onConfirm;
   document.getElementById('modal-overlay').classList.add('open');
+  const first = _modalFocusables()[0];
+  if (first) first.focus();
 }
 function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('open');
+  const overlay = document.getElementById('modal-overlay');
+  const wasOpen = overlay.classList.contains('open');
+  overlay.classList.remove('open');
+  const back = _modalReturnFocus;
+  _modalReturnFocus = null;
+  if (wasOpen && back && back.isConnected && typeof back.focus === 'function') back.focus();
 }
+document.addEventListener('keydown', (e) => {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay || !overlay.classList.contains('open')) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
+  if (e.key !== 'Tab') return;
+  const items = _modalFocusables();
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 </script>"""
 
 
@@ -260,6 +293,17 @@ function renderEmpty(target, title, hint, command) {
   host.appendChild(box);
   return box;
 }
+// Makes a non-button element (a thumbnail, a placeholder) reachable with Tab
+// and activatable with Enter or Space, announced as a button.
+function makeActivatable(el, label, onActivate) {
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  if (label) el.setAttribute('aria-label', label);
+  el.addEventListener('click', onActivate);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(e); }
+  });
+}
 function showModalError(message) {
   const sub = document.getElementById('modal-sub');
   if (!sub) return;
@@ -285,6 +329,10 @@ def render_nav(active: str, status_html: str = "") -> str:
     def cls(name: str) -> str:
         return "nav-link active" if name == active else "nav-link"
 
+    def cur(name: str) -> str:
+        # Screen readers announce the active link as the current page.
+        return ' aria-current="page"' if name == active else ""
+
     status = f'<span class="nav-status">{status_html}</span>' if status_html else ""
     version_link = (
         f'<a class="nav-version" href="/about" title="About / wiki / version" '
@@ -293,20 +341,20 @@ def render_nav(active: str, status_html: str = "") -> str:
     return (
         '<nav class="nav">'
         '<span class="nav-logo">pyimgtag</span>'
-        f'<a class="{cls("dashboard")}" href="/">Dashboard</a>'
-        f'<a class="{cls("review")}" href="/review">Review</a>'
-        f'<a class="{cls("faces")}" href="/faces">Faces</a>'
-        f'<a class="{cls("tags")}" href="/tags">Tags</a>'
-        f'<a class="{cls("query")}" href="/query">Query</a>'
-        f'<a class="{cls("search")}" href="/search">Search</a>'
-        f'<a class="{cls("events")}" href="/events">Events</a>'
-        f'<a class="{cls("judge")}" href="/judge">Judge</a>'
-        f'<a class="{cls("insights")}" href="/insights">Insights</a>'
-        f'<a class="{cls("map")}" href="/map">Map</a>'
-        f'<a class="{cls("timeline")}" href="/timeline">Timeline</a>'
-        f'<a class="{cls("dedup")}" href="/dedup">Dedup</a>'
-        f'<a class="{cls("edit")}" href="/edit">Edit</a>'
-        f'<a class="{cls("about")}" href="/about">About</a>'
+        f'<a class="{cls("dashboard")}" href="/"{cur("dashboard")}>Dashboard</a>'
+        f'<a class="{cls("review")}" href="/review"{cur("review")}>Review</a>'
+        f'<a class="{cls("faces")}" href="/faces"{cur("faces")}>Faces</a>'
+        f'<a class="{cls("tags")}" href="/tags"{cur("tags")}>Tags</a>'
+        f'<a class="{cls("query")}" href="/query"{cur("query")}>Query</a>'
+        f'<a class="{cls("search")}" href="/search"{cur("search")}>Search</a>'
+        f'<a class="{cls("events")}" href="/events"{cur("events")}>Events</a>'
+        f'<a class="{cls("judge")}" href="/judge"{cur("judge")}>Judge</a>'
+        f'<a class="{cls("insights")}" href="/insights"{cur("insights")}>Insights</a>'
+        f'<a class="{cls("map")}" href="/map"{cur("map")}>Map</a>'
+        f'<a class="{cls("timeline")}" href="/timeline"{cur("timeline")}>Timeline</a>'
+        f'<a class="{cls("dedup")}" href="/dedup"{cur("dedup")}>Dedup</a>'
+        f'<a class="{cls("edit")}" href="/edit"{cur("edit")}>Edit</a>'
+        f'<a class="{cls("about")}" href="/about"{cur("about")}>About</a>'
         '<span class="nav-spacer"></span>'
         f"{status}"
         f"{version_link}"
