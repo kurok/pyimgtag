@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
+import os
+import re
 import sqlite3
+import tempfile
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -33,6 +37,44 @@ _C = TypeVar("_C", bound=type)
 # raising "database is locked". sqlite3.connect's default timeout happens to
 # give the same value; setting it explicitly keeps it from changing silently.
 _BUSY_TIMEOUT_MS = 5000
+
+# Set to "1" to skip the copy of an existing database that is written before
+# pending schema migrations are applied to it.
+NO_MIGRATION_BACKUP_ENV = "PYIMGTAG_NO_MIGRATION_BACKUP"
+
+
+class SchemaTooNewError(sqlite3.DatabaseError):
+    """The database was written by a newer pyimgtag than the one running.
+
+    Opening it would run old code against a schema it does not know, so
+    :class:`ProgressDB` refuses instead.
+    """
+
+    def __init__(self, path: Path, found: int, supported: int) -> None:
+        self.path = path
+        self.found = found
+        self.supported = supported
+        super().__init__(
+            f"database {path} has schema v{found}, but this pyimgtag supports up to"
+            f" v{supported}. Upgrade pyimgtag, or point --db at another file."
+        )
+
+
+class MigrationBackupError(sqlite3.DatabaseError):
+    """The copy taken before migrating an existing database could not be written.
+
+    The database is left as it was (unmigrated); the message names the
+    opt-out for users who accept migrating without a backup.
+    """
+
+    def __init__(self, path: Path, cause: BaseException) -> None:
+        self.path = path
+        super().__init__(
+            f"could not back up {path} before migrating it ({cause}). Free some space or"
+            f" fix the folder's permissions, or set {NO_MIGRATION_BACKUP_ENV}=1 to"
+            " migrate without a backup."
+        )
+
 
 # Guards the lazy creation of a ProgressDB's lock, so two threads that touch a
 # ``__new__``-built instance for the first time cannot each install their own.
@@ -310,9 +352,17 @@ class ProgressDB:
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        self._conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._create_table()
+        try:
+            self._conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+            # Checked before anything writes to the file, WAL mode included.
+            self._refuse_newer_schema()
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._create_table()
+        except BaseException:
+            # Release the file (Windows keeps it locked while a connection
+            # is open) so the caller can move or delete it.
+            self._conn.close()
+            raise
 
     @property
     def _lock(self) -> threading.RLock:
@@ -486,7 +536,20 @@ class ProgressDB:
         """Delegate to :meth:`InsightsDB.compute`."""
         return self._insights.compute(top_n=top_n)
 
+    def _refuse_newer_schema(self) -> None:
+        """Raise :class:`SchemaTooNewError` if the file is ahead of this code."""
+        current: int = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        if current > SCHEMA_VERSION:
+            raise SchemaTooNewError(self._path, current, SCHEMA_VERSION)
+
     def _create_table(self) -> None:
+        # A file with no tables yet is new: it gets no pre-migration backup.
+        # A pre-versioning file (user_version 0 with tables) is existing; it
+        # is stamped v1 (the baseline schema) below, so its backup is .bak-v1.
+        tables: int = self._conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
+        ).fetchone()[0]
+        existing = tables > 0
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS processed_images (
@@ -507,15 +570,23 @@ class ProgressDB:
         current: int = self._conn.execute("PRAGMA user_version").fetchone()[0]
         if current == 0:
             self._conn.execute("PRAGMA user_version = 1")
-        self._migrate()
+        self._migrate(backup=existing)
 
-    def _migrate(self) -> None:
-        """Apply any pending versioned migrations and update user_version."""
+    def _migrate(self, *, backup: bool = False) -> None:
+        """Apply any pending versioned migrations and update user_version.
+
+        Args:
+            backup: When True and a migration is pending, first copy the
+                database to ``<db>.bak-v<old version>`` (see
+                :meth:`_backup_before_migrating`).
+        """
         current: int = self._conn.execute("PRAGMA user_version").fetchone()[0]
         # Collect all target versions that are still pending.
         pending_versions = sorted({ver for ver, _ in self._MIGRATIONS if ver > current})
         if not pending_versions:
             return
+        if backup and os.environ.get(NO_MIGRATION_BACKUP_ENV) != "1":
+            self._backup_before_migrating(current)
         for target_ver in pending_versions:
             stmts = [sql for ver, sql in self._MIGRATIONS if ver == target_ver]
             self._conn.execute(f"SAVEPOINT migrate_v{int(target_ver)}")  # nosec B608
@@ -534,6 +605,45 @@ class ProgressDB:
                 self._conn.execute(f"ROLLBACK TO migrate_v{int(target_ver)}")  # nosec B608
                 raise
         self._conn.commit()
+
+    def _backup_before_migrating(self, version: int) -> Path:
+        """Copy the database to ``<db>.bak-v<version>``; keep only that backup.
+
+        Some migrations rewrite data, so the copy is the way back. It is
+        written to a uniquely named temporary file (two processes opening the
+        same old database at once cannot clash) and renamed into place. Then
+        every other ``<db>.bak-v<N>`` of this database is removed; names are
+        matched literally, so ``lib[1].db`` never touches ``lib1.db``'s
+        backups.
+
+        Raises:
+            MigrationBackupError: If the copy cannot be written.
+        """
+        name = self._path.name
+        target = self._path.with_name(f"{name}.bak-v{int(version)}")
+        partial: Path | None = None
+        try:
+            fd, tmp = tempfile.mkstemp(dir=self._path.parent, prefix=f"{name}.bak-tmp-")
+            os.close(fd)
+            partial = Path(tmp)
+            dest = sqlite3.connect(str(partial))
+            try:
+                self._conn.backup(dest)
+            finally:
+                # Closed before the rename: Windows cannot replace an open file.
+                dest.close()
+            os.replace(partial, target)
+        except (OSError, sqlite3.Error) as exc:
+            if partial is not None:
+                with contextlib.suppress(OSError):
+                    partial.unlink(missing_ok=True)
+            raise MigrationBackupError(self._path, exc) from exc
+        backup_name = re.compile(re.escape(name) + r"\.bak-v\d+")
+        for old in self._path.parent.iterdir():
+            if old != target and backup_name.fullmatch(old.name):
+                with contextlib.suppress(OSError):
+                    old.unlink()
+        return target
 
     # --- image progress methods (delegated to ImageDB) ---
 
@@ -937,3 +1047,7 @@ class ProgressDB:
         The instance must not be used afterwards.
         """
         self._conn.close()
+
+
+#: Highest schema version this code knows how to read and write.
+SCHEMA_VERSION: int = max(ver for ver, _ in ProgressDB._MIGRATIONS)

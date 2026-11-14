@@ -1153,6 +1153,17 @@ class TestWriteBackMode:
         assert args.write_back is False
 
     def test_judge_db_arg_passed_to_progress_db(self, tmp_path):
+        import importlib
+        import pkgutil
+
+        import pyimgtag.commands
+
+        # main() imports the command modules lazily, and each binds
+        # ``ProgressDB`` at import time. Import them before patching, or a
+        # worker whose first main() call is this test keeps the mock in every
+        # command module for the rest of the session.
+        for mod in pkgutil.iter_modules(pyimgtag.commands.__path__):
+            importlib.import_module(f"pyimgtag.commands.{mod.name}")
         db_path = str(tmp_path / "judge.db")
         with (
             patch("pyimgtag.progress_db.ProgressDB") as MockDB,
@@ -1507,3 +1518,59 @@ class TestSubcommandHelp:
         out = capsys.readouterr().out
         assert "Tag images (default workhorse)" in out
         assert "Manage tags across the image database" in out
+
+
+# --- a database from a newer pyimgtag is refused with a message (#394) -------
+
+
+def _too_new_db(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "progress.db"
+    ProgressDB(db_path).close()
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA user_version = 99")
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["status"],
+        ["tags", "list"],
+        ["judge", "--input-dir", "."],
+    ],
+)
+def test_cli_reports_a_too_new_database(tmp_path, capsys, monkeypatch, argv):
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    db_path = _too_new_db(tmp_path)
+
+    rc = main([*argv, "--db", str(db_path)])
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert err.startswith("Error: database ")
+    assert "schema v99" in err and "Upgrade pyimgtag" in err
+
+
+def test_cli_reports_a_failed_migration_backup(tmp_path, capsys, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    monkeypatch.delenv("PYIMGTAG_NO_MIGRATION_BACKUP", raising=False)
+    db_path = tmp_path / "progress.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE processed_images (file_path TEXT PRIMARY KEY, status TEXT)")
+    conn.execute("PRAGMA user_version = 15")
+    conn.commit()
+    conn.close()
+
+    with patch("pyimgtag.db.progress_db.tempfile.mkstemp", side_effect=OSError("disk full")):
+        rc = main(["status", "--db", str(db_path)])
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert err.startswith("Error: could not back up ")
+    assert "PYIMGTAG_NO_MIGRATION_BACKUP=1" in err

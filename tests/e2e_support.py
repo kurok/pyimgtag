@@ -1,9 +1,9 @@
-"""Helpers for end-to-end tests that drive the real dashboard.
+"""Helpers for end-to-end tests that drive the real CLI and dashboard.
 
-These run ``python -m pyimgtag.webapp`` as a child process against a database
-in ``tmp_path``, with ``HOME`` pointed at ``tmp_path`` so nothing touches the
-developer's real cache. The dashboard binds to a free loopback port; no test
-reaches the network or Ollama.
+These run ``python -m pyimgtag`` and ``python -m pyimgtag.webapp`` as child
+processes against a database in ``tmp_path``, with ``HOME`` pointed at
+``tmp_path`` so nothing touches the developer's real cache. The dashboard
+binds to a free loopback port; no test reaches the network or Ollama.
 """
 
 from __future__ import annotations
@@ -30,10 +30,30 @@ def child_env(home: Path, extra: Mapping[str, str] | None = None) -> dict[str, s
     env["USERPROFILE"] = str(home)
     env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(_SRC), env.get("PYTHONPATH")]))
     env["PYTHONIOENCODING"] = "utf-8"
+    # The CLI otherwise asks PyPI for a newer release on every invocation.
+    env["PYIMGTAG_NO_UPDATE_CHECK"] = "1"
     env.pop("PYIMGTAG_DB", None)
     if extra:
         env.update(extra)
     return env
+
+
+def run_cli(
+    *args: str,
+    home: Path,
+    env: Mapping[str, str] | None = None,
+    timeout: float = 120.0,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``python -m pyimgtag *args`` and capture its output."""
+    return subprocess.run(  # nosec B603 — fixed interpreter and module
+        [sys.executable, "-m", "pyimgtag", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=child_env(home, env),
+        timeout=timeout,
+        check=False,
+    )
 
 
 def free_port() -> int:

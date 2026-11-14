@@ -2616,3 +2616,211 @@ class TestFaceResets:
             assert counts["persons"] == 0  # nothing to delete
             assert counts["faces"] == 1  # only the loose face
             assert [p.person_id for p in db.get_persons()] == [t]
+
+
+# --- schema guard and pre-migration backup (#394) ----------------------------
+
+
+def _write_v15_db(path: Path) -> None:
+    """Build a pre-v16 database the way tests/test_events.py does."""
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE processed_images (file_path TEXT PRIMARY KEY, status TEXT, tags TEXT)"
+    )
+    conn.execute("INSERT INTO processed_images VALUES ('/photos/a.jpg', 'ok', '[]')")
+    conn.execute("PRAGMA user_version = 15")
+    conn.commit()
+    conn.close()
+
+
+def _user_version(path: Path) -> int:
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _backups(db_path: Path) -> list[str]:
+    return sorted(p.name for p in db_path.parent.glob(f"{db_path.name}.bak-v*"))
+
+
+@pytest.fixture
+def _backups_enabled(monkeypatch):
+    monkeypatch.delenv("PYIMGTAG_NO_MIGRATION_BACKUP", raising=False)
+
+
+def test_schema_version_is_the_highest_migration():
+    from pyimgtag.db.progress_db import SCHEMA_VERSION
+
+    assert SCHEMA_VERSION == max(ver for ver, _ in ProgressDB._MIGRATIONS)
+
+
+def test_a_newer_schema_is_refused(tmp_path):
+    from pyimgtag.db.progress_db import SCHEMA_VERSION, SchemaTooNewError
+
+    db_path = tmp_path / "progress.db"
+    ProgressDB(db_path).close()
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA user_version = 99")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(SchemaTooNewError) as info:
+        ProgressDB(db_path)
+    message = str(info.value)
+    assert "v99" in message and f"v{SCHEMA_VERSION}" in message
+    assert str(db_path) in message and "Upgrade pyimgtag" in message
+    assert (info.value.found, info.value.supported) == (99, SCHEMA_VERSION)
+    assert isinstance(info.value, sqlite3.DatabaseError)
+    # The refused file is left untouched and released (Windows: deletable).
+    assert _user_version(db_path) == 99
+    db_path.unlink()
+
+
+def test_migrating_an_old_db_writes_a_backup_first(tmp_path, _backups_enabled):
+    from pyimgtag.db.progress_db import SCHEMA_VERSION
+
+    db_path = tmp_path / "progress.db"
+    _write_v15_db(db_path)
+
+    with ProgressDB(db_path) as db:
+        assert db._conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+
+    backup = tmp_path / "progress.db.bak-v15"
+    assert backup.exists()
+    assert _user_version(backup) == 15
+    conn = sqlite3.connect(backup)
+    try:
+        assert conn.execute("SELECT file_path FROM processed_images").fetchall() == [
+            ("/photos/a.jpg",)
+        ]
+    finally:
+        conn.close()
+    assert _backups(db_path) == ["progress.db.bak-v15"]
+
+
+def test_a_fresh_db_creates_no_backup(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    ProgressDB(db_path).close()
+    assert _backups(db_path) == []
+
+
+def test_a_current_db_creates_no_backup(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    ProgressDB(db_path).close()
+    with mock.patch.object(ProgressDB, "_backup_before_migrating") as backup:
+        ProgressDB(db_path).close()
+    backup.assert_not_called()
+    assert _backups(db_path) == []
+
+
+def test_only_the_latest_backup_is_kept(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    (tmp_path / "progress.db.bak-v12").write_bytes(b"older backup")
+    (tmp_path / "progress.db.bak-v15").write_bytes(b"stale copy of the same version")
+    (tmp_path / "other.db.bak-v3").write_bytes(b"someone else's backup")
+    _write_v15_db(db_path)
+
+    ProgressDB(db_path).close()
+
+    assert _backups(db_path) == ["progress.db.bak-v15"]
+    assert _user_version(tmp_path / "progress.db.bak-v15") == 15
+    assert (tmp_path / "other.db.bak-v3").exists()
+    assert not list(tmp_path.glob("*.bak-tmp-*"))
+
+
+def test_backup_can_be_disabled_by_env(tmp_path, monkeypatch):
+    from pyimgtag.db.progress_db import SCHEMA_VERSION
+
+    monkeypatch.setenv("PYIMGTAG_NO_MIGRATION_BACKUP", "1")
+    db_path = tmp_path / "progress.db"
+    _write_v15_db(db_path)
+
+    ProgressDB(db_path).close()
+
+    assert _backups(db_path) == []
+    assert _user_version(db_path) == SCHEMA_VERSION
+
+
+def test_a_failed_backup_leaves_the_db_unmigrated(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    _write_v15_db(db_path)
+
+    from pyimgtag.db.progress_db import MigrationBackupError
+
+    with mock.patch(
+        "pyimgtag.db.progress_db.tempfile.mkstemp", side_effect=PermissionError("read-only")
+    ):
+        with pytest.raises(MigrationBackupError) as info:
+            ProgressDB(db_path)
+
+    assert "PYIMGTAG_NO_MIGRATION_BACKUP=1" in str(info.value)
+    assert "read-only" in str(info.value)
+    assert _user_version(db_path) == 15
+    assert not (tmp_path / "progress.db.bak-v15").exists()
+
+
+def test_a_partial_backup_file_is_removed_on_failure(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    _write_v15_db(db_path)
+
+    from pyimgtag.db.progress_db import MigrationBackupError
+
+    with mock.patch("pyimgtag.db.progress_db.os.replace", side_effect=OSError("disk full")):
+        with pytest.raises(MigrationBackupError, match="disk full"):
+            ProgressDB(db_path)
+
+    assert _user_version(db_path) == 15
+    assert not list(tmp_path.glob("*.bak-tmp-*"))
+    assert _backups(db_path) == []
+
+
+def test_pruning_matches_the_db_name_literally(tmp_path, _backups_enabled):
+    db_path = tmp_path / "lib[1].db"
+    _write_v15_db(db_path)
+    (tmp_path / "lib1.db.bak-v3").write_bytes(b"another database's backup")
+    (tmp_path / "lib[1].db.bak-v2").write_bytes(b"this database's stale backup")
+    (tmp_path / "lib[1].db.bak-v2-notes.txt").write_bytes(b"not a backup")
+
+    ProgressDB(db_path).close()
+
+    assert (tmp_path / "lib1.db.bak-v3").exists()
+    assert not (tmp_path / "lib[1].db.bak-v2").exists()
+    assert (tmp_path / "lib[1].db.bak-v2-notes.txt").exists()
+    assert (tmp_path / "lib[1].db.bak-v15").exists()
+
+
+def test_pruning_leaves_another_processs_backup_in_progress(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    _write_v15_db(db_path)
+    in_progress = tmp_path / "progress.db.bak-tmp-otherprocess"
+    in_progress.write_bytes(b"being written by a concurrent open")
+
+    ProgressDB(db_path).close()
+
+    assert in_progress.exists()
+    assert _backups(db_path) == ["progress.db.bak-v15"]
+
+
+def test_a_pre_versioning_db_with_data_is_backed_up_as_v1(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    # The v1 baseline table, as written before user_version was used.
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE processed_images (file_path TEXT PRIMARY KEY, file_size INTEGER,"
+        " file_mtime REAL, tags TEXT, scene_summary TEXT, processed_at TEXT,"
+        " status TEXT, error_message TEXT)"
+    )
+    conn.execute("INSERT INTO processed_images (file_path, status) VALUES ('/p/a.jpg', 'ok')")
+    conn.commit()
+    conn.close()
+
+    ProgressDB(db_path).close()
+
+    assert _backups(db_path) == ["progress.db.bak-v1"]
+    conn = sqlite3.connect(tmp_path / "progress.db.bak-v1")
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0] == 1
+    finally:
+        conn.close()
