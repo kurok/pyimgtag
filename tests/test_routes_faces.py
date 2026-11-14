@@ -579,8 +579,14 @@ def test_thumbnail_endpoint_survives_cancellation(tmp_path, monkeypatch):
     app.include_router(build_faces_router(db, api_base=""))
     (pid,) = _seed_persons_with_faces(db_path, [("Solo", True, 2)])
 
-    async def _cancelled(*_a, **_k):
-        raise asyncio.CancelledError
+    real_to_thread = asyncio.to_thread
+
+    async def _cancelled(func, /, *args, **kwargs):
+        # Only the thumbnail crop is cancelled; the DB reads that the handler
+        # also runs in worker threads go through untouched.
+        if func.__name__ == "_work":
+            raise asyncio.CancelledError
+        return await real_to_thread(func, *args, **kwargs)
 
     monkeypatch.setattr(asyncio, "to_thread", _cancelled)
 
@@ -955,3 +961,44 @@ def test_faces_pages_template_markers():
     assert "const _personId = 7;" in detail  # int-coerced person_id injected
     assert "_apiBase  = '/faces';" in detail
     assert not re.findall(r"__[A-Z][A-Z0-9_]+__", grid + detail)
+
+
+# --- faces list endpoints read the DB off the event loop (#390) --------------
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get_unassigned_faces", "/faces/api/faces/unassigned"),
+        ("get_ignored_faces", "/faces/api/faces/ignored"),
+        ("get_persons", "/faces/api/persons"),
+        ("get_persons", "/faces/api/persons/with-faces"),
+    ],
+)
+def test_faces_lists_do_not_block_other_requests(tmp_path, method, path):
+    import threading
+    from unittest.mock import patch
+
+    import requests
+
+    from pyimgtag.db.face_db import FaceDB
+    from pyimgtag.webapp.unified_app import create_unified_app
+    from tests.e2e_support import assert_health_stays_responsive
+
+    db_path = tmp_path / "progress.db"
+    ProgressDB(db_path=db_path).close()
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_read(self, *args):
+        entered.set()
+        release.wait(15.0)
+        return []
+
+    with patch.object(FaceDB, method, slow_read):
+        response = assert_health_stays_responsive(
+            create_unified_app(db_path=db_path),
+            lambda base: requests.get(f"{base}{path}", timeout=30),
+            entered,
+            release,
+        )
+    assert response.status_code == 200
