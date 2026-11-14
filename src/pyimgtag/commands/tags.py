@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from pyimgtag.progress_db import ProgressDB
@@ -48,6 +49,9 @@ def _handle_tags_list(args: argparse.Namespace) -> int:
     with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         counts = db.get_tag_counts()
 
+    if getattr(args, "format", "table") == "json":
+        print(json.dumps([{"tag": tag, "count": count} for tag, count in counts], indent=2))
+        return 0
     if not counts:
         print("No tags found.", file=sys.stderr)
         return 0

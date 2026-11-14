@@ -443,6 +443,10 @@ pyimgtag status
 #   ok:      140
 #   error:   2
 #   pending: 58
+
+# Machine-readable
+pyimgtag status --format json
+# {"total": 200, "ok": 140, "error": 2, "pending": 58}
 ```
 
 #### `pyimgtag reprocess` — reset for re-tagging
@@ -472,6 +476,11 @@ pyimgtag cleanup --include-review
 #
 #   [delete]  /path/to/blurry_photo.jpg  | 2026-03-15  | tags: blurry, dark
 #   [delete]  /path/to/screenshot.png    | 2026-04-01  | tags: screenshot, text
+
+# Machine-readable: {"candidates": [{"file_path", "cleanup_class", "tags",
+# "image_date", "nearest_city", "nearest_country"}, ...],
+# "duplicate_groups": n, "reclaimable_bytes": n}
+pyimgtag cleanup --format json
 ```
 
 #### `pyimgtag cleanup-drift` — prune dead DB rows
@@ -1125,7 +1134,7 @@ pyimgtag faces scan --photos-library ~/Pictures/Photos\ Library.photoslibrary \
 # 2. Cluster embeddings into person groups (DBSCAN)
 pyimgtag faces cluster --eps 0.5 --min-samples 2
 
-# 3. Inspect the clusters from the CLI
+# 3. Inspect the clusters from the CLI (--format json: [{"person_id", "label", "confirmed", "face_count"}, ...])
 pyimgtag faces review
 
 # 4. Name the auto clusters — pick whichever fits your library (see table below):
@@ -1216,6 +1225,7 @@ Requires the `[mcp]` extra (`pip install 'pyimgtag[mcp]'`). See
 ```bash
 # List all tags with image counts
 pyimgtag tags list
+pyimgtag tags list --format json   # [{"tag": "beach", "count": 12}, ...]; [] when empty
 
 # Rename a tag across all images
 pyimgtag tags rename old-name new-name
@@ -1284,7 +1294,7 @@ pyimgtag judge --input-dir ~/Pictures/exported \
 | `--min-score SCORE` | — | Only show images scoring ≥ SCORE |
 | `--sort-by score\|name` | `score` | Final sort order |
 | `--output-json FILE` | — | Write ranked results to JSON |
-| `--verbose` | false | Show the model's reason for each score |
+| `--verbose` / `-v` | false | Show the model's reason for each score |
 | `--no-recursive` | false | Do not scan subdirectories |
 | `--backend ollama\|anthropic\|openai\|gemini` | `ollama` | Vision-model backend (same as `pyimgtag run`) |
 | `--model NAME` | backend-specific | Model name; defaults `gemma4:e4b` / `claude-sonnet-4-6` / `gpt-4o-mini` / `gemini-1.5-flash` |

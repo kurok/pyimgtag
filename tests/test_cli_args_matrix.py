@@ -715,3 +715,32 @@ def test_db_help_names_the_environment_variable(argv, capsys, monkeypatch):
     with pytest.raises(SystemExit):
         _parse(*argv, "--help")
     assert "$PYIMGTAG_DB" in " ".join(capsys.readouterr().out.split())
+
+
+class TestOutputFlagsAreConsistent:
+    """#404: ``judge -v`` and ``--format {table,json}`` on four more commands."""
+
+    def test_judge_takes_short_v(self) -> None:
+        assert _parse("judge", "--input-dir", "x", "-v").verbose is True
+        assert _parse("judge", "--input-dir", "x").verbose is False
+
+    @pytest.mark.parametrize(
+        "argv",
+        [["status"], ["cleanup"], ["tags", "list"], ["faces", "review"]],
+        ids=["status", "cleanup", "tags-list", "faces-review"],
+    )
+    def test_format_defaults_to_table_and_takes_json(self, argv) -> None:
+        assert _parse(*argv).format == "table"
+        assert _parse(*argv, "--format", "json").format == "json"
+
+    @pytest.mark.parametrize(
+        "argv",
+        [["status"], ["cleanup"], ["tags", "list"], ["faces", "review"]],
+        ids=["status", "cleanup", "tags-list", "faces-review"],
+    )
+    @pytest.mark.parametrize("bad", ["csv", "paths", "yaml"])
+    def test_format_rejects_other_values(self, argv, bad, capsys) -> None:
+        with pytest.raises(SystemExit) as exc:
+            _parse(*argv, "--format", bad)
+        assert exc.value.code == 2
+        assert "invalid choice" in capsys.readouterr().err
