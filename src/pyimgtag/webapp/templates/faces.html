@@ -266,7 +266,7 @@ async function load() {
     data = await apiFetch(url);
   } catch (err) {
     document.getElementById('status').textContent = 'Could not load persons';
-    showLoadError('persons', err.message, load);
+    showLoadError('persons', err.message, retryFor(err, load));
     return;
   }
   _total = data.total;
@@ -325,7 +325,7 @@ async function loadUnassigned() {
     data = await apiFetch(url);
   } catch (err) {
     document.getElementById('status').textContent = 'Could not load unassigned faces';
-    showLoadError('unassigned-grid', err.message, loadUnassigned);
+    showLoadError('unassigned-grid', err.message, retryFor(err, loadUnassigned));
     return;
   }
   _uaTotal = data.total;
@@ -555,7 +555,7 @@ async function loadTrash() {
     data = await apiFetch(url);
   } catch (err) {
     document.getElementById('status').textContent = 'Could not load dismissed faces';
-    showLoadError('trash-grid', err.message, loadTrash);
+    showLoadError('trash-grid', err.message, retryFor(err, loadTrash));
     return;
   }
   _trTotal = data.total;

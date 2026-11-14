@@ -140,10 +140,12 @@ __NAV__
 <div id="count"></div>
 <div id="results"></div>
 <script>
-// Enter in any filter runs the search, like the button.
-document.querySelectorAll('.filter-card input, .filter-card select').forEach(el => {
+// Enter in any text filter runs the search, like the button. Selects are
+// left alone (Enter there picks an option), and so is Enter that confirms
+// IME composition.
+document.querySelectorAll('.filter-card input').forEach(el => {
   el.addEventListener('keydown', ev => {
-    if (ev.key === 'Enter') { ev.preventDefault(); search(); }
+    if (ev.key === 'Enter' && !ev.isComposing) { ev.preventDefault(); search(); }
   });
 });
 
@@ -179,7 +181,7 @@ async function search() {
   } catch (err) {
     // e.g. a 400 for year=abc: show the server's reason, never "undefined results".
     count.textContent = 'Search failed';
-    showLoadError(wrap, err.message, search);
+    showLoadError(wrap, err.message, retryFor(err, search));
     return;
   }
   count.textContent = rows.length + ' results';

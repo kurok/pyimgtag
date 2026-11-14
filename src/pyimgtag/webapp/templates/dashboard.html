@@ -155,6 +155,7 @@
       controlErrorUntil = Date.now() + 6000;
       return;
     }
+    controlErrorUntil = 0;  // a later success replaces an earlier refusal
     refresh();
   }
   pauseBtn.addEventListener('click', () => control('pause', '/api/run/current/pause'));

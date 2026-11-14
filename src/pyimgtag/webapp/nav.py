@@ -179,7 +179,9 @@ async function apiFetch(url, opts) {
       if (typeof data.detail === 'string') {
         message = data.detail;
       } else if (Array.isArray(data.detail)) {
-        message = data.detail.map(d => (d && d.msg) ? d.msg : String(d)).join('; ');
+        message = data.detail.map(d => (d && d.msg) ? d.msg : JSON.stringify(d)).join('; ');
+      } else if (data.detail != null) {
+        message = JSON.stringify(data.detail);
       }
     } catch (_e) { /* not JSON: keep the HTTP status */ }
     const err = new Error(message);
@@ -188,7 +190,21 @@ async function apiFetch(url, opts) {
   }
   if (r.status === 204) return null;
   const type = r.headers.get('content-type') || '';
-  return type.includes('json') ? r.json() : r.text();
+  if (type.includes('json')) return r.json();
+  // Every caller expects JSON; anything else (e.g. a proxy's HTML page)
+  // is an error, not data. A caller that wants text passes {text: true}.
+  if (opts && opts.text) return r.text();
+  const what = type || 'no content type';
+  const err = new Error('Unexpected response from the server (' + what + ')');
+  err.status = r.status;
+  throw err;
+}
+// Retrying cannot fix a request the server rejected as invalid (4xx other
+// than timeouts and rate limits), so those banners get no Retry button.
+function retryFor(err, retry) {
+  const s = err && err.status;
+  if (s && s >= 400 && s < 500 && s !== 408 && s !== 429) return null;
+  return retry;
 }
 function showLoadError(target, message, retry) {
   const host = typeof target === 'string' ? document.getElementById(target) : target;

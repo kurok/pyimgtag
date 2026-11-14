@@ -148,7 +148,7 @@ async function load() {
     d = await apiFetch('{{ api_base }}/api/images' + qs);
   } catch (err) {
     document.getElementById('count').textContent = '';
-    showLoadError('grid', err.message, load);
+    showLoadError('grid', err.message, retryFor(err, load));
     return;
   }
   _total = d.total;

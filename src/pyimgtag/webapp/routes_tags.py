@@ -79,7 +79,7 @@ async function load() {
     allTags = await apiFetch('__API_BASE__/api/tags');
   } catch (err) {
     status.textContent = 'Could not load tags';
-    showLoadError('list', err.message, load);
+    showLoadError('list', err.message, retryFor(err, load));
     return;
   }
   status.textContent = allTags.length + ' tags';

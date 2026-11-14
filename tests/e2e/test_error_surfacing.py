@@ -97,3 +97,41 @@ def test_a_refused_run_control_is_shown_on_the_dashboard(page, base_url: str) ->
     expect(stop).to_be_enabled()
     stop.click()
     expect(page.locator("#error")).to_have_text("Could not stop: no active run")
+
+
+def test_a_rejected_query_offers_no_pointless_retry(page, base_url: str) -> None:
+    """A 400 cannot succeed on retry; a 503 can."""
+    page.goto(f"{base_url}/query/")
+    page.fill("#f_year", "abc")
+    page.get_by_role("button", name="Search").click()
+    expect(page.locator("#results .load-error")).to_be_visible()
+    expect(page.locator("#results .load-error-retry")).to_have_count(0)
+
+    page.route("**/query/api/images?*", _fail(503, "busy, try again"))
+    page.fill("#f_year", "")
+    page.get_by_role("button", name="Search").click()
+    expect(page.locator("#results .load-error")).to_contain_text("busy, try again")
+    expect(page.locator("#results .load-error-retry")).to_have_count(1)
+
+
+def test_a_non_json_success_is_reported_not_counted(page, base_url: str) -> None:
+    page.route(
+        "**/query/api/images?*",
+        lambda route: route.fulfill(
+            status=200, content_type="text/html", body="<html>proxy</html>"
+        ),
+    )
+    page.goto(f"{base_url}/query/")
+    page.get_by_role("button", name="Search").click()
+    expect(page.locator("#results .load-error")).to_contain_text("Unexpected response")
+    expect(page.locator("#count")).to_have_text("Search failed")
+
+
+def test_enter_in_a_select_does_not_search(page, base_url: str) -> None:
+    page.goto(f"{base_url}/query/")
+    requests_seen: list[str] = []
+    page.on("request", lambda r: requests_seen.append(r.url) if "/api/images" in r.url else None)
+    page.focus("#f_status")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(300)
+    assert requests_seen == []
