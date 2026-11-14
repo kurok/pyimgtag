@@ -181,3 +181,10 @@ def test_new_methods_run_under_the_connection_lock():
         "set_person_id_many",
     ):
         assert getattr(getattr(ProgressDB, name), "__pyimgtag_locked__", False), name
+
+
+@pytest.mark.parametrize("offset", [2**63 - 1, 2**63, 10**20])
+def test_a_huge_offset_is_an_empty_page_not_an_error(db, offset):
+    assert db.get_unassigned_faces(5, offset) == []
+    assert db.get_ignored_faces(None, offset) == []
+    assert db.get_faces_for_person(1, 5, offset, order_by_confidence=True) == []

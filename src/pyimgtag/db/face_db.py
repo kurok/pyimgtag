@@ -595,9 +595,13 @@ class FaceDB:
         sql = f"SELECT {self._FACE_COLUMNS} FROM faces WHERE {where} ORDER BY {order}"  # nosec B608
         args: tuple = params
         if limit is not None or offset:
-            # SQLite needs a LIMIT before OFFSET; -1 means "no limit".
+            # SQLite needs a LIMIT before OFFSET; -1 means "no limit". Both are
+            # clamped to SQLite's 64-bit range: a huge offset is simply past
+            # the end (an empty page), as the old Python slice was.
             sql += " LIMIT ? OFFSET ?"
-            args = (*params, -1 if limit is None else max(int(limit), 0), max(int(offset), 0))
+            top = 2**63 - 1
+            page_size = -1 if limit is None else min(max(int(limit), 0), top)
+            args = (*params, page_size, min(max(int(offset), 0), top))
         return self._face_dicts(self._conn.execute(sql, args).fetchall())
 
     def _count_faces(self, where: str, params: tuple = ()) -> int:

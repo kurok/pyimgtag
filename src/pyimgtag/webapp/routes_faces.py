@@ -328,10 +328,8 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                 raise HTTPException(status_code=404, detail="Person not found")
             target_id = person_id
         else:
-            target_id = db.create_person(
-                label=label,
-                confirmed=bool(label),
-                trusted=bool(label),
+            target_id = await asyncio.to_thread(
+                db.create_person, label=label, confirmed=bool(label), trusted=bool(label)
             )
         # One transaction: either every face moves or none does.
         await asyncio.to_thread(db.set_person_id_many, list(face_ids), target_id)

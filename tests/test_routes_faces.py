@@ -1079,3 +1079,18 @@ def test_assign_batch_is_all_or_nothing(tmp_path):
     with pytest.raises(Exception, match="injected"):
         client.post("/api/faces/assign-batch", json={"face_ids": fids, "person_id": pid})
     assert db.count_unassigned_faces() == 3
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/faces/unassigned?offset=99999999999999999999",
+        "/api/faces/ignored?offset=9223372036854775808",
+    ],
+)
+def test_a_huge_offset_answers_an_empty_page(tmp_path, path):
+    _db, db_path, client = _faces_app(tmp_path)
+    _seed_unassigned_faces(db_path, 2)
+    r = client.get(path)
+    assert r.status_code == 200
+    assert r.json()["items"] == []
