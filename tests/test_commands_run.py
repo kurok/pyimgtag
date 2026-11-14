@@ -1646,6 +1646,9 @@ class TestCmdRunMisc:
         args = _base_args(tmp_path)
         args.dry_run = False
         args.no_cache = False
+        # MagicMock args make every unset flag truthy; without ffmpeg on the
+        # runner --include-video would add its own warning line.
+        args.include_video = False
         (tmp_path / "a.jpg").write_bytes(b"\xff\xd8\xff\xd9")
         return args
 
