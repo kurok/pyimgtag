@@ -2727,7 +2727,7 @@ def test_only_the_latest_backup_is_kept(tmp_path, _backups_enabled):
     assert _backups(db_path) == ["progress.db.bak-v15"]
     assert _user_version(tmp_path / "progress.db.bak-v15") == 15
     assert (tmp_path / "other.db.bak-v3").exists()
-    assert not list(tmp_path.glob("*.partial"))
+    assert not list(tmp_path.glob("*.bak-tmp-*"))
 
 
 def test_backup_can_be_disabled_by_env(tmp_path, monkeypatch):
@@ -2747,12 +2747,16 @@ def test_a_failed_backup_leaves_the_db_unmigrated(tmp_path, _backups_enabled):
     db_path = tmp_path / "progress.db"
     _write_v15_db(db_path)
 
-    # A directory where the backup file goes makes sqlite3 fail to open it.
-    (tmp_path / "progress.db.bak-v15.partial").mkdir()
+    from pyimgtag.db.progress_db import MigrationBackupError
 
-    with pytest.raises(sqlite3.OperationalError):
-        ProgressDB(db_path)
+    with mock.patch(
+        "pyimgtag.db.progress_db.tempfile.mkstemp", side_effect=PermissionError("read-only")
+    ):
+        with pytest.raises(MigrationBackupError) as info:
+            ProgressDB(db_path)
 
+    assert "PYIMGTAG_NO_MIGRATION_BACKUP=1" in str(info.value)
+    assert "read-only" in str(info.value)
     assert _user_version(db_path) == 15
     assert not (tmp_path / "progress.db.bak-v15").exists()
 
@@ -2761,10 +2765,62 @@ def test_a_partial_backup_file_is_removed_on_failure(tmp_path, _backups_enabled)
     db_path = tmp_path / "progress.db"
     _write_v15_db(db_path)
 
+    from pyimgtag.db.progress_db import MigrationBackupError
+
     with mock.patch("pyimgtag.db.progress_db.os.replace", side_effect=OSError("disk full")):
-        with pytest.raises(OSError, match="disk full"):
+        with pytest.raises(MigrationBackupError, match="disk full"):
             ProgressDB(db_path)
 
     assert _user_version(db_path) == 15
-    assert not list(tmp_path.glob("*.partial"))
+    assert not list(tmp_path.glob("*.bak-tmp-*"))
     assert _backups(db_path) == []
+
+
+def test_pruning_matches_the_db_name_literally(tmp_path, _backups_enabled):
+    db_path = tmp_path / "lib[1].db"
+    _write_v15_db(db_path)
+    (tmp_path / "lib1.db.bak-v3").write_bytes(b"another database's backup")
+    (tmp_path / "lib[1].db.bak-v2").write_bytes(b"this database's stale backup")
+    (tmp_path / "lib[1].db.bak-v2-notes.txt").write_bytes(b"not a backup")
+
+    ProgressDB(db_path).close()
+
+    assert (tmp_path / "lib1.db.bak-v3").exists()
+    assert not (tmp_path / "lib[1].db.bak-v2").exists()
+    assert (tmp_path / "lib[1].db.bak-v2-notes.txt").exists()
+    assert (tmp_path / "lib[1].db.bak-v15").exists()
+
+
+def test_pruning_leaves_another_processs_backup_in_progress(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    _write_v15_db(db_path)
+    in_progress = tmp_path / "progress.db.bak-tmp-otherprocess"
+    in_progress.write_bytes(b"being written by a concurrent open")
+
+    ProgressDB(db_path).close()
+
+    assert in_progress.exists()
+    assert _backups(db_path) == ["progress.db.bak-v15"]
+
+
+def test_a_pre_versioning_db_with_data_is_backed_up_as_v1(tmp_path, _backups_enabled):
+    db_path = tmp_path / "progress.db"
+    # The v1 baseline table, as written before user_version was used.
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE processed_images (file_path TEXT PRIMARY KEY, file_size INTEGER,"
+        " file_mtime REAL, tags TEXT, scene_summary TEXT, processed_at TEXT,"
+        " status TEXT, error_message TEXT)"
+    )
+    conn.execute("INSERT INTO processed_images (file_path, status) VALUES ('/p/a.jpg', 'ok')")
+    conn.commit()
+    conn.close()
+
+    ProgressDB(db_path).close()
+
+    assert _backups(db_path) == ["progress.db.bak-v1"]
+    conn = sqlite3.connect(tmp_path / "progress.db.bak-v1")
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0] == 1
+    finally:
+        conn.close()

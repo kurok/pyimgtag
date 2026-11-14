@@ -5,7 +5,9 @@ from __future__ import annotations
 import contextlib
 import functools
 import os
+import re
 import sqlite3
+import tempfile
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
@@ -55,6 +57,22 @@ class SchemaTooNewError(sqlite3.DatabaseError):
         super().__init__(
             f"database {path} has schema v{found}, but this pyimgtag supports up to"
             f" v{supported}. Upgrade pyimgtag, or point --db at another file."
+        )
+
+
+class MigrationBackupError(sqlite3.DatabaseError):
+    """The copy taken before migrating an existing database could not be written.
+
+    The database is left as it was (unmigrated); the message names the
+    opt-out for users who accept migrating without a backup.
+    """
+
+    def __init__(self, path: Path, cause: BaseException) -> None:
+        self.path = path
+        super().__init__(
+            f"could not back up {path} before migrating it ({cause}). Free some space or"
+            f" fix the folder's permissions, or set {NO_MIGRATION_BACKUP_ENV}=1 to"
+            " migrate without a backup."
         )
 
 
@@ -526,6 +544,8 @@ class ProgressDB:
 
     def _create_table(self) -> None:
         # A file with no tables yet is new: it gets no pre-migration backup.
+        # A pre-versioning file (user_version 0 with tables) is existing; it
+        # is stamped v1 (the baseline schema) below, so its backup is .bak-v1.
         tables: int = self._conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
         ).fetchone()[0]
@@ -590,12 +610,22 @@ class ProgressDB:
         """Copy the database to ``<db>.bak-v<version>``; keep only that backup.
 
         Some migrations rewrite data, so the copy is the way back. It is
-        written to a temporary name and renamed into place, and older
-        ``<db>.bak-v*`` files are removed once it exists.
+        written to a uniquely named temporary file (two processes opening the
+        same old database at once cannot clash) and renamed into place. Then
+        every other ``<db>.bak-v<N>`` of this database is removed; names are
+        matched literally, so ``lib[1].db`` never touches ``lib1.db``'s
+        backups.
+
+        Raises:
+            MigrationBackupError: If the copy cannot be written.
         """
-        target = self._path.with_name(f"{self._path.name}.bak-v{int(version)}")
-        partial = target.with_name(target.name + ".partial")
+        name = self._path.name
+        target = self._path.with_name(f"{name}.bak-v{int(version)}")
+        partial: Path | None = None
         try:
+            fd, tmp = tempfile.mkstemp(dir=self._path.parent, prefix=f"{name}.bak-tmp-")
+            os.close(fd)
+            partial = Path(tmp)
             dest = sqlite3.connect(str(partial))
             try:
                 self._conn.backup(dest)
@@ -603,13 +633,16 @@ class ProgressDB:
                 # Closed before the rename: Windows cannot replace an open file.
                 dest.close()
             os.replace(partial, target)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                partial.unlink(missing_ok=True)
-            raise
-        for old in self._path.parent.glob(f"{self._path.name}.bak-v*"):
-            if old != target:
-                old.unlink(missing_ok=True)
+        except (OSError, sqlite3.Error) as exc:
+            if partial is not None:
+                with contextlib.suppress(OSError):
+                    partial.unlink(missing_ok=True)
+            raise MigrationBackupError(self._path, exc) from exc
+        backup_name = re.compile(re.escape(name) + r"\.bak-v\d+")
+        for old in self._path.parent.iterdir():
+            if old != target and backup_name.fullmatch(old.name):
+                with contextlib.suppress(OSError):
+                    old.unlink()
         return target
 
     # --- image progress methods (delegated to ImageDB) ---

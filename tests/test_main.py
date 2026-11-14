@@ -1553,3 +1553,24 @@ def test_cli_reports_a_too_new_database(tmp_path, capsys, monkeypatch, argv):
     assert rc == 1
     assert err.startswith("Error: database ")
     assert "schema v99" in err and "Upgrade pyimgtag" in err
+
+
+def test_cli_reports_a_failed_migration_backup(tmp_path, capsys, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    monkeypatch.delenv("PYIMGTAG_NO_MIGRATION_BACKUP", raising=False)
+    db_path = tmp_path / "progress.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE processed_images (file_path TEXT PRIMARY KEY, status TEXT)")
+    conn.execute("PRAGMA user_version = 15")
+    conn.commit()
+    conn.close()
+
+    with patch("pyimgtag.db.progress_db.tempfile.mkstemp", side_effect=OSError("disk full")):
+        rc = main(["status", "--db", str(db_path)])
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert err.startswith("Error: could not back up ")
+    assert "PYIMGTAG_NO_MIGRATION_BACKUP=1" in err

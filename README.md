@@ -1482,8 +1482,19 @@ running against a schema it does not know:
 Error: database ~/.cache/pyimgtag/progress.db has schema v18, but this pyimgtag supports up to v17. Upgrade pyimgtag, or point --db at another file.
 ```
 
-To go back to an older release, restore the backup:
-`cp progress.db.bak-v15 progress.db`.
+To go back to an older release, stop every pyimgtag process (CLI, dashboard,
+`watch`), remove the write-ahead log files next to the database so SQLite
+cannot replay newer changes onto the restored copy, then restore the backup:
+
+```bash
+cd ~/.cache/pyimgtag
+rm -f progress.db-wal progress.db-shm
+cp progress.db.bak-v15 progress.db
+```
+
+If the backup cannot be written (a full disk, a read-only folder), the
+database is left unmigrated and the command exits with an error that names
+`PYIMGTAG_NO_MIGRATION_BACKUP`.
 
 ## Resume and Enrichment
 
