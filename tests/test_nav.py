@@ -56,3 +56,23 @@ def test_the_shared_modal_is_a_dialog():
     assert 'aria-labelledby="modal-title"' in MODAL_HTML
     assert "e.key === 'Escape'" in MODAL_JS
     assert "_modalReturnFocus" in MODAL_JS
+
+
+def test_the_nav_scrolls_sideways_on_narrow_screens():
+    """#406: the nav scrolls on its own instead of widening the page."""
+    from pyimgtag.webapp.nav import DESIGN_CSS
+
+    nav_rule = DESIGN_CSS.split(".nav{", 1)[1].split("}", 1)[0]
+    assert "overflow-x:auto" in nav_rule
+    assert "white-space:nowrap" in nav_rule
+    assert ".nav>*{flex-shrink:0}" in DESIGN_CSS
+    assert "@media (max-width:900px)" in DESIGN_CSS
+
+
+def test_the_active_link_is_scrolled_into_view_on_load():
+    from pyimgtag.webapp.nav import render_nav
+
+    html = render_nav("about")
+    script = html.split("</nav>", 1)[1]
+    assert ".nav-link.active" in script
+    assert "scrollLeft" in script

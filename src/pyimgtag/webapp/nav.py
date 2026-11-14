@@ -16,7 +16,10 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .nav{display:flex;align-items:center;height:52px;padding:0 24px;
      background:rgba(255,255,255,.72);backdrop-filter:blur(20px);
      -webkit-backdrop-filter:blur(20px);border-bottom:1px solid rgba(0,0,0,.07);
-     box-shadow:0 1px 0 rgba(0,0,0,.04);position:sticky;top:0;z-index:100}
+     box-shadow:0 1px 0 rgba(0,0,0,.04);position:sticky;top:0;z-index:100;
+     overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:none}
+.nav::-webkit-scrollbar{display:none}
+.nav>*{flex-shrink:0}
 .nav-logo{font-size:17px;font-weight:700;letter-spacing:-.4px;color:var(--text);
           margin-right:32px;text-decoration:none}
 .nav-link{font-size:13px;color:var(--muted);padding:0 12px;height:52px;display:flex;
@@ -124,6 +127,12 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .empty-state code{font-family:ui-monospace,'SF Mono',monospace;font-size:12px;
                   background:var(--bg);padding:2px 6px;border-radius:4px}
 .empty-state a{color:var(--accent)}
+@media (max-width:900px){
+  .nav{padding:0 12px}
+  .nav-logo{margin-right:12px}
+  .page-hdr{flex-wrap:wrap;padding:20px 16px 0}
+  .pills{flex-wrap:wrap;padding:12px 16px 0}
+}
 """
 
 # Backward-compatibility alias — used by the routes_*.py page templates (__NAV_STYLES__).
@@ -313,6 +322,20 @@ function showModalError(message) {
 </script>"""
 
 
+#: On a narrow screen the nav scrolls sideways; start it with the active
+#: link in view (centred when possible) without scrolling the page itself.
+_NAV_SCROLL_JS = """<script>
+(function () {
+  var nav = document.querySelector("nav.nav");
+  var link = nav && nav.querySelector(".nav-link.active");
+  if (!link || nav.scrollWidth <= nav.clientWidth) return;
+  var left = link.offsetLeft, right = left + link.offsetWidth;
+  if (left >= nav.scrollLeft && right <= nav.scrollLeft + nav.clientWidth) return;
+  nav.scrollLeft = link.offsetLeft - (nav.clientWidth - link.offsetWidth) / 2;
+})();
+</script>"""
+
+
 def render_nav(active: str, status_html: str = "") -> str:
     """Return nav HTML with ``active`` section highlighted.
 
@@ -358,5 +381,5 @@ def render_nav(active: str, status_html: str = "") -> str:
         '<span class="nav-spacer"></span>'
         f"{status}"
         f"{version_link}"
-        "</nav>" + API_JS
+        "</nav>" + _NAV_SCROLL_JS + API_JS
     )
