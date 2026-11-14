@@ -133,7 +133,7 @@ def test_faces_ui_opens_browser_thread(tmp_path):
     with (
         patch.dict(sys.modules, {"uvicorn": fake_uvicorn}),
         patch("pyimgtag.webapp.unified_app.create_unified_app") as mock_create,
-        patch("pyimgtag.commands.faces.threading.Thread", _CapturingThread),
+        patch("pyimgtag.webapp.serve.threading.Thread", _CapturingThread),
         patch("time.sleep"),
         patch("webbrowser.open") as mock_open,
     ):
@@ -168,7 +168,7 @@ def test_faces_ui_browser_open_swallows_exception(tmp_path):
     with (
         patch.dict(sys.modules, {"uvicorn": fake_uvicorn}),
         patch("pyimgtag.webapp.unified_app.create_unified_app") as mock_create,
-        patch("pyimgtag.commands.faces.threading.Thread", _SyncThread),
+        patch("pyimgtag.webapp.serve.threading.Thread", _SyncThread),
         patch("time.sleep"),
         patch("webbrowser.open", side_effect=RuntimeError("no display")),
     ):
@@ -176,3 +176,20 @@ def test_faces_ui_browser_open_swallows_exception(tmp_path):
         rc = _handle_faces_ui(args)
 
     assert rc == 0
+
+
+def test_faces_ui_serves_the_unified_app_at_faces():
+    """#407: faces ui goes through the one launcher, opening /faces."""
+    import argparse
+
+    from pyimgtag.commands.faces import _handle_faces_ui
+
+    args = argparse.Namespace(db="/d.db", host="0.0.0.0", port=9001, no_browser=False)  # nosec B104
+    with patch("pyimgtag.webapp.serve.serve_unified", return_value=0) as serve:
+        assert _handle_faces_ui(args) == 0
+    serve.assert_called_once()
+    assert serve.call_args.args == ("/d.db", "0.0.0.0", 9001)
+    kwargs = serve.call_args.kwargs
+    assert kwargs["open_path"] == "/faces"
+    assert kwargs["open_browser"] is True
+    assert kwargs["log_level"] == "warning"

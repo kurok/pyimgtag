@@ -192,7 +192,6 @@ select = ["E", "F", "W", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/pyimgtag/review_server.py" = ["E501"]  # HTML/CSS template has long lines
-"src/pyimgtag/faces_review_server.py" = ["E501"]
 # Tests that guard optional dependencies with pytest.importorskip() must
 # place the dependent imports after the skip call (E402).
 "tests/test_dashboard_server.py" = ["E402"]

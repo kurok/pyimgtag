@@ -24,23 +24,26 @@ import os
 
 
 def main() -> None:
-    try:
-        import uvicorn
-    except ImportError as exc:
-        raise SystemExit(
-            "uvicorn is required to launch the dashboard standalone. "
-            "Install with: pip install 'pyimgtag[review]'"
-        ) from exc
-
-    from pyimgtag.webapp.unified_app import create_unified_app
+    from pyimgtag.webapp.serve import serve_unified
 
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8000"))
     log_level = os.environ.get("PYIMGTAG_LOG_LEVEL", "info")
     db_path = os.environ.get("PYIMGTAG_DB") or None
 
-    app = create_unified_app(db_path=db_path)
-    uvicorn.run(app, host=host, port=port, log_level=log_level)
+    code = serve_unified(
+        db_path,
+        host,
+        port,
+        log_level=log_level,
+        label="dashboard",
+        missing_uvicorn=(
+            "uvicorn is required to launch the dashboard standalone. "
+            "Install with: pip install 'pyimgtag[review]'"
+        ),
+    )
+    if code:
+        raise SystemExit(code)
 
 
 if __name__ == "__main__":

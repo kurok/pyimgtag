@@ -104,3 +104,13 @@ class TestWebappMain:
         assert kwargs.get("host") == "0.0.0.0"
         assert kwargs.get("port") == 9000
         assert kwargs.get("log_level") == "debug"
+
+
+def test_the_standalone_review_and_faces_apps_are_gone():
+    """#407: one dashboard app; the old standalone servers are deleted."""
+    import importlib.util
+
+    import pyimgtag.review_server as review_server
+
+    assert importlib.util.find_spec("pyimgtag.faces_review_server") is None
+    assert not hasattr(review_server, "create_app")

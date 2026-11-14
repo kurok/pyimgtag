@@ -816,50 +816,20 @@ def _handle_faces_capture_names(args: argparse.Namespace) -> int:
 
 def _handle_faces_ui(args: argparse.Namespace) -> int:
     """Start the face management web UI."""
-    try:
-        import uvicorn
-    except ImportError:
-        print(
-            "Error: uvicorn is required for the faces UI. "
-            "Install with: pip install 'pyimgtag[review]'",
-            file=sys.stderr,
-        )
-        return 1
+    from pyimgtag.webapp.serve import serve_unified
 
-    try:
-        from pyimgtag.webapp.unified_app import create_unified_app
-    except ImportError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
-
-    app = create_unified_app(db_path=args.db)
     host = getattr(args, "host", "127.0.0.1")
     port = getattr(args, "port", 8766)
-    url = f"http://{host}:{port}/faces"
-    print(f"pyimgtag faces UI: {url}", flush=True)
-
-    if not getattr(args, "no_browser", False):
-        import webbrowser
-
-        def _open() -> None:
-            import time
-
-            time.sleep(0.5)
-            try:
-                webbrowser.open(url)
-            except Exception:  # noqa: BLE001  # nosec B110
-                pass
-
-        threading.Thread(target=_open, daemon=True).start()
-
-    try:
-        uvicorn.run(app, host=host, port=port, log_level="warning")
-    except OSError as exc:
-        # Most commonly the port is already in use (EADDRINUSE); surface an
-        # actionable message instead of an unhandled traceback.
-        print(f"Error: could not start faces UI on {host}:{port}: {exc}", file=sys.stderr)
-        return 1
-    return 0
+    return serve_unified(
+        args.db,
+        host,
+        port,
+        open_path="/faces",
+        open_browser=not getattr(args, "no_browser", False),
+        log_level="warning",
+        banner=f"pyimgtag faces UI: http://{host}:{port}/faces",
+        label="faces UI",
+    )
 
 
 def _write_person_keywords(
