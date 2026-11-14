@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pyimgtag.preflight import (
     check_cloud_backend,
     check_directory,
@@ -87,8 +89,7 @@ class TestCheckOllamaModel:
 
         ok, msg = check_ollama_model("gemma4:e4b")
         assert ok is False
-        assert "not found" in msg
-        assert "llama3:8b" in msg
+        assert msg == "model 'gemma4:e4b' is not pulled. Run 'ollama pull gemma4:e4b'."
 
     @patch("pyimgtag.preflight.requests.get")
     def test_request_exception_returns_fail(self, mock_get: MagicMock) -> None:
@@ -320,3 +321,73 @@ class TestCheckCloudBackend:
         ok, msg = check_cloud_backend("gemini")
         assert ok is True
         assert "GEMINI_API_KEY" in msg
+
+
+# --- actionable messages and name/name:latest matching (#391) ----------------
+
+
+def _tags_response(*names: str) -> MagicMock:
+    resp = MagicMock()
+    resp.json.return_value = {"models": [{"name": n} for n in names]}
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+@patch("pyimgtag.preflight.requests.get")
+def test_unreachable_message_names_the_url_and_the_fix(mock_get: MagicMock) -> None:
+    import requests
+
+    mock_get.side_effect = requests.ConnectionError(
+        "HTTPConnectionPool(host='127.0.0.1', port=9): Max retries exceeded"
+    )
+    for check in (
+        lambda: check_ollama("http://127.0.0.1:9"),
+        lambda: check_ollama_model("gemma4", "http://127.0.0.1:9"),
+    ):
+        ok, msg = check()
+        assert ok is False
+        assert msg == (
+            "Ollama is not reachable at http://127.0.0.1:9. Start it with 'ollama serve',"
+            " or point --ollama-url at a running server."
+        )
+        assert "HTTPConnectionPool" not in msg
+
+
+@patch("pyimgtag.preflight.requests.get")
+def test_the_raw_error_is_logged_at_debug(mock_get: MagicMock, caplog) -> None:
+    import logging
+
+    import requests
+
+    mock_get.side_effect = requests.ConnectionError("HTTPConnectionPool boom")
+    with caplog.at_level(logging.DEBUG, logger="pyimgtag.preflight"):
+        check_ollama("http://127.0.0.1:9")
+    assert "HTTPConnectionPool boom" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("wanted", "available", "ok"),
+    [
+        ("gemma4", "gemma4:latest", True),
+        ("gemma4:latest", "gemma4", True),
+        ("gemma4:latest", "gemma4:latest", True),
+        ("gemma4:e4b", "gemma4:e4b", True),
+        ("gemma4:e4b", "gemma4:latest", False),
+        ("gemma4", "gemma4:e4b", False),
+        ("gemma", "gemma4:latest", False),
+    ],
+)
+@patch("pyimgtag.preflight.requests.get")
+def test_name_and_name_latest_are_the_same_model(
+    mock_get: MagicMock, wanted: str, available: str, ok: bool
+) -> None:
+    mock_get.return_value = _tags_response(available)
+    assert check_ollama_model(wanted)[0] is ok
+
+
+@patch("pyimgtag.preflight.requests.get")
+def test_a_missing_model_message_says_how_to_pull_it(mock_get: MagicMock) -> None:
+    mock_get.return_value = _tags_response("llama3:8b")
+    ok, msg = check_ollama_model("gemma4:e4b")
+    assert ok is False
+    assert "ollama pull gemma4:e4b" in msg

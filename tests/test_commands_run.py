@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pyimgtag.models import ExifData
 from pyimgtag.scanner import scan_directory
 
@@ -1640,11 +1642,80 @@ class TestCmdRunMisc:
 
         assert "--skip-existing is inactive in --dry-run mode" in capsys.readouterr().err
 
-    def test_ollama_down_warning(self, tmp_path: Path, capsys) -> None:
+    def _writing_args(self, tmp_path: Path):
+        args = _base_args(tmp_path)
+        args.dry_run = False
+        args.no_cache = False
+        (tmp_path / "a.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+        return args
+
+    def test_run_aborts_before_any_work_when_ollama_is_unreachable(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.preflight import _unreachable_message
+
+        args = self._writing_args(tmp_path)
+        with (
+            patch(
+                "pyimgtag.commands.run.check_ollama",
+                return_value=(False, _unreachable_message(args.ollama_url)),
+            ),
+            patch("pyimgtag.commands.run.OllamaClient") as client,
+            patch("pyimgtag.commands.run.scan_directory") as scan,
+        ):
+            rc = cmd_run(args, MagicMock())
+
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert err.strip().splitlines() == [
+            f"Error: Ollama is not reachable at {args.ollama_url}. Start it with"
+            " 'ollama serve', or point --ollama-url at a running server."
+        ]
+        assert "HTTPConnectionPool" not in err
+        scan.assert_not_called()
+        client.assert_not_called()
+        assert not (tmp_path / "p.db").exists()
+
+    def test_run_aborts_when_the_model_is_not_pulled(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.preflight import _not_pulled_message
+
+        args = self._writing_args(tmp_path)
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "up")),
+            patch(
+                "pyimgtag.commands.run.check_ollama_model",
+                return_value=(False, _not_pulled_message("test")),
+            ) as model_check,
+            patch("pyimgtag.commands.run.scan_directory") as scan,
+        ):
+            rc = cmd_run(args, MagicMock())
+
+        assert rc == 1
+        assert "Run 'ollama pull test'." in capsys.readouterr().err
+        model_check.assert_called_once_with("test", args.ollama_url)
+        scan.assert_not_called()
+        assert not (tmp_path / "p.db").exists()
+
+    def test_the_model_check_uses_the_default_model(self, tmp_path: Path) -> None:
         from pyimgtag.commands.run import cmd_run
 
-        args = _base_args(tmp_path)
+        args = self._writing_args(tmp_path)
+        args.model = None
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "up")),
+            patch(
+                "pyimgtag.commands.run.check_ollama_model", return_value=(False, "missing")
+            ) as model_check,
+        ):
+            assert cmd_run(args, MagicMock()) == 1
+        model_check.assert_called_once_with("gemma4:e4b", args.ollama_url)
 
+    def test_dry_run_does_not_need_ollama(self, tmp_path: Path, capsys) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        args = _base_args(tmp_path)  # dry_run=True
         with (
             patch("pyimgtag.commands.run.check_ollama", return_value=(False, "no ollama")),
             patch("pyimgtag.commands.run.OllamaClient") as cls,
@@ -1653,8 +1724,23 @@ class TestCmdRunMisc:
             cls.return_value.tag_image.return_value = _ok_tag()
             rc = cmd_run(args, MagicMock())
 
-        assert "Warning: no ollama" in capsys.readouterr().err
         assert rc == 0
+        assert "Warning: no ollama" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("backend", ["anthropic", "openai", "gemini"])
+    def test_cloud_backend_skips_the_ollama_check(self, tmp_path: Path, backend: str) -> None:
+        from pyimgtag.commands.run import cmd_run
+
+        args = self._writing_args(tmp_path)
+        args.backend = backend
+        with (
+            patch("pyimgtag.commands.run.check_ollama") as server_check,
+            patch("pyimgtag.commands.run.check_ollama_model") as model_check,
+            patch("pyimgtag.commands.run.scan_directory", return_value=[]),
+        ):
+            assert cmd_run(args, MagicMock()) == 0
+        server_check.assert_not_called()
+        model_check.assert_not_called()
 
     def test_no_files_returns_zero(self, tmp_path: Path, capsys) -> None:
         from pyimgtag.commands.run import cmd_run

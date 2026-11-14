@@ -358,6 +358,7 @@ _CHILD = textwrap.dedent(
     client.tag_image.side_effect = tag_image
     client.prompt_builder = None
     with patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")), \\
+         patch("pyimgtag.commands.run.check_ollama_model", return_value=(True, "")), \\
          patch("pyimgtag.commands.run.read_exif", return_value=ExifData()), \\
          patch("pyimgtag.commands.run.OllamaClient", return_value=client):
         sys.exit(main([

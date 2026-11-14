@@ -2,11 +2,34 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess  # nosec B404
 from pathlib import Path
 
 import requests
+
+logger = logging.getLogger(__name__)
+
+
+def _unreachable_message(base_url: str) -> str:
+    return (
+        f"Ollama is not reachable at {base_url}. Start it with 'ollama serve',"
+        " or point --ollama-url at a running server."
+    )
+
+
+def _not_pulled_message(model: str) -> str:
+    return f"model '{model}' is not pulled. Run 'ollama pull {model}'."
+
+
+def _same_model(wanted: str, available: str) -> bool:
+    """Treat ``name`` and ``name:latest`` as the same Ollama model."""
+
+    def canonical(name: str) -> str:
+        return name if ":" in name else f"{name}:latest"
+
+    return canonical(wanted) == canonical(available)
 
 
 def check_ollama(base_url: str = "http://localhost:11434") -> tuple[bool, str]:
@@ -16,7 +39,8 @@ def check_ollama(base_url: str = "http://localhost:11434") -> tuple[bool, str]:
         base_url: Ollama HTTP base URL.
 
     Returns:
-        Tuple of (success, message).
+        Tuple of (success, message). On failure the message is one short,
+        actionable line; the underlying exception is logged at debug level.
     """
     try:
         resp = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=5)
@@ -24,7 +48,8 @@ def check_ollama(base_url: str = "http://localhost:11434") -> tuple[bool, str]:
         models = resp.json().get("models", [])
         return (True, f"Ollama is running ({len(models)} models available)")
     except requests.RequestException as e:
-        return (False, f"Ollama is not reachable at {base_url}: {e}")
+        logger.debug("Ollama probe at %s failed: %r", base_url, e)
+        return (False, _unreachable_message(base_url))
 
 
 def check_cloud_backend(backend: str) -> tuple[bool, str]:
@@ -58,22 +83,26 @@ def check_ollama_model(model: str, base_url: str = "http://localhost:11434") -> 
     """Check that a specific model is available in Ollama.
 
     Args:
-        model: Model name to look for.
+        model: Model name to look for; ``name`` and ``name:latest`` match
+            each other.
         base_url: Ollama HTTP base URL.
 
     Returns:
-        Tuple of (success, message).
+        Tuple of (success, message). On failure the message says how to fix
+        it (``ollama pull <model>`` or ``ollama serve``).
     """
     try:
         resp = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=5)
         resp.raise_for_status()
         models = resp.json().get("models", [])
         names = [m.get("name", "") for m in models]
-        if model in names:
+        if any(_same_model(model, name) for name in names):
             return (True, f"Model '{model}' is available")
-        return (False, f"Model '{model}' not found. Available: {names}")
+        logger.debug("model %r not in Ollama's list: %s", model, names)
+        return (False, _not_pulled_message(model))
     except requests.RequestException as e:
-        return (False, f"Cannot check model: Ollama not reachable ({e})")
+        logger.debug("Ollama probe at %s failed: %r", base_url, e)
+        return (False, _unreachable_message(base_url))
 
 
 def check_exiftool() -> tuple[bool, str]:
