@@ -2824,3 +2824,61 @@ def test_a_pre_versioning_db_with_data_is_backed_up_as_v1(tmp_path, _backups_ena
         assert conn.execute("SELECT COUNT(*) FROM processed_images").fetchone()[0] == 1
     finally:
         conn.close()
+
+
+# --- must_exist (#395) --------------------------------------------------------
+
+
+def test_must_exist_raises_before_touching_the_filesystem(tmp_path):
+    from pyimgtag.db.progress_db import DatabaseNotFoundError
+
+    missing = tmp_path / "nope" / "deeper" / "x.db"
+    with pytest.raises(DatabaseNotFoundError) as info:
+        ProgressDB(missing, must_exist=True)
+
+    assert info.value.path == missing
+    assert isinstance(info.value, FileNotFoundError)
+    assert str(info.value) == (
+        f"no database at {missing}. Run 'pyimgtag run' first, or check --db."
+    )
+    assert not (tmp_path / "nope").exists()
+
+
+def test_must_exist_rejects_a_directory(tmp_path):
+    from pyimgtag.db.progress_db import DatabaseNotFoundError
+
+    with pytest.raises(DatabaseNotFoundError):
+        ProgressDB(tmp_path, must_exist=True)
+
+
+def test_must_exist_opens_an_existing_database(tmp_path):
+    db_path = tmp_path / "x.db"
+    ProgressDB(db_path).close()
+    with ProgressDB(db_path, must_exist=True) as db:
+        assert db.get_stats()["total"] == 0
+
+
+def test_the_default_still_creates_a_missing_database(tmp_path):
+    db_path = tmp_path / "new" / "x.db"
+    ProgressDB(db_path).close()
+    assert db_path.is_file()
+
+
+def test_must_exist_reports_an_empty_path_as_such(tmp_path, monkeypatch):
+    from pyimgtag.db.progress_db import DatabaseNotFoundError
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(DatabaseNotFoundError) as info:
+        ProgressDB("", must_exist=True)
+    assert str(info.value).startswith("no database at ''.")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_must_exist_treats_an_unreadable_parent_as_missing(tmp_path):
+    from pyimgtag.db.progress_db import DatabaseNotFoundError
+
+    target = tmp_path / "locked" / "x.db"
+    with mock.patch.object(Path, "is_file", side_effect=PermissionError("denied")):
+        with pytest.raises(DatabaseNotFoundError):
+            ProgressDB(target, must_exist=True)
+    assert not (tmp_path / "locked").exists()

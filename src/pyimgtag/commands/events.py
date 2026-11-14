@@ -80,7 +80,10 @@ def cmd_events(args: argparse.Namespace) -> int:
     if handler is None:
         print("Usage: pyimgtag events {detect|list|show|name|rename|apply}", file=sys.stderr)
         return 1
-    with ProgressDB(db_path=args.db) as db:
+    # list/show only read: a missing, explicitly named --db is an error, not
+    # a new empty database.
+    read_only = args.events_action in ("list", "show")
+    with ProgressDB(db_path=args.db, must_exist=read_only and args.db is not None) as db:
         return handler(args, db)
 
 

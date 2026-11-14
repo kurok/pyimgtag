@@ -87,7 +87,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     from pyimgtag.output_writer import write_rows_csv, write_rows_json
 
     output = Path(args.output).expanduser()
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         rows = db.export_rows()
         if not rows:
             print("Nothing to export: the database has no processed images.", file=sys.stderr)

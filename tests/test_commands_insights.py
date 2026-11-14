@@ -158,6 +158,7 @@ def test_main_output_json_extension_infers_format(tmp_path, monkeypatch):
 def test_main_empty_db_is_friendly(tmp_path, capsys, monkeypatch):
     monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
     db = tmp_path / "empty.db"
+    ProgressDB(db).close()  # read-only commands need an existing --db
     assert main(["insights", "--db", str(db)]) == 0
     captured = capsys.readouterr()
     assert "Nothing tagged yet" in captured.out

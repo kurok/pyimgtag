@@ -36,7 +36,7 @@ def cmd_query(args: argparse.Namespace) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         event_paths: set[str] | None = None
         if getattr(args, "event", None) is not None:
             if db.get_event(args.event) is None:

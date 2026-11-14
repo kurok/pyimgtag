@@ -140,7 +140,7 @@ def _handle_list(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         groups = [
             summarize_group(g, prefer)
             for g in db.list_dedup_groups(include_resolved=bool(args.include_resolved))

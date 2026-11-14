@@ -215,6 +215,7 @@ def test_list_prefer_changes_the_best_pick(tmp_path, capsys):
 def test_list_reports_an_empty_plan(tmp_path, capsys):
     args = _args("list")
     args.db = str(tmp_path / "empty.db")
+    ProgressDB(args.db).close()  # read-only commands need an existing --db
     assert cmd_dedup(args) == 0
     assert "No duplicate groups" in capsys.readouterr().err
 

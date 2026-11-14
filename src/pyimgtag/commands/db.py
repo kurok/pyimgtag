@@ -11,7 +11,7 @@ from pyimgtag.progress_db import ProgressDB
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Show progress stats from the DB."""
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         stats = db.get_stats()
 
     total = stats["total"]
@@ -58,7 +58,7 @@ def cmd_reprocess(args: argparse.Namespace) -> int:
 
 def cmd_cleanup(args: argparse.Namespace) -> int:
     """List photos flagged for cleanup and exit."""
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         candidates = db.get_cleanup_candidates(include_review=args.include_review)
         dedup_totals = db.get_dedup_totals()
 

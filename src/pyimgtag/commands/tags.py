@@ -27,7 +27,7 @@ def cmd_tags(args: argparse.Namespace) -> int:
 
 def _handle_tags_list(args: argparse.Namespace) -> int:
     """List all tags with image counts."""
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         counts = db.get_tag_counts()
 
     if not counts:
