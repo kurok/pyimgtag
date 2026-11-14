@@ -1066,9 +1066,11 @@ def _int_at_least(minimum: int, what: str) -> Any:
     return convert
 
 
-#: argparse ``type=`` for counts that must be 1 or more (``--timeout``, ``--top``).
+#: argparse ``type=`` for counts that must be 1 or more (``--timeout``, ``--top``, and
+#: ``--limit`` on ``query`` / ``index``, where 0 would silently produce nothing).
 _positive_int = _int_at_least(1, "a whole number of 1 or more")
-#: argparse ``type=`` for counts where 0 has a meaning (``--limit``: none, ``-j``: auto).
+#: argparse ``type=`` for counts where 0 has a meaning: ``-j 0`` is auto, and ``--limit 0``
+#: on run / watch / judge / faces scan / events list / immich-sync means no limit.
 _non_negative_int = _int_at_least(0, "a whole number of 0 or more")
 
 
@@ -1133,7 +1135,8 @@ def _add_query_subcommand(subparsers: Any) -> None:
         default="table",
         help="Output format (default: table)",
     )
-    query_p.add_argument("--limit", type=_non_negative_int, help="Max results to return")
+    # 1 or more: query builds LIMIT N, so 0 would silently return nothing.
+    query_p.add_argument("--limit", type=_positive_int, help="Max results to return")
     query_p.add_argument(
         "--type",
         dest="media_type",
@@ -1180,8 +1183,9 @@ def _add_index_subcommand(subparsers: Any) -> None:
         action="store_true",
         help="Re-embed every image, discarding the existing index",
     )
+    # 1 or more: the indexer stops once N are embedded, so 0 would embed nothing.
     index_p.add_argument(
-        "--limit", type=_non_negative_int, metavar="N", help="Embed at most N new images"
+        "--limit", type=_positive_int, metavar="N", help="Embed at most N new images"
     )
     index_p.add_argument(
         "--model-dir",

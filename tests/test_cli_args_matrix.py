@@ -647,10 +647,12 @@ _REJECTED = [
     (["judge", "--input-dir", "x", "-j", "-2"], "--jobs", "0 or more"),
     (["judge", "--input-dir", "x", "--timeout", "-1"], "--timeout", "1 or more"),
     (["judge", "--input-dir", "x", "--limit", "-1"], "--limit", "0 or more"),
-    (["query", "--limit", "-1"], "--limit", "0 or more"),
+    (["query", "--limit", "-1"], "--limit", "1 or more"),
+    (["query", "--limit", "0"], "--limit", "1 or more"),
+    (["index", "--limit", "0"], "--limit", "1 or more"),
     (["faces", "scan", "--input-dir", "x", "--limit", "-1"], "--limit", "0 or more"),
     (["faces", "scan", "--input-dir", "x", "-j", "-1"], "--jobs", "0 or more"),
-    (["index", "--limit", "-1"], "--limit", "0 or more"),
+    (["index", "--limit", "-1"], "--limit", "1 or more"),
     (["events", "list", "--limit", "-1"], "--limit", "0 or more"),
     (["search", "q", "--top", "0"], "--top", "1 or more"),
     (["insights", "--top", "0"], "--top", "1 or more"),
@@ -698,7 +700,8 @@ def test_boundary_values_stay_valid(argv, attr, value):
         assert isinstance(getattr(ns, attr), str)
 
 
-def test_run_limit_help_says_zero_means_no_limit(capsys):
+def test_run_limit_help_says_zero_means_no_limit(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "200")  # argparse wraps help text to the terminal width
     with pytest.raises(SystemExit):
         _parse("run", "--help")
-    assert "0 = no limit" in capsys.readouterr().out
+    assert "0 = no limit" in " ".join(capsys.readouterr().out.split())
