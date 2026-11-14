@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 DESIGN_CSS = """
 :root{--bg:#f5f5f7;--surface:#fff;--border:rgba(0,0,0,.08);
       --accent:#0071e3;--accent-h:#0077ed;--danger:#ff3b30;--warn:#ff9f0a;--ok:#34c759;
@@ -131,7 +133,8 @@ NAV_STYLES = DESIGN_CSS
 
 MODAL_HTML = (
     '<div id="modal-overlay" class="modal-overlay" onclick="closeModal()">'
-    '<div class="modal-box" onclick="event.stopPropagation()">'
+    '<div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title" '
+    'aria-describedby="modal-sub" onclick="event.stopPropagation()">'
     '<div class="modal-title" id="modal-title"></div>'
     '<p class="modal-sub" id="modal-sub"></p>'
     '<div id="modal-field" style="margin-bottom:4px"></div>'
@@ -142,7 +145,18 @@ MODAL_HTML = (
 )
 
 MODAL_JS = """<script>
+// Keyboard and screen-reader behaviour: focus moves into the dialog when it
+// opens and back to whatever opened it when it closes; Escape closes it; Tab
+// stays inside it while it is open.
+let _modalReturnFocus = null;
+function _modalFocusables() {
+  const box = document.querySelector('#modal-overlay .modal-box');
+  return box ? [...box.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )].filter(el => !el.disabled && el.offsetParent !== null) : [];
+}
 function openModal(title, sub, fieldHtml, confirmLabel, confirmCls, onConfirm) {
+  _modalReturnFocus = document.activeElement;
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-sub').textContent = sub;
   document.getElementById('modal-sub').classList.remove('modal-error');
@@ -152,10 +166,28 @@ function openModal(title, sub, fieldHtml, confirmLabel, confirmCls, onConfirm) {
   btn.className = 'btn btn-sm ' + (confirmCls || 'btn-primary');
   btn.onclick = onConfirm;
   document.getElementById('modal-overlay').classList.add('open');
+  const first = _modalFocusables()[0];
+  if (first) first.focus();
 }
 function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('open');
+  const overlay = document.getElementById('modal-overlay');
+  const wasOpen = overlay.classList.contains('open');
+  overlay.classList.remove('open');
+  const back = _modalReturnFocus;
+  _modalReturnFocus = null;
+  if (wasOpen && back && back.isConnected && typeof back.focus === 'function') back.focus();
 }
+document.addEventListener('keydown', (e) => {
+  const overlay = document.getElementById('modal-overlay');
+  if (!overlay || !overlay.classList.contains('open')) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
+  if (e.key !== 'Tab') return;
+  const items = _modalFocusables();
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 </script>"""
 
 
@@ -260,6 +292,17 @@ function renderEmpty(target, title, hint, command) {
   host.appendChild(box);
   return box;
 }
+// Makes a non-button element (a thumbnail, a placeholder) reachable with Tab
+// and activatable with Enter or Space, announced as a button.
+function makeActivatable(el, label, onActivate) {
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  if (label) el.setAttribute('aria-label', label);
+  el.addEventListener('click', onActivate);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(e); }
+  });
+}
 function showModalError(message) {
   const sub = document.getElementById('modal-sub');
   if (!sub) return;
@@ -290,7 +333,7 @@ def render_nav(active: str, status_html: str = "") -> str:
         f'<a class="nav-version" href="/about" title="About / wiki / version" '
         f'data-version="{_ver}">v{_ver}</a>'
     )
-    return (
+    html = (
         '<nav class="nav">'
         '<span class="nav-logo">pyimgtag</span>'
         f'<a class="{cls("dashboard")}" href="/">Dashboard</a>'
@@ -311,4 +354,8 @@ def render_nav(active: str, status_html: str = "") -> str:
         f"{status}"
         f"{version_link}"
         "</nav>" + API_JS
+    )
+    # Screen readers announce the active link as the current page.
+    return re.sub(
+        r'(class="nav-link active" href="[^"]*")', r'\1 aria-current="page"', html, count=1
     )

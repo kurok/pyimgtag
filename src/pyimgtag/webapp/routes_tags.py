@@ -42,6 +42,7 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 __NAV__
+<main id="main">
 __MODAL_HTML__
 __MODAL_JS__
 <div class="page-hdr">
@@ -49,7 +50,7 @@ __MODAL_JS__
   <span id="status" class="page-meta">Loading\u2026</span>
 </div>
 <div class="tags-toolbar">
-  <input class="search-inp" id="search" placeholder="Filter tags\u2026"
+  <input class="search-inp" id="search" aria-label="Filter tags" placeholder="Filter tags\u2026"
          oninput="filterTags(this.value)">
 </div>
 <div id="list"></div>
@@ -122,7 +123,7 @@ function render(tags) {
       openModal(
         'Rename tag',
         'Renaming "' + t.tag + '" will update all ' + t.count + ' images.',
-        '<input class="inp" id="m-inp" />',
+        '<input class="inp" id="m-inp" aria-label="New tag name" />',
         'Rename', 'btn-primary',
         async () => {
           const val = document.getElementById('m-inp').value.trim();
@@ -140,7 +141,7 @@ function render(tags) {
       openModal(
         'Merge tag',
         'Merge "' + t.tag + '" into which tag? The source tag is removed.',
-        '<input class="inp" id="m-inp" placeholder="Target tag" />',
+        '<input class="inp" id="m-inp" aria-label="Merge into tag" placeholder="Target tag" />',
         'Merge', 'btn-primary',
         async () => {
           const val = document.getElementById('m-inp').value.trim();
@@ -181,6 +182,7 @@ function filterTags(q) {
 
 load();
 </script>
+</main>
 </body>
 </html>"""
 

@@ -177,3 +177,17 @@ def test_query_router_missing_fastapi_raises_importerror(tmp_path) -> None:
     with patch.dict("sys.modules", {"fastapi": None}):
         with pytest.raises(ImportError, match="fastapi is required"):
             build_query_router(db)
+
+
+def test_every_query_filter_has_a_label(tmp_path):
+    import re
+
+    db = _seeded_db(tmp_path)
+    app = FastAPI()
+    app.include_router(build_query_router(db, api_base="/query"), prefix="/query")
+    html = TestClient(app).get("/query/").text
+    controls = re.findall(r'<(?:input|select)[^>]*\bid="(f_\w+)"', html)
+    labelled = set(re.findall(r'<label for="(f_\w+)"', html))
+    assert len(controls) == 16
+    assert set(controls) == labelled
+    assert '<main id="main">' in html

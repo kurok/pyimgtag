@@ -39,7 +39,8 @@
     .lightbox.open{display:flex}
     .lightbox img{max-width:95vw;max-height:95vh;object-fit:contain;cursor:default}
     .lightbox-close{position:fixed;top:16px;right:24px;color:#fff;font-size:32px;
-                     cursor:pointer;line-height:1;user-select:none}
+                     cursor:pointer;line-height:1;user-select:none;background:none;
+                     border:none;padding:0;font-family:inherit}
     .img-judge{position:absolute;top:8px;right:8px;font-size:13px;font-weight:700;
                padding:4px 10px;border-radius:12px;background:rgba(0,0,0,.55);
                color:#fff;letter-spacing:.4px;pointer-events:none;
@@ -57,6 +58,7 @@
 </head>
 <body>
 {{ nav }}
+<main id="main">
 <div class="toolbar">
   <label class="ctrl-label">Min rating
     <input id="minRating" type="number" min="1" max="10" step="1"
@@ -98,9 +100,9 @@
   <button id="nextBtn" onclick="nextPage()">Next &#8594;</button>
 </div>
 
-<div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
+<div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Photo viewer" onclick="closeLightbox(event)">
   <img id="lightboxImg" alt="" />
-  <span class="lightbox-close" onclick="closeLightbox(event)">&times;</span>
+  <button type="button" class="lightbox-close" aria-label="Close" onclick="closeLightbox(event)">&times;</button>
 </div>
 <script>
 let _offset = 0, _total = 0;
@@ -174,6 +176,19 @@ function setRating() {
 function prevPage() { _offset = Math.max(0, _offset - PAGE); load(); }
 function nextPage() { _offset += PAGE; load(); }
 
+// Focus goes to the Close button when the viewer opens and back to the
+// thumbnail that opened it when it closes.
+let _lightboxReturn = null;
+function _lightboxOpened() {
+  _lightboxReturn = document.activeElement;
+  const close = document.querySelector('#lightbox .lightbox-close');
+  if (close) close.focus();
+}
+function _lightboxClosed() {
+  const back = _lightboxReturn;
+  _lightboxReturn = null;
+  if (back && back.isConnected && typeof back.focus === 'function') back.focus();
+}
 function openLightbox(path) {
   const lb = document.getElementById('lightbox');
   const img = document.getElementById('lightboxImg');
@@ -182,10 +197,12 @@ function openLightbox(path) {
   // succeeds for any judged image regardless of which page opened it.
   img.src = '/review/original?path=' + encodeURIComponent(path);
   lb.classList.add('open');
+  _lightboxOpened();
 }
 function closeLightbox(e) {
   if (e && e.target && e.target.tagName === 'IMG') return;
   document.getElementById('lightbox').classList.remove('open');
+  _lightboxClosed();
   document.getElementById('lightboxImg').removeAttribute('src');
 }
 window.addEventListener('keydown', e => {
@@ -210,13 +227,15 @@ function renderGrid(items) {
     // request value).
     thumbEl.src = '/review/thumbnail?path=' +
                   encodeURIComponent(img.file_path) + '&size=400';
-    thumbEl.addEventListener('click', () => openLightbox(img.file_path));
+    makeActivatable(thumbEl, 'Open ' + (img.file_name || 'photo'),
+                    () => openLightbox(img.file_path));
     thumbEl.onerror = () => {
       const ph = document.createElement('div');
       ph.className = 'img-thumb-fallback';
       ph.title = img.file_path || '';
       ph.textContent = img.file_name || 'thumbnail unavailable';
-      ph.addEventListener('click', () => openLightbox(img.file_path));
+      makeActivatable(ph, 'Open ' + (img.file_name || 'photo'),
+                      () => openLightbox(img.file_path));
       if (thumbEl.parentNode) thumbEl.parentNode.replaceChild(ph, thumbEl);
     };
     thumbWrap.appendChild(thumbEl);
@@ -293,5 +312,6 @@ function renderGrid(items) {
 
 load();
 </script>
+</main>
 </body>
 </html>

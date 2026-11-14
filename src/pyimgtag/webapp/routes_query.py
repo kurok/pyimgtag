@@ -69,58 +69,59 @@ _HTML_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
 __NAV__
+<main id="main">
 <div class="page-hdr">
   <h1 class="page-title">Query</h1>
 </div>
 <div class="filter-card">
   <div class="filter-row">
-    <div class="field"><label>Tag</label>
+    <div class="field"><label for="f_tag">Tag</label>
       <input id="f_tag" type="text" placeholder="e.g. sunset"></div>
-    <div class="field"><label>Has text</label>
+    <div class="field"><label for="f_text">Has text</label>
       <select id="f_text">
         <option value="">any</option>
         <option value="true">yes</option>
         <option value="false">no</option>
       </select></div>
-    <div class="field"><label>Cleanup</label>
+    <div class="field"><label for="f_cleanup">Cleanup</label>
       <select id="f_cleanup">
         <option value="">any</option>
         <option value="delete">delete</option>
         <option value="review">review</option>
         <option value="keep">keep</option>
       </select></div>
-    <div class="field"><label>Category</label>
+    <div class="field"><label for="f_cat">Category</label>
       <input id="f_cat" type="text" placeholder="e.g. landscape"></div>
-    <div class="field"><label>City</label>
+    <div class="field"><label for="f_city">City</label>
       <input id="f_city" type="text" placeholder="e.g. Kyiv"></div>
-    <div class="field"><label>Country</label>
+    <div class="field"><label for="f_country">Country</label>
       <input id="f_country" type="text" placeholder="e.g. UA"></div>
-    <div class="field"><label>Status</label>
+    <div class="field"><label for="f_status">Status</label>
       <select id="f_status">
         <option value="">any</option>
         <option value="ok">ok</option>
         <option value="error">error</option>
       </select></div>
-    <div class="field"><label>Bbox</label>
+    <div class="field"><label for="f_bbox">Bbox</label>
       <input id="f_bbox" type="text" size="26" placeholder="lat1,lon1,lat2,lon2"
              title="Geographic box; handed over by the Map page's Show as grid"></div>
-    <div class="field"><label>Year</label>
+    <div class="field"><label for="f_year">Year</label>
       <input id="f_year" type="text" size="6" placeholder="2024"></div>
-    <div class="field"><label>Month</label>
+    <div class="field"><label for="f_month">Month</label>
       <input id="f_month" type="text" size="8" placeholder="2024-03"></div>
-    <div class="field"><label>Day</label>
+    <div class="field"><label for="f_day">Day</label>
       <input id="f_day" type="text" size="11" placeholder="2024-03-17"></div>
-    <div class="field"><label>Judge ≥</label>
+    <div class="field"><label for="f_min_judge">Judge ≥</label>
       <input id="f_min_judge" type="number" min="1" max="10" placeholder="1-10"></div>
-    <div class="field"><label>Judge ≤</label>
+    <div class="field"><label for="f_max_judge">Judge ≤</label>
       <input id="f_max_judge" type="number" min="1" max="10" placeholder="1-10"></div>
-    <div class="field"><label>Judged</label>
+    <div class="field"><label for="f_judged">Judged</label>
       <select id="f_judged">
         <option value="">any</option>
         <option value="true">scored</option>
         <option value="false">not scored</option>
       </select></div>
-    <div class="field"><label>Sort</label>
+    <div class="field"><label for="f_sort">Sort</label>
       <select id="f_sort">
         <option value="path_asc">Path (A→Z)</option>
         <option value="path_desc">Path (Z→A)</option>
@@ -131,7 +132,7 @@ __NAV__
         <option value="judge_desc">Judge score (high→low)</option>
         <option value="judge_asc">Judge score (low→high)</option>
       </select></div>
-    <div class="field"><label>Limit</label>
+    <div class="field"><label for="f_limit">Limit</label>
       <input id="f_limit" type="number" value="100" min="1" max="5000"></div>
     <button class="btn btn-primary" onclick="search()">Search</button>
   </div>
@@ -424,6 +425,7 @@ function hideHoverThumb() {
   if (any) search();
 })();
 </script>
+</main>
 </body>
 </html>"""
 
