@@ -122,8 +122,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
     @router.get("/persons/{person_id}")
     async def person_detail(person_id: int):
-        persons = await asyncio.to_thread(db.get_persons)
-        if not any(p.person_id == person_id for p in persons):
+        if not await asyncio.to_thread(db.person_exists, person_id):
             # The person was deleted or re-clustered away since the grid was
             # rendered (auto-clustering deletes and recreates persons, so cards
             # can point at ids that no longer exist). Bounce back to the faces
@@ -218,8 +217,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
 
     @router.get("/api/persons/{person_id}")
     async def get_person(person_id: int) -> dict:
-        persons = await asyncio.to_thread(db.get_persons)
-        p = next((p for p in persons if p.person_id == person_id), None)
+        p = await asyncio.to_thread(db.get_person, person_id)
         if p is None:
             raise HTTPException(status_code=404, detail="Person not found")
         return {
@@ -246,15 +244,14 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         Response: ``{"total": N, "items": [...]}``.
         """
         limit = min(max(limit, 1), 200)
-        persons = await asyncio.to_thread(db.get_persons)
-        if not any(p.person_id == person_id for p in persons):
+        if not await asyncio.to_thread(db.person_exists, person_id):
             raise HTTPException(status_code=404, detail="Person not found")
-        faces = await asyncio.to_thread(db.get_faces_for_person, person_id)
         # Best matches first so page 1 shows the hero + strongest faces, and
-        # pagination order is stable across pages.
-        faces.sort(key=lambda f: f.get("confidence") or 0.0, reverse=True)
-        total = len(faces)
-        page = faces[offset : offset + limit]
+        # pagination order is stable across pages; paged and counted in SQL.
+        total = await asyncio.to_thread(db.count_faces_for_person, person_id)
+        page = await asyncio.to_thread(
+            db.get_faces_for_person, person_id, limit, max(offset, 0), True
+        )
 
         items = await _thumbs(page)
         return {"total": total, "items": items}
@@ -275,25 +272,23 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         set for ``source="biggest"``).
         """
         limit = min(max(limit, 1), 200)
-        persons = await asyncio.to_thread(db.get_persons)
-        if not any(p.person_id == person_id for p in persons):
+        offset = max(offset, 0)
+        if not await asyncio.to_thread(db.person_exists, person_id):
             raise HTTPException(status_code=404, detail="Person not found")
 
         source_label = None
+        page: list[dict] = []
+        total = 0
         if source == "biggest":
-            others = [p for p in persons if p.person_id != person_id and p.face_ids]
-            biggest = max(others, key=lambda p: len(p.face_ids), default=None)
-            if biggest is None:
-                faces: list[dict] = []
-            else:
-                faces = await asyncio.to_thread(db.get_faces_for_person, biggest.person_id)
-                source_label = biggest.label or f"Person {biggest.person_id}"
+            biggest = await asyncio.to_thread(db.largest_other_person, person_id)
+            if biggest is not None:
+                big_id, big_label = biggest
+                total = await asyncio.to_thread(db.count_faces_for_person, big_id)
+                page = await asyncio.to_thread(db.get_faces_for_person, big_id, limit, offset, True)
+                source_label = big_label or f"Person {big_id}"
         else:
-            faces = await asyncio.to_thread(db.get_unassigned_faces)
-
-        faces.sort(key=lambda f: f.get("confidence") or 0.0, reverse=True)
-        total = len(faces)
-        page = faces[offset : offset + limit]
+            total = await asyncio.to_thread(db.count_unassigned_faces)
+            page = await asyncio.to_thread(db.get_unassigned_faces, limit, offset, True)
 
         items = await _thumbs(page)
         return {"total": total, "items": items, "source_label": source_label}
@@ -302,9 +297,8 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     async def list_unassigned_faces(offset: int = 0, limit: int = 40) -> dict:
         """Return a page of faces with no person assignment, with thumbnails."""
         limit = min(max(limit, 1), 200)
-        all_faces = await asyncio.to_thread(db.get_unassigned_faces)
-        total = len(all_faces)
-        page = all_faces[offset : offset + limit]
+        total = await asyncio.to_thread(db.count_unassigned_faces)
+        page = await asyncio.to_thread(db.get_unassigned_faces, limit, max(offset, 0))
 
         items = await _thumbs(page)
         return {"total": total, "items": items}
@@ -330,7 +324,7 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
         if person_id is not None:
             # Reject unknown ids so faces are never left pointing at a person
             # row that doesn't exist (a dangling assignment).
-            if not any(p.person_id == person_id for p in db.get_persons()):
+            if not await asyncio.to_thread(db.person_exists, person_id):
                 raise HTTPException(status_code=404, detail="Person not found")
             target_id = person_id
         else:
@@ -339,8 +333,8 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
                 confirmed=bool(label),
                 trusted=bool(label),
             )
-        for fid in face_ids:
-            db.set_person_id(fid, target_id)
+        # One transaction: either every face moves or none does.
+        await asyncio.to_thread(db.set_person_id_many, list(face_ids), target_id)
         return {"ok": True, "person_id": target_id}
 
     @router.get("/api/faces/{face_id}/preview")
@@ -451,9 +445,8 @@ def build_faces_router(db: ProgressDB, api_base: str = "") -> Any:
     async def list_ignored_faces(offset: int = 0, limit: int = 40) -> dict:
         """Return a page of ignored (trashed) faces with thumbnails."""
         limit = min(max(limit, 1), 200)
-        all_faces = await asyncio.to_thread(db.get_ignored_faces)
-        total = len(all_faces)
-        page = all_faces[offset : offset + limit]
+        total = await asyncio.to_thread(db.count_ignored_faces)
+        page = await asyncio.to_thread(db.get_ignored_faces, limit, max(offset, 0))
 
         items = await _thumbs(page)
         return {"total": total, "items": items}

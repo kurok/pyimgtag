@@ -1002,3 +1002,80 @@ def test_faces_lists_do_not_block_other_requests(tmp_path, method, path):
             release,
         )
     assert response.status_code == 200
+
+
+# --- faces and persons are paged and looked up in SQL (#400) -------------------
+
+
+def _faces_app(tmp_path):
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    app = FastAPI()
+    app.include_router(build_faces_router(db, api_base=""))
+    return db, db_path, TestClient(app)
+
+
+def test_person_endpoints_never_load_every_person(tmp_path, monkeypatch):
+    db, db_path, client = _faces_app(tmp_path)
+    (pid,) = _seed_persons_with_faces(db_path, [("Solo", True, 3)])
+    fids = _seed_unassigned_faces(db_path, 2)
+
+    def everyone(*_a, **_k):
+        raise AssertionError("get_persons() loads every person and face")
+
+    monkeypatch.setattr(db, "get_persons", everyone)
+
+    r = client.get(f"/api/persons/{pid}")
+    assert r.status_code == 200 and r.json()["face_count"] == 3
+    r = client.get(f"/api/persons/{pid}/faces?offset=1&limit=1")
+    assert r.status_code == 200 and r.json()["total"] == 3 and len(r.json()["items"]) == 1
+    r = client.get(f"/api/persons/{pid}/candidates?source=biggest")
+    assert r.status_code == 200
+    r = client.post("/api/faces/assign-batch", json={"face_ids": fids, "person_id": pid})
+    assert r.status_code == 200 and r.json() == {"ok": True, "person_id": pid}
+    assert client.get(f"/persons/{pid}").status_code == 200
+    assert client.get("/api/persons/9999").status_code == 404
+    assert client.get("/api/persons/9999/faces").status_code == 404
+    r = client.post("/api/faces/assign-batch", json={"face_ids": fids, "person_id": 9999})
+    assert r.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("path", "method"),
+    [
+        ("/api/faces/unassigned?offset=1&limit=2", "get_unassigned_faces"),
+        ("/api/faces/ignored?offset=1&limit=2", "get_ignored_faces"),
+    ],
+)
+def test_lists_ask_the_database_for_one_page(tmp_path, monkeypatch, path, method):
+    db, db_path, client = _faces_app(tmp_path)
+    _seed_unassigned_faces(db_path, 5)
+    if method == "get_ignored_faces":
+        db._conn.execute("UPDATE faces SET ignored = 1")
+        db._conn.commit()
+    calls: list[tuple] = []
+    real = getattr(db, method)
+
+    def spy(*args, **kwargs):
+        calls.append(args)
+        assert args and args[0] is not None, "the endpoint must pass a limit"
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(db, method, spy)
+    body = client.get(path).json()
+    assert calls == [(2, 1)]
+    assert body["total"] == 5 and len(body["items"]) == 2
+
+
+def test_assign_batch_is_all_or_nothing(tmp_path):
+    db, db_path, client = _faces_app(tmp_path)
+    (pid,) = _seed_persons_with_faces(db_path, [("Solo", True, 1)])
+    fids = _seed_unassigned_faces(db_path, 3)
+    db._conn.execute(
+        f"CREATE TRIGGER no_last BEFORE UPDATE ON faces WHEN NEW.id = {fids[-1]} "
+        "BEGIN SELECT RAISE(ABORT, 'injected'); END"
+    )
+    db._conn.commit()
+    with pytest.raises(Exception, match="injected"):
+        client.post("/api/faces/assign-batch", json={"face_ids": fids, "person_id": pid})
+    assert db.count_unassigned_faces() == 3
