@@ -195,7 +195,7 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
         ImportError: If fastapi is not installed.
     """
     try:
-        from fastapi import APIRouter, Body
+        from fastapi import APIRouter, Body, HTTPException
         from fastapi.responses import HTMLResponse
         from pydantic import BaseModel
     except ImportError as exc:
@@ -216,6 +216,16 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
 
     router = APIRouter()
 
+    def _check(source: str, target: str | None = None) -> None:
+        """404 for an unknown tag, 422 for a change that can never do anything."""
+        from pyimgtag.tag_changes import TagChangeError, check_tag_change
+
+        try:
+            check_tag_change(db.get_tag_counts(), source, target)
+        except TagChangeError as exc:
+            status = 404 if exc.kind == "not_found" else 422
+            raise HTTPException(status_code=status, detail=str(exc)) from None
+
     @router.get("/", response_class=HTMLResponse)
     async def index() -> str:
         return render_tags_html(api_base)
@@ -227,6 +237,7 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
 
     async def rename_tag(body: _RenameBody = Body(...)) -> dict:
         # Tag mutations rewrite every tagged row: run them off the event loop.
+        await asyncio.to_thread(_check, body.old_tag, body.new_tag)
         count = await asyncio.to_thread(db.rename_tag, body.old_tag, body.new_tag)
         return {"ok": True, "count": count}
 
@@ -234,6 +245,7 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
     router.post("/api/tags/rename")(rename_tag)
 
     async def merge_tags(body: _MergeBody = Body(...)) -> dict:
+        await asyncio.to_thread(_check, body.source_tag, body.target_tag)
         count = await asyncio.to_thread(db.merge_tags, body.source_tag, body.target_tag)
         return {"ok": True, "count": count}
 
@@ -241,6 +253,7 @@ def build_tags_router(db: "ProgressDB", api_base: str = "") -> Any:
     router.post("/api/tags/merge")(merge_tags)
 
     async def delete_tag(body: _DeleteBody = Body(...)) -> dict:
+        await asyncio.to_thread(_check, body.tag)
         count = await asyncio.to_thread(db.delete_tag, body.tag)
         return {"ok": True, "count": count}
 

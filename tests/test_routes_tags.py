@@ -137,7 +137,9 @@ def test_tag_mutations_do_not_block_other_requests(tmp_path, method, url, body):
     from tests.e2e_support import assert_health_stays_responsive
 
     db_path = tmp_path / "progress.db"
-    ProgressDB(db_path=db_path).close()
+    img = tmp_path / "a.jpg"
+    with ProgressDB(db_path=db_path) as seeded:  # tag "a" must exist (#399)
+        seeded.mark_done(img, ImageResult(file_path=str(img), file_name="a.jpg", tags=["a"]))
     entered, release = threading.Event(), threading.Event()
 
     def slow_mutation(self, *args):
@@ -154,3 +156,69 @@ def test_tag_mutations_do_not_block_other_requests(tmp_path, method, url, body):
         )
     assert response.status_code == 200
     assert response.json() == {"ok": True, "count": 7}
+
+
+# --- unknown tags and no-op changes are refused (#399) ------------------------
+
+
+def _api(tmp_path):
+    db = _seeded_db(tmp_path)
+    app = FastAPI()
+    app.include_router(build_tags_router(db, api_base="/tags"), prefix="/tags")
+    return db, TestClient(app)
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("/tags/api/tags/rename", {"old_tag": "nosuch", "new_tag": "x"}),
+        ("/tags/api/tags/merge", {"source_tag": "nosuch", "target_tag": "sunset"}),
+        ("/tags/api/tags/delete", {"tag": "nosuch"}),
+    ],
+)
+def test_an_unknown_tag_is_404(tmp_path, path, body):
+    db, client = _api(tmp_path)
+    r = client.post(path, json=body)
+    assert r.status_code == 404
+    assert r.json() == {"detail": "no tag 'nosuch'"}
+    assert dict(db.get_tag_counts()) == {"ocean": 1, "sunset": 1}
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "detail"),
+    [
+        ("/tags/api/tags/rename", {"old_tag": "sunset", "new_tag": ""}, "new tag name is empty"),
+        ("/tags/api/tags/rename", {"old_tag": "sunset", "new_tag": "  "}, "new tag name is empty"),
+        (
+            "/tags/api/tags/rename",
+            {"old_tag": "sunset", "new_tag": "SUNSET"},
+            "source and target are the same tag",
+        ),
+        (
+            "/tags/api/tags/merge",
+            {"source_tag": "ocean", "target_tag": "ocean"},
+            "source and target are the same tag",
+        ),
+        ("/tags/api/tags/delete", {"tag": " "}, "tag name is empty"),
+    ],
+)
+def test_a_no_op_change_is_422(tmp_path, path, body, detail):
+    db, client = _api(tmp_path)
+    r = client.post(path, json=body)
+    assert r.status_code == 422
+    assert r.json() == {"detail": detail}
+    assert dict(db.get_tag_counts()) == {"ocean": 1, "sunset": 1}
+
+
+def test_a_real_change_keeps_its_response_shape(tmp_path):
+    db, client = _api(tmp_path)
+    assert client.post(
+        "/tags/api/tags/rename", json={"old_tag": "Sunset", "new_tag": "dusk"}
+    ).json() == {"ok": True, "count": 1}
+    assert client.post(
+        "/tags/api/tags/merge", json={"source_tag": "dusk", "target_tag": "ocean"}
+    ).json() == {"ok": True, "count": 1}
+    assert client.post("/tags/api/tags/delete", json={"tag": "ocean"}).json() == {
+        "ok": True,
+        "count": 1,
+    }
