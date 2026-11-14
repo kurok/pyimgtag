@@ -34,6 +34,7 @@
   <button id="stopBtn" class="ctrl-btn" style="color:var(--danger);border-color:var(--danger)" disabled>Stop</button>
 </div>
 <div id="current">(no active item)</div>
+<div id="idle-empty" style="padding:0 32px"></div>
 <div class="dash-grid" id="counters"></div>
 <div id="error"></div>
 <div style="padding:20px 32px 0">
@@ -59,10 +60,50 @@
   const unpauseBtn = document.getElementById('unpauseBtn');
   const stopBtn = document.getElementById('stopBtn');
 
+  // Idle: say so, with the library size and where to look next. The total
+  // is fetched once per idle spell, not on every 1.5 s poll.
+  const idleEl = document.getElementById('idle-empty');
+  let idleShown = false;
+  async function showIdle() {
+    if (idleShown) return;
+    idleShown = true;
+    currentEl.style.display = 'none';  // the card says it; no "(no active item)" too
+    const box = renderEmpty(idleEl, 'No run in progress',
+                            'Start one from the terminal, for example',
+                            'pyimgtag run --input-dir <folder>');
+    const more = document.createElement('p');
+    const total = document.createElement('span');
+    total.className = 'idle-total';
+    more.appendChild(total);
+    more.appendChild(document.createTextNode(' Browse the '));
+    const review = document.createElement('a');
+    review.href = '/review';
+    review.textContent = 'Review';
+    more.appendChild(review);
+    more.appendChild(document.createTextNode(' page or the library '));
+    const insights = document.createElement('a');
+    insights.href = '/insights';
+    insights.textContent = 'Insights';
+    more.appendChild(insights);
+    more.appendChild(document.createTextNode('.'));
+    box.appendChild(more);
+    try {
+      const stats = await apiFetch('/review/api/stats');
+      total.textContent = 'Library: ' + stats.total + ' photo(s) tagged.';
+    } catch (_e) { /* the standalone dashboard has no library API: leave it out */ }
+  }
+  function hideIdle() {
+    if (!idleShown) return;
+    idleShown = false;
+    idleEl.innerHTML = '';
+    currentEl.style.display = '';
+  }
+
   async function refresh() {
     try {
       const d = await apiFetch('/api/run/current');
       if (!d.active) {
+        showIdle();
         stateEl.textContent = 'idle';
         stateEl.className = 'pill-state';
         cmdEl.textContent = '';
@@ -75,6 +116,7 @@
         stopBtn.disabled = true;
         return;
       }
+      hideIdle();
       // `watch` idles between poll cycles while still "running" — label it so
       // the user can tell a live daemon from a batch run.
       const isWatching = d.command === 'watch' && (d.state || 'running') === 'running';

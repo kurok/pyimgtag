@@ -117,6 +117,13 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
             font-size:13px;line-height:1.4}
 .load-error-text{flex:1}
 .modal-sub.modal-error{color:var(--danger)}
+.empty-state{background:var(--surface);border-radius:var(--radius-md);padding:48px;
+             margin:16px 0;text-align:center;color:var(--muted);box-shadow:var(--shadow-sm);
+             grid-column:1/-1}
+.empty-state p:first-child{font-size:17px;color:var(--text);margin-bottom:8px}
+.empty-state code{font-family:ui-monospace,'SF Mono',monospace;font-size:12px;
+                  background:var(--bg);padding:2px 6px;border-radius:4px}
+.empty-state a{color:var(--accent)}
 """
 
 # Backward-compatibility alias — used by the routes_*.py page templates (__NAV_STYLES__).
@@ -226,6 +233,32 @@ function showLoadError(target, message, retry) {
     box.appendChild(btn);
   }
   host.appendChild(box);
+}
+// Replaces the contents of *target* with an empty-state card: a title and,
+// optionally, a hint line ending in a command to run. Built with
+// textContent only. ``empty`` is the class pages and tests already use;
+// ``empty-state`` carries the shared look.
+function renderEmpty(target, title, hint, command) {
+  const host = typeof target === 'string' ? document.getElementById(target) : target;
+  if (!host) return null;
+  host.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'empty empty-state';
+  const head = document.createElement('p');
+  head.textContent = title;
+  box.appendChild(head);
+  if (hint || command) {
+    const line = document.createElement('p');
+    if (hint) line.appendChild(document.createTextNode(hint + (command ? ' ' : '')));
+    if (command) {
+      const code = document.createElement('code');
+      code.textContent = command;
+      line.appendChild(code);
+    }
+    box.appendChild(line);
+  }
+  host.appendChild(box);
+  return box;
 }
 function showModalError(message) {
   const sub = document.getElementById('modal-sub');

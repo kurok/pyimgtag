@@ -112,6 +112,7 @@
 </div>
 <script>
 let _offset = 0, _total = 0, _cleanup = null, _status = null;
+let _libraryTotal = null;  // from /api/stats; null until it arrives
 let _sort = 'path_asc';
 let PAGE = 50;
 
@@ -119,6 +120,7 @@ async function loadStats() {
   const stats = document.getElementById('stats');
   try {
     const d = await apiFetch('{{ api_base }}/api/stats');
+    _libraryTotal = d.total;
     stats.textContent = d.total + ' images · ' + d.error + ' errors';
   } catch (err) {
     stats.textContent = 'Stats unavailable';
@@ -165,7 +167,25 @@ async function load() {
   document.getElementById('prevBtnTop').disabled = atFirst;
   document.getElementById('nextBtn').disabled = atLast;
   document.getElementById('nextBtnTop').disabled = atLast;
-  renderGrid(d.items || []);
+  const items = d.items || [];
+  // An edit or another tab shrank the result set under a later page: step
+  // back to the last page that has rows instead of calling it empty.
+  if (!items.length && !_singleFile && _total > 0 && _offset >= _total) {
+    _offset = (Math.ceil(_total / PAGE) - 1) * PAGE;
+    return load();
+  }
+  renderGrid(items);
+  if (!items.length) {
+    // Filters (cleanup / status pills, ?file=) narrowed an existing library
+    // to nothing, or there is nothing tagged at all.
+    const filtered = _cleanup || _status || _singleFile;
+    if (filtered && _libraryTotal !== 0) {
+      renderEmpty('grid', 'No photos match these filters', 'Clear a filter to see the rest.');
+    } else {
+      renderEmpty('grid', 'No photos tagged yet', 'Tag a folder of photos first:',
+                  'pyimgtag run --input-dir <folder>');
+    }
+  }
 }
 
 function setFilter(val, btn) {

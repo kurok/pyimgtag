@@ -142,7 +142,20 @@ async function load() {
   document.getElementById('prevBtnTop').disabled = atFirst;
   document.getElementById('nextBtn').disabled = atLast;
   document.getElementById('nextBtnTop').disabled = atLast;
-  renderGrid(d.items || []);
+  const items = d.items || [];
+  if (!items.length && _total > 0 && _offset >= _total) {
+    _offset = (Math.ceil(_total / PAGE) - 1) * PAGE;
+    return load();
+  }
+  renderGrid(items);
+  if (!items.length) {
+    if (_minRating != null || _maxRating != null) {
+      renderEmpty('grid', 'No photos match these filters', 'Widen the rating range.');
+    } else {
+      renderEmpty('grid', 'No photos scored yet', 'Score a folder of photos first:',
+                  'pyimgtag judge --input-dir <folder>');
+    }
+  }
 }
 
 function setSort(val) { _sort = val; _offset = 0; load(); }

@@ -186,7 +186,11 @@ async function search() {
   }
   count.textContent = rows.length + ' results';
   wrap.innerHTML = '';
-  if (!rows.length) return;
+  if (!rows.length) {
+    renderEmpty(wrap, 'No images match these filters',
+                'Loosen or clear a filter and search again.');
+    return;
+  }
 
   const tbl = document.createElement('table');
   tbl.className = 'tbl';
