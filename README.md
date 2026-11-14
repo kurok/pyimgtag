@@ -1309,14 +1309,16 @@ code, so cron jobs, `watch` wrappers and CI can tell a dead run from a quiet one
 | Code | Meaning |
 |---|---|
 | 0 | at least one item succeeded, or nothing needed processing |
-| 1 | interrupted, or a setup/usage error detected by the command (for example Ollama not reachable, or a missing `--db` for a read-only command) |
+| 1 | interrupted, or a setup error detected by the command (for example Ollama not reachable, or the model not pulled) |
 | 2 | argparse usage error (an unknown flag, a missing required argument) |
 | 3 | at least one item was attempted and **every** attempt failed at the model |
 
-A partial failure (some images tagged, some not) is still `0`; the summary's
-`Model failures` line counts them. When `judge` cannot score an image it says
-why, e.g. `judge failed (request failed: HTTP 500), skipping`. `pyimgtag watch`
-keeps looping through cycles where every call failed.
+A partial failure (some images tagged, some not) is still `0`; for `run` the
+summary's `Model failures` line counts them. When `judge` cannot score an image
+it says why, e.g. `judge failed (request failed: HTTP 500), skipping`. A video
+clip that cannot be decoded (no ffmpeg) counts as a failed attempt too, so a run
+over only undecodable clips also exits `3`. `pyimgtag watch` keeps looping
+through cycles where every call failed.
 
 ### Sample verbose output
 

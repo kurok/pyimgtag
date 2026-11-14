@@ -255,9 +255,14 @@ class BaseCloudClient(JudgeErrorMixin, ABC):
         except (OSError, ValueError, RuntimeError):
             self._judge_failed(JUDGE_IMAGE_UNREADABLE)
             return None
+        self._judge_ok()  # a reason left by an earlier call must not leak into this one
         text = self._call(_JUDGE_PROMPT, img_b64, on_error_msg=None)
         if not isinstance(text, str):
-            # _call recorded the request or response-shape reason.
+            # _call records request and response-shape failures; a reply with
+            # no text at all (e.g. OpenAI ``content: null`` on a refusal or a
+            # content filter) reaches here with nothing recorded.
+            if self.last_error is None:
+                self._judge_failed(JUDGE_UNPARSEABLE)
             return None
         scores = _parse_judge_response(text)
         if scores is None:

@@ -634,3 +634,18 @@ class TestCloudJudgeLastError:
         worker.join(5)
         assert seen == [None]
         assert client.last_error == "request failed: timed out"
+
+
+def test_a_reply_with_no_text_still_gets_a_reason(jpg):
+    """OpenAI ``content: null`` (refusal / filter) must not leave a stale reason."""
+    client = OpenAIClient(api_key="x")
+    with patch.object(client._session, "post", side_effect=requests.Timeout("slow")):
+        client.judge_image(jpg)
+    assert client.last_error == "request failed: timed out"
+
+    resp = MagicMock(status_code=200, headers={})
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"choices": [{"message": {"content": None}}]}
+    with patch.object(client._session, "post", return_value=resp):
+        assert client.judge_image(jpg) is None
+    assert client.last_error == "response could not be parsed"

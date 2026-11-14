@@ -2751,7 +2751,7 @@ class TestHydrateGeocodeFailure:
 
 
 class TestRunExitCodeContract:
-    def _run(self, tmp_path: Path, results):
+    def _run(self, tmp_path: Path, results, jobs: int = 1):
         from pyimgtag.commands.run import cmd_run
         from pyimgtag.models import TagResult
 
@@ -2761,16 +2761,24 @@ class TestRunExitCodeContract:
             f.write_bytes(b"\xff\xd8\xff\xd9")
             files.append(f)
         args = _base_args(tmp_path)
+        args.jobs = jobs
+        args.max_rps = None
+        args.include_video = False
+        bad_names = {f"p{i}.jpg" for i, bad in enumerate(results) if bad}
+
+        def tag_image(path, context=None):
+            # Keyed by file, not call order: with -j N calls arrive in any order.
+            if Path(path).name in bad_names:
+                return TagResult(error="Ollama request failed: boom")
+            return _ok_tag()
+
         with (
             patch("pyimgtag.commands.run.check_ollama", return_value=(True, "up")),
             patch("pyimgtag.commands.run.OllamaClient") as cls,
             patch("pyimgtag.commands.run.scan_directory", return_value=files),
             patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
         ):
-            cls.return_value.tag_image.side_effect = [
-                TagResult(error="Ollama request failed: boom") if bad else _ok_tag()
-                for bad in results
-            ]
+            cls.return_value.tag_image.side_effect = tag_image
             cls.return_value.prompt_builder = None
             return cmd_run(args, MagicMock())
 
@@ -2785,6 +2793,12 @@ class TestRunExitCodeContract:
 
     def test_all_succeeding_exits_0(self, tmp_path: Path) -> None:
         assert self._run(tmp_path, [False, False]) == 0
+
+    def test_concurrent_all_failing_exits_3(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, [True, True, True, True], jobs=2) == 3
+
+    def test_concurrent_partial_failure_exits_0(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, [True, False, True, True], jobs=2) == 0
 
 
 def test_exit_code_for_table() -> None:
