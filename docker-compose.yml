@@ -53,7 +53,7 @@ services:
       # Share the cache with the CLI service (geocoder results + progress DB)
       - ${CACHE_DIR:-pyimgtag-cache}:/home/pyimgtag/.cache/pyimgtag
     environment:
-      PYIMGTAG_DB_PATH: /home/pyimgtag/.cache/pyimgtag/progress.db
+      PYIMGTAG_DB: /home/pyimgtag/.cache/pyimgtag/progress.db
 
 volumes:
   pyimgtag-cache:

@@ -1661,3 +1661,88 @@ def test_events_writers_still_create_a_missing_database(tmp_path, monkeypatch):
     main(["events", "detect", "--db", str(db_path)])
 
     assert db_path.is_file()
+
+
+# --- the CLI honours PYIMGTAG_DB (#405) ----------------------------------------
+
+
+def _seed_two(db_path):
+    from pyimgtag.models import ImageResult as _IR
+
+    with ProgressDB(db_path) as db:
+        for name in ("a.jpg", "b.jpg"):
+            db.mark_done(
+                db_path.parent / name, _IR(file_path=str(db_path.parent / name), file_name=name)
+            )
+
+
+@pytest.fixture
+def _home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    return tmp_path / "home" / ".cache" / "pyimgtag" / "progress.db"
+
+
+def test_env_db_is_used_when_no_flag(tmp_path, monkeypatch, capsys, _home):
+    env_db = tmp_path / "env.db"
+    _seed_two(env_db)
+    monkeypatch.setenv("PYIMGTAG_DB", str(env_db))
+
+    assert main(["status"]) == 0
+
+    assert "Progress: 2 / 2" in capsys.readouterr().out
+    assert not _home.exists()
+
+
+def test_flag_beats_env(tmp_path, monkeypatch, capsys, _home):
+    env_db = tmp_path / "env.db"
+    flag_db = tmp_path / "flag.db"
+    _seed_two(env_db)
+    ProgressDB(flag_db).close()
+    monkeypatch.setenv("PYIMGTAG_DB", str(env_db))
+
+    assert main(["status", "--db", str(flag_db)]) == 0
+
+    assert "Progress: 0 / 0" in capsys.readouterr().out
+
+
+def test_empty_env_is_ignored(tmp_path, monkeypatch, capsys, _home):
+    monkeypatch.setenv("PYIMGTAG_DB", "")
+
+    assert main(["status"]) == 0
+
+    assert _home.exists()  # the default location, as with the variable unset
+
+
+def test_a_missing_env_db_is_refused_like_a_missing_flag(tmp_path, monkeypatch, capsys, _home):
+    missing = tmp_path / "typo" / "x.db"
+    monkeypatch.setenv("PYIMGTAG_DB", str(missing))
+
+    assert main(["status"]) == 1
+
+    assert f"no database at {missing}" in capsys.readouterr().err
+    assert not (tmp_path / "typo").exists()
+
+
+def test_a_write_command_creates_the_env_db(tmp_path, monkeypatch, _home):
+    new = tmp_path / "new.db"
+    monkeypatch.setenv("PYIMGTAG_DB", str(new))
+
+    assert main(["reprocess", "--status", "error"]) == 0
+
+    assert new.exists()
+    assert not _home.exists()
+
+
+def test_resolve_db_path_precedence(monkeypatch):
+    from pyimgtag.db_location import resolve_db_path
+
+    monkeypatch.delenv("PYIMGTAG_DB", raising=False)
+    assert resolve_db_path(None) is None
+    assert resolve_db_path("/flag.db") == "/flag.db"
+    monkeypatch.setenv("PYIMGTAG_DB", "/env.db")
+    assert resolve_db_path(None) == "/env.db"
+    assert resolve_db_path("/flag.db") == "/flag.db"
+    monkeypatch.setenv("PYIMGTAG_DB", "")
+    assert resolve_db_path(None) is None

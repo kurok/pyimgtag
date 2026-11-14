@@ -424,7 +424,7 @@ identically for `pyimgtag judge`.
 | `--api-base URL` / `--api-key KEY` | Cloud-API base URL / key (anthropic / openai / gemini) |
 | `--max-dim N` | Max image dimension (default: 1280) |
 | `--timeout N` | Model request timeout in seconds |
-| `--db PATH` | Progress database path |
+| `--db PATH` | Progress database path (default: `$PYIMGTAG_DB`, else `~/.cache/pyimgtag/progress.db`) |
 | `--no-cache` | Skip progress DB, reprocess all |
 | `--skip-existing` | Fully skip unchanged photos already complete in the DB (fastest resume; takes precedence over `--resume-from-db`) |
 | `--resume-from-db` | Reuse cached model results for unchanged files; only re-run local enrichment (EXIF, geocoding) |
@@ -1293,7 +1293,7 @@ pyimgtag judge --input-dir ~/Pictures/exported \
 | `--api-key KEY` | env var | Cloud-API key; defaults to the provider's conventional env var |
 | `--max-dim N` | `1280` | Max image dimension before resize |
 | `--timeout N` | `120` | Request timeout (seconds) |
-| `--db PATH` | `~/.cache/pyimgtag/progress.db` | Progress DB path; judge scores share the same DB as `run` |
+| `--db PATH` | `$PYIMGTAG_DB`, else `~/.cache/pyimgtag/progress.db` | Progress DB path; judge scores share the same DB as `run` |
 | `--skip-judged` | false | Skip images that already have a row in `judge_scores` |
 | `--jobs N` / `-j N` | `1` | Concurrent model requests; `0` = auto. See [Parallel tagging](#parallel-tagging--j) |
 | `--max-rps RPS` | unlimited | Cap model requests per second across all workers |
@@ -1403,6 +1403,7 @@ src/pyimgtag/
   filters.py           Date filter logic
   output_writer.py     JSON/CSV/JSONL output
   progress_db.py       SQLite progress DB with versioned migrations
+  db_location.py       --db / PYIMGTAG_DB resolution
   mcp_server.py        MCP tool surface over the DB (read-only by default, gated writes)
   applescript_writer.py  Apple Photos keyword/description write-back
   _face_dep_check.py   Preflight for face_recognition; auto-downloads model files via _face_model_cache
@@ -1824,7 +1825,7 @@ a default server cannot see them at all. No tool deletes anything.
 | `PYIMGTAG_NO_MIGRATION_BACKUP` | Anything that opens the progress DB | `1` skips the `<db>.bak-v<N>` copy written before an existing database is migrated to a newer schema (see [Database upgrades](#database-upgrades)). |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |
 | `PYIMGTAG_PARSE_ERROR_LOG` | `pyimgtag run` | Path to write JSON-parse error log (opt-in; disabled by default). May contain photo descriptions — do not store in a synced or shared directory. |
-| `PYIMGTAG_DB` | `python -m pyimgtag.webapp` | Override the progress-DB path the standalone webapp opens. |
+| `PYIMGTAG_DB` | Every command with `--db`, and `python -m pyimgtag.webapp` | Progress-DB path to use when `--db` is not given (`--db` wins; an empty value is ignored). Like `--db`, a path from the variable counts as chosen, so read-only commands (`status`, `query`, `tags list`, …) refuse a missing file instead of creating it. `watch --install-service` writes the path into the service as `--db`. |
 | `PYIMGTAG_LOG_LEVEL` | `python -m pyimgtag.webapp` | uvicorn log level (default `info`). |
 | `HOST` / `PORT` | `python -m pyimgtag.webapp` | Bind host / port for the standalone launcher (default `127.0.0.1:8000`). |
 | `PYIMGTAG_SCREENSHOT_DB` | `tests/local/test_webapp_screenshots.py` | Walk the screenshot suite against an existing DB instead of a sandboxed one. |

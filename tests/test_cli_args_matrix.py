@@ -705,3 +705,13 @@ def test_run_limit_help_says_zero_means_no_limit(capsys, monkeypatch):
     with pytest.raises(SystemExit):
         _parse("run", "--help")
     assert "0 = no limit" in " ".join(capsys.readouterr().out.split())
+
+
+@pytest.mark.parametrize(
+    "argv", [["status"], ["run"], ["query"], ["tags", "list"], ["judge"], ["watch"], ["insights"]]
+)
+def test_db_help_names_the_environment_variable(argv, capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        _parse(*argv, "--help")
+    assert "$PYIMGTAG_DB" in " ".join(capsys.readouterr().out.split())

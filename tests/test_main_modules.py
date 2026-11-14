@@ -114,3 +114,22 @@ def test_the_standalone_review_and_faces_apps_are_gone():
 
     assert importlib.util.find_spec("pyimgtag.faces_review_server") is None
     assert not hasattr(review_server, "create_app")
+
+
+@pytest.mark.parametrize(("env", "expected"), [("/data/p.db", "/data/p.db"), ("", None)])
+def test_python_m_webapp_resolves_the_db_through_the_shared_resolver(monkeypatch, env, expected):
+    import importlib
+    from unittest.mock import patch
+
+    # Patch the modules sys.modules holds: other tests re-import webapp
+    # modules, which can leave a stale package attribute behind.
+    entry = importlib.import_module("pyimgtag.webapp.__main__")
+    unified = importlib.import_module("pyimgtag.webapp.unified_app")
+
+    monkeypatch.setenv("PYIMGTAG_DB", env)
+    with (
+        patch.dict(sys.modules, {"uvicorn": MagicMock()}),
+        patch.object(unified, "create_unified_app") as create,
+    ):
+        entry.main()
+    create.assert_called_once_with(db_path=expected)

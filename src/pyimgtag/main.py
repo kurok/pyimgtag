@@ -10,7 +10,9 @@ from typing import Any
 from pyimgtag import __version__
 from pyimgtag.ollama_defaults import DEFAULT_OLLAMA_MODEL, ollama_url_from_env
 
-_DEFAULT_DB_HELP = "Path to progress database (default: ~/.cache/pyimgtag/progress.db)"
+_DEFAULT_DB_HELP = (
+    "Path to progress database (default: $PYIMGTAG_DB if set, else ~/.cache/pyimgtag/progress.db)"
+)
 
 
 # Per-subcommand help. Each entry is (summary, description, epilog):
@@ -1783,6 +1785,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     # The raw argv is what `watch --install-service` bakes into the unit file.
     args._argv = list(argv) if argv is not None else sys.argv[1:]
+    # --db, else $PYIMGTAG_DB, else the default (None) for every subcommand
+    # that takes --db. An env-chosen path counts as named, like --db.
+    if hasattr(args, "db"):
+        from pyimgtag.db_location import resolve_db_path
+
+        args.db = resolve_db_path(args.db)
 
     if args.subcommand is None:
         parser.print_help()

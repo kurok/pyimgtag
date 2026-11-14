@@ -357,6 +357,27 @@ def test_watch_install_uninstall_dispatch(tmp_path):
     un.assert_called_once_with()
 
 
+def test_install_service_bakes_in_a_database_chosen_by_pyimgtag_db(tmp_path, monkeypatch):
+    """The service does not inherit the shell's PYIMGTAG_DB, so --db goes in the unit."""
+    db = str(tmp_path / "lib2.db")
+    monkeypatch.setenv("PYIMGTAG_DB", db)
+    with patch("pyimgtag.service_units.install_service", return_value=0) as inst:
+        assert main(["watch", "--input-dir", str(tmp_path), "--install-service"]) == 0
+    assert inst.call_args.args[0] == [
+        "watch",
+        "--input-dir",
+        str(tmp_path),
+        "--install-service",
+        "--db",
+        db,
+    ]
+    other = str(tmp_path / "flag.db")
+    with patch("pyimgtag.service_units.install_service", return_value=0) as inst:
+        argv = ["watch", "--input-dir", str(tmp_path), "--install-service", f"--db={other}"]
+        assert main(argv) == 0
+    assert inst.call_args.args[0] == argv
+
+
 def test_watch_invalid_vocabulary_is_startup_error(tmp_path, capsys):
     bad = tmp_path / "bad.json"
     bad.write_text("{", encoding="utf-8")
