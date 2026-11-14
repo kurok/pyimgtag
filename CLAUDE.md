@@ -133,8 +133,11 @@ src/pyimgtag/
   face/                Face pipeline subpackage: detection, embedding, clustering, naming,
                        ocr, thumb (detect, embed, cluster, name, OCR, thumbs) and
                        photos_importer (Apple Photos face/people import)
-  review_server.py / faces_review_server.py  FastAPI review and face-management UI servers
+  review_server.py     `serve()` for `pyimgtag review`: a thin wrapper over webapp.serve
   commands/            Per-subcommand handlers (run, judge, db, query, tags, faces, ...)
+  webapp/serve.py      serve_unified(): the one foreground launcher (uvicorn, browser-open
+                       delay, "port in use" -> exit 1) behind `review`, `faces ui` and
+                       `python -m pyimgtag.webapp`
   webapp/              FastAPI dashboard + review/faces/tags/query/judge/insights/map/timeline/
                        dedup UIs; page HTML/CSS/JS lives in webapp/templates/*.html, rendered via
                        Jinja2 (webapp/templating.py). webapp/static/ holds vendored front-end

@@ -1,4 +1,4 @@
-"""Tests for the review UI FastAPI server."""
+"""Route tests for the review pages, mounted at the root (formerly ``review_server.create_app``)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,18 @@ from starlette.testclient import TestClient  # noqa: E402
 
 from pyimgtag.models import ImageResult  # noqa: E402
 from pyimgtag.progress_db import ProgressDB  # noqa: E402
-from pyimgtag.review_server import create_app  # noqa: E402
+from pyimgtag.webapp.routes_review import build_review_router  # noqa: E402
+
+
+def create_app(db_path):
+    """The review routes mounted at the root, as the removed standalone app did (#407)."""
+    from fastapi import FastAPI
+
+    app = FastAPI(title="pyimgtag Review", docs_url=None, redoc_url=None, openapi_url=None)
+    app.include_router(build_review_router(ProgressDB(db_path=db_path), api_base=""))
+    return app
+
+
 from pyimgtag.webapp.routes_review import _make_thumbnail  # noqa: E402
 
 
@@ -337,28 +348,32 @@ class TestReviewServerServe:
         assert opened[0].endswith("/review")
         assert "7777" in opened[0]
 
-    def test_create_app_raises_when_fastapi_missing(self, tmp_path, monkeypatch):
-        """Missing fastapi should surface a helpful ImportError from create_app."""
+    def test_serve_reports_a_missing_fastapi_and_returns_1(self, tmp_path, monkeypatch, capsys):
+        """A missing web dependency is a message and exit code, not a traceback."""
         import builtins
+        import sys
+        import types
 
-        import pytest
+        from pyimgtag.review_server import serve
 
         real_import = builtins.__import__
 
         def fake_import(name, *a, **kw):
             if name == "fastapi" or name.startswith("fastapi."):
-                raise ImportError("gone")
+                raise ImportError("No module named 'fastapi'")
             return real_import(name, *a, **kw)
 
+        fake_uvicorn = types.ModuleType("uvicorn")
+        fake_uvicorn.run = lambda *a, **k: None  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "uvicorn", fake_uvicorn)
         monkeypatch.setattr(builtins, "__import__", fake_import)
-        with pytest.raises(ImportError, match="fastapi and uvicorn are required"):
-            create_app(db_path=str(tmp_path / "p.db"))
+        assert serve(db_path=str(tmp_path / "p.db"), open_browser=False) == 1
+        err = capsys.readouterr().err
+        assert "fastapi and uvicorn are required" in err
+        assert "[review]" in err
 
-    def test_serve_raises_when_uvicorn_missing(self, tmp_path, monkeypatch):
-        """Missing uvicorn should surface a helpful ImportError."""
+    def test_serve_reports_a_missing_uvicorn_and_returns_1(self, tmp_path, monkeypatch, capsys):
         import builtins
-
-        import pytest
 
         from pyimgtag.review_server import serve
 
@@ -370,5 +385,7 @@ class TestReviewServerServe:
             return real_import(name, *a, **kw)
 
         monkeypatch.setattr(builtins, "__import__", fake_import)
-        with pytest.raises(ImportError, match="uvicorn is required"):
-            serve(db_path=str(tmp_path / "p.db"))
+        assert serve(db_path=str(tmp_path / "p.db")) == 1
+        err = capsys.readouterr().err
+        assert "uvicorn is required for the review UI" in err
+        assert "[review]" in err

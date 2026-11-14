@@ -1,28 +1,34 @@
-"""Tests for faces_review_server FastAPI endpoints.
+"""Route tests for the faces pages, mounted at the root.
 
-``build_app`` and ``run_server`` only need fastapi/uvicorn, both of which are
-mocked or imported directly so the success bodies run even when the heavier
-test client stack (httpx) is unavailable in CI. The route-level integration
-tests use Starlette's TestClient and are skipped when httpx is missing.
+These used ``faces_review_server.build_app``, which was dead code and is
+gone (#407); ``build_app`` below mounts the same router the same way. The
+old launcher tests (uvicorn handoff, missing-dependency messages) now live
+with the one shared launcher in ``tests/test_webapp_serve.py``.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import sys
-import unittest.mock
-from types import ModuleType
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 pytest.importorskip("fastapi")
 
-from pyimgtag.faces_review_server import build_app, run_server
 from pyimgtag.models import FaceDetection
 from pyimgtag.progress_db import ProgressDB
 
 _HAS_HTTPX = importlib.util.find_spec("httpx") is not None
+
+
+def build_app(db):
+    """The faces routes mounted at the root, as the removed standalone app did (#407)."""
+    from fastapi import FastAPI
+
+    from pyimgtag.webapp.routes_faces import build_faces_router
+
+    app = FastAPI(title="pyimgtag Faces", docs_url=None, redoc_url=None, openapi_url=None)
+    app.include_router(build_faces_router(db, api_base=""))
+    return app
 
 
 @pytest.fixture()
@@ -44,60 +50,6 @@ class TestBuildApp:
         paths = set(app.openapi().get("paths", {}).keys())
         assert "/api/persons" in paths
         assert app.title == "pyimgtag Faces"
-
-
-class TestRunServer:
-    """run_server should build the app and hand it to uvicorn.run without
-    actually binding a socket."""
-
-    def test_invokes_uvicorn_run(self, db, capsys):
-        fake_uvicorn = ModuleType("uvicorn")
-        fake_uvicorn.run = MagicMock()
-        with patch.dict(sys.modules, {"uvicorn": fake_uvicorn}):
-            run_server(db, host="127.0.0.1", port=8766)
-
-        fake_uvicorn.run.assert_called_once()
-        # The app passed to uvicorn.run is the FastAPI instance.
-        passed_app = fake_uvicorn.run.call_args[0][0]
-        assert passed_app.title == "pyimgtag Faces"
-        # uvicorn.run receives the host/port kwargs.
-        assert fake_uvicorn.run.call_args.kwargs["host"] == "127.0.0.1"
-        assert fake_uvicorn.run.call_args.kwargs["port"] == 8766
-        # The startup banner is printed before the server blocks.
-        assert "Face review UI: http://127.0.0.1:8766/" in capsys.readouterr().out
-
-
-class TestFacesReviewServerMissingDeps:
-    """Regression tests for issue #97: error messages should point at [review]."""
-
-    def test_build_app_missing_fastapi(self, db):
-        """build_app raises ImportError pointing at [review] when fastapi absent."""
-        with unittest.mock.patch.dict(
-            sys.modules,
-            {"fastapi": None, "fastapi.responses": None, "pydantic": None},
-        ):
-            with pytest.raises(ImportError) as exc_info:
-                build_app(db)
-
-            msg = str(exc_info.value)
-            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
-            assert "[dev]" not in msg, (
-                f"Error message should not mention [dev] (issue #97), got: {msg}"
-            )
-            assert "fastapi is required" in msg, f"Error message should mention fastapi, got: {msg}"
-
-    def test_run_server_missing_uvicorn(self, db):
-        """run_server raises ImportError pointing at [review] when uvicorn absent."""
-        with unittest.mock.patch.dict(sys.modules, {"uvicorn": None}):
-            with pytest.raises(ImportError) as exc_info:
-                run_server(db, host="127.0.0.1", port=0)
-
-            msg = str(exc_info.value)
-            assert "[review]" in msg, f"Error message should mention [review], got: {msg}"
-            assert "[dev]" not in msg, (
-                f"Error message should not mention [dev] (issue #97), got: {msg}"
-            )
-            assert "uvicorn is required" in msg, f"Error message should mention uvicorn, got: {msg}"
 
 
 # ── Route-level integration tests (require httpx for the test client) ──────────
