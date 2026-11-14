@@ -4,6 +4,10 @@ Starts the real dashboard (``python -m pyimgtag.webapp``) on a seeded database
 and fires person merges, tag renames and reads at it from several threads,
 then checks that no request failed with a 5xx and no face points at a person
 that no longer exists.
+
+This is a regression smoke over the real server: none of these requests fails
+mid-write, so it does not reproduce the rollback race itself. That race is
+pinned deterministically in ``test_progress_db_concurrency.py``.
 """
 
 from __future__ import annotations

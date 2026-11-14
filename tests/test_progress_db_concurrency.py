@@ -215,6 +215,7 @@ def test_lock_is_reentrant_for_nested_facade_calls(tmp_path: Path) -> None:
 
 
 def test_connections_wait_for_a_busy_writer(tmp_path: Path) -> None:
+    # Pins the wait explicitly: it must not drop if sqlite3's default changes.
     db = ProgressDB(tmp_path / "p.db")
     assert db._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
     db.close()
@@ -225,3 +226,15 @@ def test_iterators_stop_cleanly_on_an_empty_db(tmp_path: Path, method: str) -> N
     db = ProgressDB(tmp_path / "p.db")
     assert list(getattr(db, method)()) == []
     db.close()
+
+
+def test_static_and_class_methods_are_refused() -> None:
+    from pyimgtag.db.progress_db import _serialise_connection_access
+
+    class WithStatic:
+        @staticmethod
+        def helper() -> int:
+            return 1
+
+    with pytest.raises(TypeError, match="WithStatic.helper"):
+        _serialise_connection_access(WithStatic)

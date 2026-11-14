@@ -30,7 +30,8 @@ _C = TypeVar("_C", bound=type)
 
 # Milliseconds a statement waits for another connection's write lock (the CLI
 # writer and the dashboard hold separate connections in one process) before
-# raising "database is locked".
+# raising "database is locked". sqlite3.connect's default timeout happens to
+# give the same value; setting it explicitly keeps it from changing silently.
 _BUSY_TIMEOUT_MS = 5000
 
 # Guards the lazy creation of a ProgressDB's lock, so two threads that touch a
@@ -56,6 +57,11 @@ def _locked_iter(method: _F) -> _F:
     The lock is taken to create the iterator and again for every ``next()``,
     and released before the item is handed to the caller, so a consumer that
     suspends between items never blocks other threads' writes.
+
+    A consumer that stops early leaves the inner generator to be closed by the
+    garbage collector without the lock. That is safe only while the inner
+    generators yield from rows already fetched with ``fetchall()``; one that
+    kept a cursor open across a ``yield`` would need closing under the lock.
     """
 
     @functools.wraps(method)
@@ -84,6 +90,8 @@ def _serialise_connection_access(cls: _C) -> _C:
     for name, attr in list(vars(cls).items()):
         if not callable(attr) or name.startswith("__"):
             continue
+        if isinstance(attr, (staticmethod, classmethod)):
+            raise TypeError(f"{cls.__name__}.{name}: wrap static/class methods explicitly")
         if getattr(attr, "__pyimgtag_locked__", False):
             continue
         setattr(cls, name, _locked(attr))
