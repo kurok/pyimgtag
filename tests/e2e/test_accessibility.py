@@ -40,6 +40,17 @@ def _json(route, body) -> None:
     route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
 
 
+def _thumb(page: Page, name: str):
+    """The settled control for *name*'s thumbnail.
+
+    The stubbed thumbnails 404, so each <img> is swapped for its text
+    fallback; focusing the <img> just before the swap would lose focus.
+    Wait until every card shows its fallback, then use that.
+    """
+    expect(page.locator("#grid .img-thumb-fallback")).to_have_count(2)
+    return page.get_by_role("button", name=f"Open {name}")
+
+
 def _stub_lists(page: Page) -> None:
     page.route("**/tags/api/tags", lambda r: _json(r, [{"tag": "sunset", "count": 2}]))
     page.route("**/review/api/images?*", lambda r: _json(r, _IMAGES))
@@ -96,7 +107,7 @@ def test_the_modal_takes_focus_closes_on_escape_and_gives_it_back(
 def test_the_lightbox_works_from_the_keyboard(page: Page, base_url: str, path: str) -> None:
     _stub_lists(page)
     page.goto(base_url + path)
-    thumb = page.get_by_role("button", name="Open a.jpg")
+    thumb = _thumb(page, "a.jpg")
     expect(thumb).to_be_visible()
     thumb.focus()
     page.keyboard.press("Enter")
@@ -120,7 +131,7 @@ def test_tag_remove_buttons_say_which_tag(page: Page, base_url: str) -> None:
 def test_tab_stays_inside_the_open_lightbox(page: Page, base_url: str, path: str) -> None:
     _stub_lists(page)
     page.goto(base_url + path)
-    page.get_by_role("button", name="Open a.jpg").focus()
+    _thumb(page, "a.jpg").focus()
     page.keyboard.press("Space")  # Space activates too
     expect(page.locator("#lightbox")).to_have_class(re.compile(r"\bopen\b"))
     for _ in range(5):
@@ -139,7 +150,7 @@ def test_tab_stays_inside_the_open_lightbox(page: Page, base_url: str, path: str
 def test_a_backdrop_click_also_gives_focus_back(page: Page, base_url: str, path: str) -> None:
     _stub_lists(page)
     page.goto(base_url + path)
-    thumb = page.get_by_role("button", name="Open b.jpg")
+    thumb = _thumb(page, "b.jpg")
     thumb.focus()
     page.keyboard.press("Enter")
     page.locator("#lightbox").click(position={"x": 5, "y": 5})
