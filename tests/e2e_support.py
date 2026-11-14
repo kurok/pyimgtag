@@ -127,8 +127,15 @@ def assert_health_stays_responsive(
     """
     from pyimgtag.webapp.server_thread import DashboardServer
 
-    server = DashboardServer(app, host="127.0.0.1", port=free_port())
-    assert server.start(ready_timeout=15.0), "dashboard thread did not start"
+    # free_port() can race with a parallel xdist worker taking the same port
+    # before uvicorn binds it; a server that fails to start retries on another.
+    for _ in range(3):
+        server = DashboardServer(app, host="127.0.0.1", port=free_port())
+        if server.start(ready_timeout=15.0):
+            break
+        server.stop()
+    else:
+        raise AssertionError("dashboard thread did not start")
     result: dict[str, requests.Response] = {}
     worker = threading.Thread(
         target=lambda: result.setdefault("r", slow_request(server.url)), daemon=True

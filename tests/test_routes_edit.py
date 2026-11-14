@@ -525,10 +525,72 @@ def test_the_web_drift_probe_uses_a_short_timeout(tmp_path):
     assert r.json()["photos_probe_error"] == "probe timed out"
 
 
-def test_the_cli_drift_probe_keeps_its_long_default():
+def test_the_cli_drift_probe_keeps_its_long_default(tmp_path, monkeypatch):
     import inspect
 
     from pyimgtag.applescript_writer import fetch_photos_membership
+    from pyimgtag.main import main
 
     default = inspect.signature(fetch_photos_membership).parameters["timeout"].default
     assert default == 1800
+
+    # The CLI path must call the probe with that default, not a short cap.
+    calls: list[tuple[tuple, dict]] = []
+
+    def probe(*args, **kwargs):
+        calls.append((args, kwargs))
+        return set(), None
+
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    db_path, _ = _seed_one_image(tmp_path)
+    monkeypatch.setattr("pyimgtag.cleanup_drift.fetch_photos_membership", probe)
+    assert main(["cleanup-drift", "--db", str(db_path), "--dry-run"]) == 0
+    assert calls == [((), {})]
+
+
+def test_concurrent_drift_scans_run_one_at_a_time(tmp_path):
+    import threading
+    import time
+
+    import requests
+
+    from pyimgtag.webapp.server_thread import DashboardServer
+    from pyimgtag.webapp.unified_app import create_unified_app
+    from tests.e2e_support import free_port
+
+    db_path, _ = _seed_one_image(tmp_path)
+    active = 0
+    peak = 0
+    guard = threading.Lock()
+
+    def probe(timeout):
+        nonlocal active, peak
+        with guard:
+            active += 1
+            peak = max(peak, active)
+        time.sleep(0.3)
+        with guard:
+            active -= 1
+        return set(), None
+
+    server = DashboardServer(create_unified_app(db_path=db_path), port=free_port())
+    assert server.start(ready_timeout=15.0)
+    try:
+        with patch("pyimgtag.applescript_writer.fetch_photos_membership", probe):
+            results: list[int] = []
+            threads = [
+                threading.Thread(
+                    target=lambda: results.append(
+                        requests.get(f"{server.url}/edit/api/drift", timeout=30).status_code
+                    )
+                )
+                for _ in range(3)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(30)
+    finally:
+        server.stop()
+    assert results == [200, 200, 200]
+    assert peak == 1

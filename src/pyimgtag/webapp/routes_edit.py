@@ -378,6 +378,9 @@ def build_edit_router(db: ProgressDB, api_base: str = "") -> Any:
         with _JOB_LOCK:
             return _snapshot(_JOB)
 
+    # One drift scan at a time per dashboard (a reload or second tab queues).
+    drift_scan_lock = asyncio.Lock()
+
     @router.get("/api/drift")
     async def get_drift() -> dict:
         """Summarise stale ``processed_images`` rows for the panel.
@@ -385,10 +388,11 @@ def build_edit_router(db: ProgressDB, api_base: str = "") -> Any:
         Runs the full drift scan in a worker thread — the panel pulls
         counts + a 20-row sample on page load. The bulk Photos.app probe
         is capped at ``WEB_DRIFT_PROBE_TIMEOUT_SECONDS`` (the CLI keeps its
-        longer default) so a slow library call cannot hang the request;
-        a timeout surfaces as ``photos_probe_error``. ``photos_probe_error`` is forwarded
-        unchanged so the UI can hint when the macOS-only signal
-        degraded.
+        longer default) so a slow library call cannot hang the request.
+        ``photos_probe_error`` (a timeout included) is forwarded unchanged
+        so the UI can hint when the macOS-only signal degraded. Scans run
+        one at a time: parallel Photos enumerations slow each other down
+        until each one hits the cap.
         """
         from pyimgtag.applescript_writer import fetch_photos_membership
         from pyimgtag.cleanup_drift import DRIFT_SAMPLE_SIZE, scan_drift
@@ -399,7 +403,8 @@ def build_edit_router(db: ProgressDB, api_base: str = "") -> Any:
         # The scan walks every row and the Photos probe shells out to
         # osascript: run both off the event loop so /health and the run
         # controls stay responsive while it works.
-        report = await asyncio.to_thread(scan_drift, db, fetch_membership=probe)
+        async with drift_scan_lock:
+            report = await asyncio.to_thread(scan_drift, db, fetch_membership=probe)
         return {
             "total": report.total,
             "disk_missing": report.disk_missing,
