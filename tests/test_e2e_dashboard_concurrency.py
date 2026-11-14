@@ -70,19 +70,23 @@ def test_concurrent_merges_and_tag_edits_leave_no_orphans(tmp_path: Path) -> Non
 
         statuses = list(pool.map(call, session_calls))
 
+        # Read back while the server is still up: on Windows a killed
+        # server can leave the WAL index locked, so a reader opened after
+        # shutdown sees "disk I/O error" instead of the data.
+        conn = sqlite3.connect(db_path)
+        try:
+            orphans = conn.execute(
+                "SELECT COUNT(*) FROM faces WHERE person_id IS NOT NULL"
+                " AND person_id NOT IN (SELECT id FROM persons)"
+            ).fetchone()[0]
+            persons = conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
+            tagged = conn.execute(
+                "SELECT COUNT(*) FROM processed_images WHERE tags LIKE '%common%'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
     assert all(status < 500 for status in statuses), statuses
-    conn = sqlite3.connect(db_path)
-    try:
-        orphans = conn.execute(
-            "SELECT COUNT(*) FROM faces WHERE person_id IS NOT NULL"
-            " AND person_id NOT IN (SELECT id FROM persons)"
-        ).fetchone()[0]
-        persons = conn.execute("SELECT COUNT(*) FROM persons").fetchone()[0]
-        tagged = conn.execute(
-            "SELECT COUNT(*) FROM processed_images WHERE tags LIKE '%common%'"
-        ).fetchone()[0]
-    finally:
-        conn.close()
     assert orphans == 0
     assert persons == _PAIRS
     assert tagged == 60
