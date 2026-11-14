@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import functools
 import sqlite3
+import threading
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pyimgtag.db.dedup_db import DedupDB
 from pyimgtag.db.events_db import EventsDB
@@ -17,13 +19,78 @@ from pyimgtag.db.search_db import SearchDB
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
 
     import numpy as np
 
     from pyimgtag.models import JudgeResult
 
+_F = TypeVar("_F", bound="Callable[..., Any]")
+_C = TypeVar("_C", bound=type)
 
+# Milliseconds a statement waits for another connection's write lock (the CLI
+# writer and the dashboard hold separate connections in one process) before
+# raising "database is locked".
+_BUSY_TIMEOUT_MS = 5000
+
+# Guards the lazy creation of a ProgressDB's lock, so two threads that touch a
+# ``__new__``-built instance for the first time cannot each install their own.
+_LOCK_CREATION_GUARD = threading.Lock()
+
+
+def _locked(method: _F) -> _F:
+    """Run *method* while holding the instance's connection lock."""
+
+    @functools.wraps(method)
+    def wrapper(self: ProgressDB, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    wrapper.__pyimgtag_locked__ = True  # type: ignore[attr-defined]
+    return wrapper  # type: ignore[return-value]
+
+
+def _locked_iter(method: _F) -> _F:
+    """Wrap an iterator-returning *method* so each step runs under the lock.
+
+    The lock is taken to create the iterator and again for every ``next()``,
+    and released before the item is handed to the caller, so a consumer that
+    suspends between items never blocks other threads' writes.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: ProgressDB, *args: Any, **kwargs: Any) -> Iterator[Any]:
+        with self._lock:
+            inner = iter(method(self, *args, **kwargs))
+        while True:
+            with self._lock:
+                try:
+                    item = next(inner)
+                except StopIteration:
+                    return
+            yield item
+
+    wrapper.__pyimgtag_locked__ = True  # type: ignore[attr-defined]
+    return wrapper  # type: ignore[return-value]
+
+
+def _serialise_connection_access(cls: _C) -> _C:
+    """Apply :func:`_locked` to every connection-touching method of *cls*.
+
+    Dunder methods (``__init__`` takes the lock around its schema work through
+    ``_create_table``), properties and methods already wrapped (the iterator
+    ones use :func:`_locked_iter`) are left alone.
+    """
+    for name, attr in list(vars(cls).items()):
+        if not callable(attr) or name.startswith("__"):
+            continue
+        if getattr(attr, "__pyimgtag_locked__", False):
+            continue
+        setattr(cls, name, _locked(attr))
+    return cls
+
+
+@_serialise_connection_access
 class ProgressDB:
     """Track which images have been processed to enable incremental re-runs."""
 
@@ -235,8 +302,28 @@ class ProgressDB:
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
+        self._conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._create_table()
+
+    @property
+    def _lock(self) -> threading.RLock:
+        """Re-entrant lock serialising every use of :attr:`_conn`.
+
+        The dashboard shares one connection between the event loop,
+        ``asyncio.to_thread`` workers and job threads; without this lock a
+        rollback in one thread can undo half of another thread's write.
+        Created lazily so instances built with ``ProgressDB.__new__`` (and an
+        injected ``_conn``) get one too.
+        """
+        lock: threading.RLock | None = self.__dict__.get("_db_lock")
+        if lock is None:
+            with _LOCK_CREATION_GUARD:
+                lock = self.__dict__.get("_db_lock")
+                if lock is None:
+                    lock = threading.RLock()
+                    self.__dict__["_db_lock"] = lock
+        return lock
 
     @property
     def path(self) -> Path:
@@ -564,6 +651,7 @@ class ProgressDB:
         """Delegate to :meth:`ImageDB.delete_image`."""
         return self._images.delete_image(file_path)
 
+    @_locked_iter
     def iter_image_paths(self, batch_size: int = _DEFAULT_PATH_BATCH_SIZE) -> "Iterator[str]":
         """Delegate to :meth:`ImageDB.iter_image_paths`."""
         return self._images.iter_image_paths(batch_size)
@@ -770,6 +858,7 @@ class ProgressDB:
 
     # --- duplicate groups (delegated to DedupDB) ---
 
+    @_locked_iter
     def iter_paths_missing_phash(self, include_hashed: bool = False) -> "Iterator[str]":
         """Delegate to :meth:`DedupDB.iter_paths_missing_phash`."""
         return self._dedup.iter_paths_missing_phash(include_hashed)
