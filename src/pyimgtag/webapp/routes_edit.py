@@ -89,43 +89,15 @@ _JOB: _Job = _Job(job_id="", state="idle")
 
 
 def _categorise_applescript_error(err: str) -> str:
-    """Collapse a verbose AppleScript error onto a stable category string.
+    """Return the stable category for a Photos error (see ``categorise_error``).
 
-    Mirrors :func:`pyimgtag.webapp.routes_review.open_in_photos` so the
-    browser only ever sees a small fixed set of labels and the
-    ``osascript`` line/column references stay server-side. The
-    UI-scripting path that performs the actual delete (System Events
-    keystroke into Photos.app) introduces a new failure mode the
-    reveal/write paths don't see: Accessibility permission denied —
-    surfaced as ``-1719`` / ``-25204`` from System Events.
+    Kept as a name for callers and tests; the one mapping lives in
+    :func:`pyimgtag.applescript_writer.categorise_error`, shared with the
+    Review page's open-in-Photos endpoint.
     """
-    low = err.lower()
-    if "macos" in low:
-        return "platform_unsupported"
-    if "timed out" in low or "timeout" in low:
-        return "photos_timeout"
-    # System Events accessibility-denied must be checked BEFORE the
-    # generic ``applescript``/``osascript`` mention because the
-    # accessibility-denied stderr always begins with
-    # ``AppleScript error …``. Markers we accept: literal AppleEvent
-    # codes ``(-1719)`` / ``(-25204)``, the substring "assistive
-    # access" (used by System Events' own message), or any explicit
-    # mention of accessibility.
-    if "(-1719)" in err or "(-25204)" in err or "assistive access" in low or "accessibility" in low:
-        return "accessibility_denied"
-    # Photo not in Photos.app even though the file sits on disk inside
-    # the Photos library bundle (deleted from Photos manually, orphaned
-    # original, etc.). ``applescript_writer._filename_scan_block``
-    # raises ``error "Photo not found: <name>"`` (-2700). Surface that
-    # as its own category so the dashboard can render "Photos.app
-    # doesn't have this image" rather than the misleading
-    # ``photos_unavailable``. Checked before the generic ``applescript``
-    # branch because the stderr begins with ``AppleScript error …``.
-    if "photo not found" in low or "(-2700)" in err:
-        return "photo_not_in_library"
-    if "osascript" in low or "applescript" in low:
-        return "photos_unavailable"
-    return "photos_error"
+    from pyimgtag.applescript_writer import categorise_error
+
+    return categorise_error(err)
 
 
 def _snapshot(job: _Job) -> dict[str, Any]:
