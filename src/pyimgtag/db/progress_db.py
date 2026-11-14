@@ -76,6 +76,18 @@ class MigrationBackupError(sqlite3.DatabaseError):
         )
 
 
+class DatabaseNotFoundError(FileNotFoundError):
+    """A read-only command was pointed at a database file that does not exist.
+
+    Raised instead of creating an empty database, which would make a typo in
+    ``--db`` look like an empty library.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(f"no database at {path}. Run 'pyimgtag run' first, or check --db.")
+
+
 # Guards the lazy creation of a ProgressDB's lock, so two threads that touch a
 # ``__new__``-built instance for the first time cannot each install their own.
 _LOCK_CREATION_GUARD = threading.Lock()
@@ -331,12 +343,16 @@ class ProgressDB:
         (17, "CREATE INDEX IF NOT EXISTS idx_pi_media_type ON processed_images(media_type)"),
     )
 
-    def __init__(self, db_path: str | Path | None = None) -> None:
+    def __init__(self, db_path: str | Path | None = None, *, must_exist: bool = False) -> None:
         """Open (creating if needed) the SQLite progress database.
 
         Args:
             db_path: Path to the database file. When ``None``, defaults to
                 ``~/.cache/pyimgtag/progress.db``.
+            must_exist: When True, a missing file raises
+                :class:`DatabaseNotFoundError` before anything is created on
+                disk (no parent directory, no file). Read-only commands pass
+                it when the user named ``--db`` explicitly.
 
         The parent directory is created if missing, the connection is opened
         with ``check_same_thread=False`` (a background thread may read while the
@@ -344,12 +360,16 @@ class ProgressDB:
         versioned migrations run on open.
 
         Raises:
+            DatabaseNotFoundError: If ``must_exist`` is True and the file is
+                missing.
             sqlite3.DatabaseError: If the file is not a usable database or a
                 migration cannot be applied.
         """
         if db_path is None:
             db_path = Path.home() / ".cache" / "pyimgtag" / "progress.db"
         self._path = Path(db_path)
+        if must_exist and not self._path.is_file():
+            raise DatabaseNotFoundError(self._path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         try:

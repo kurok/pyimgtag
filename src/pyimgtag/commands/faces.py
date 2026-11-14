@@ -501,7 +501,7 @@ def _handle_faces_cluster(args: argparse.Namespace) -> int:
 
 def _handle_faces_review(args: argparse.Namespace) -> int:
     """List detected persons and face counts."""
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         persons = db.get_persons()
         total_faces = db.get_face_count()
 

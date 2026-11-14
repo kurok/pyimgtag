@@ -292,6 +292,7 @@ class TestExportEdgeCases(ExportCase):
         from pyimgtag.main import main
 
         empty = self.tmp / "empty.db"
+        ProgressDB(empty).close()  # read-only commands need an existing --db
         out = self.tmp / "nothing.csv"
         # main() directly rather than self._run: that helper appends its own
         # --db, and argparse takes the last one, so an override there would

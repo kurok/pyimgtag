@@ -1758,11 +1758,15 @@ def main(argv: list[str] | None = None) -> int:
 
     _check_for_update()
 
-    from pyimgtag.db.progress_db import MigrationBackupError, SchemaTooNewError
+    from pyimgtag.db.progress_db import (
+        DatabaseNotFoundError,
+        MigrationBackupError,
+        SchemaTooNewError,
+    )
 
     try:
         return _dispatch(args, parser)
-    except (SchemaTooNewError, MigrationBackupError) as exc:
+    except (SchemaTooNewError, MigrationBackupError, DatabaseNotFoundError) as exc:
         # Raised by whichever handler opens the database first; one place
         # turns it into a message instead of a traceback.
         print(f"Error: {exc}", file=sys.stderr)

@@ -388,6 +388,7 @@ class TestQueryByExampleCli(unittest.TestCase):
 
     def test_an_unindexed_library_is_reported_before_anything_else(self):
         empty = self.tmp / "empty.db"
+        ProgressDB(empty).close()  # read-only commands need an existing --db
         code, _, err = self._run(
             ["search", "--db", str(empty), "--similar-to", str(self.tmp / "beach.jpg")]
         )

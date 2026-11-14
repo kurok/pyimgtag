@@ -152,7 +152,7 @@ def cmd_search(args: argparse.Namespace) -> int:
     """Execute the search subcommand."""
     import json as _json
 
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         stats = db.embedding_stats()
         if not stats["count"]:
             print(

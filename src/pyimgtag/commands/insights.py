@@ -29,7 +29,7 @@ def cmd_insights(args: argparse.Namespace) -> int:
     elif output and fmt == "terminal" and output.lower().endswith(".json"):
         fmt = "json"
 
-    with ProgressDB(db_path=args.db) as db:
+    with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         doc = db.get_insights(top_n=args.top)
 
     if fmt == "json":

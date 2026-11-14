@@ -339,11 +339,13 @@ class TestMainNoSource:
 class TestStatusSubcommand:
     def test_status_empty_db(self, tmp_path):
         db_path = str(tmp_path / "test.db")
+        ProgressDB(db_path).close()  # read-only commands need an existing --db
         result = main(["status", "--db", db_path])
         assert result == 0
 
     def test_status_output_format(self, tmp_path, capsys):
         db_path = str(tmp_path / "test.db")
+        ProgressDB(db_path).close()  # read-only commands need an existing --db
         result = main(["status", "--db", db_path])
         assert result == 0
         out = capsys.readouterr().out
@@ -461,6 +463,7 @@ class TestReprocessSubcommand:
 class TestCleanupSubcommand:
     def test_cleanup_empty_db_prints_no_candidates(self, tmp_path, capsys):
         db_path = str(tmp_path / "test.db")
+        ProgressDB(db_path).close()  # read-only commands need an existing --db
         result = main(["cleanup", "--db", db_path])
         assert result == 0
         assert "No cleanup candidates found." in capsys.readouterr().err
@@ -704,6 +707,7 @@ class TestFacesBuildParser:
 class TestFacesReviewSubcommand:
     def test_review_empty_db(self, tmp_path, capsys):
         db_path = str(tmp_path / "test.db")
+        ProgressDB(db_path).close()  # read-only commands need an existing --db
         result = main(["faces", "review", "--db", db_path])
         assert result == 0
         assert "No faces detected yet" in capsys.readouterr().err
@@ -951,6 +955,7 @@ class TestQuerySubcommand:
 
     def test_query_empty_db_exits_zero(self, tmp_path, capsys):
         db_path = str(tmp_path / "empty.db")
+        ProgressDB(db_path).close()  # read-only commands need an existing --db
         result = main(["query", "--db", db_path])
         assert result == 0
 
@@ -1029,6 +1034,7 @@ class TestTagsSubcommand:
 
     def test_tags_list_empty_db(self, tmp_path, capsys):
         db_path = str(tmp_path / "empty.db")
+        ProgressDB(db_path).close()  # read-only commands need an existing --db
         result = main(["tags", "list", "--db", db_path])
         assert result == 0
         assert "No tags" in capsys.readouterr().err
@@ -1574,3 +1580,84 @@ def test_cli_reports_a_failed_migration_backup(tmp_path, capsys, monkeypatch):
     assert rc == 1
     assert err.startswith("Error: could not back up ")
     assert "PYIMGTAG_NO_MIGRATION_BACKUP=1" in err
+
+
+# --- read-only commands refuse a missing, explicitly named --db (#395) -------
+
+_READ_ONLY_COMMANDS = [
+    pytest.param(["status"], id="status"),
+    pytest.param(["cleanup"], id="cleanup"),
+    pytest.param(["query"], id="query"),
+    pytest.param(["tags", "list"], id="tags-list"),
+    pytest.param(["insights"], id="insights"),
+    pytest.param(["export", "--format", "json", "-o", "{tmp}/out.json"], id="export"),
+    pytest.param(["events", "list"], id="events-list"),
+    pytest.param(["events", "show", "1"], id="events-show"),
+    pytest.param(["dedup", "list"], id="dedup-list"),
+    pytest.param(["faces", "review"], id="faces-review"),
+    pytest.param(["search", "a red car"], id="search"),
+]
+
+
+@pytest.mark.parametrize("argv", _READ_ONLY_COMMANDS)
+def test_read_only_commands_refuse_a_missing_database(tmp_path, capsys, monkeypatch, argv):
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    missing = tmp_path / "nope" / "x.db"
+
+    argv = [arg.replace("{tmp}", str(tmp_path)) for arg in argv]
+    rc = main([*argv, "--db", str(missing)])
+
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert f"Error: no database at {missing}." in err
+    assert not (tmp_path / "out.json").exists()
+    assert "Run 'pyimgtag run' first, or check --db." in err
+    assert not (tmp_path / "nope").exists()
+
+
+def test_run_still_creates_a_missing_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    db_path = tmp_path / "new" / "x.db"
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    (photos / "a.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+
+    with (
+        patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+        patch("pyimgtag.commands.run._process_one", return_value=None),
+    ):
+        rc = main(["run", "--input-dir", str(photos), "--db", str(db_path), "--no-web"])
+
+    assert rc == 0
+    assert db_path.is_file()
+
+
+@pytest.mark.parametrize("argv", [["tags", "rename", "a", "b"], ["dedup", "scan"]])
+def test_writers_still_create_a_missing_database(tmp_path, monkeypatch, argv):
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    db_path = tmp_path / "new" / "x.db"
+
+    main([*argv, "--db", str(db_path)])
+
+    assert db_path.is_file()
+
+
+def test_the_default_path_keeps_its_empty_output(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+    rc = main(["status"])
+
+    assert rc == 0
+    assert "no database at" not in capsys.readouterr().err
+    assert (tmp_path / ".cache" / "pyimgtag" / "progress.db").is_file()
+
+
+def test_events_writers_still_create_a_missing_database(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYIMGTAG_NO_UPDATE_CHECK", "1")
+    db_path = tmp_path / "new" / "x.db"
+
+    main(["events", "detect", "--db", str(db_path)])
+
+    assert db_path.is_file()
