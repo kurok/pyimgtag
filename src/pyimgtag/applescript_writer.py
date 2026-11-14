@@ -244,6 +244,107 @@ def _write_via_photoscript(
         return f"photoscript error: {exc}"
 
 
+class PhotosError(str):
+    """An Apple Photos / osascript failure that is still a plain message.
+
+    A ``str`` subclass, so every caller that prints or compares the returned
+    error keeps working, with two extra attributes:
+
+    Attributes:
+        category: One of the stable labels from :func:`categorise_error`
+            (what the web UI shows instead of raw AppleScript text).
+        detail: The underlying stderr or exception text, without the
+            "AppleScript error (exit N):" framing; may be empty.
+        kind: How the failure happened, set by :func:`_run_osascript`:
+            ``"timeout"``, ``"launch"`` (osascript could not be started) or
+            ``"exit"`` (non-zero exit); ``"other"`` for errors raised before
+            osascript runs. Callers branch on this, never on the wording.
+    """
+
+    category: str
+    detail: str
+    kind: str
+
+    def __new__(cls, message: str, detail: str = "", kind: str = "other") -> PhotosError:
+        obj = super().__new__(cls, message)
+        # A timeout is a timeout whatever its wording; everything else is
+        # classified from the message.
+        obj.category = "photos_timeout" if kind == "timeout" else categorise_error(message)
+        obj.detail = detail
+        obj.kind = kind
+        return obj
+
+
+def categorise_error(err: str) -> str:
+    """Collapse a verbose Photos/AppleScript error onto a stable category.
+
+    The browser only ever sees one of: ``platform_unsupported``,
+    ``photos_timeout``, ``accessibility_denied``, ``photo_not_in_library``,
+    ``photos_unavailable`` or ``photos_error``; ``osascript`` line/column
+    references stay server-side. The one copy of this mapping is shared by
+    the Review and Edit endpoints.
+    """
+    low = err.lower()
+    if "macos" in low:
+        return "platform_unsupported"
+    if "timed out" in low or "timeout" in low:
+        return "photos_timeout"
+    # System Events accessibility-denied must be checked BEFORE the generic
+    # ``applescript``/``osascript`` mention because that stderr always begins
+    # with ``AppleScript error …``. Markers: AppleEvent codes ``(-1719)`` /
+    # ``(-25204)``, "assistive access" (System Events' own wording), or any
+    # explicit mention of accessibility.
+    if "(-1719)" in err or "(-25204)" in err or "assistive access" in low or "accessibility" in low:
+        return "accessibility_denied"
+    # ``_filename_scan_block`` raises ``error "Photo not found: <name>"``
+    # (-2700) when the file is on disk but not in Photos.app. Also checked
+    # before the generic branch for the same reason as above.
+    if "photo not found" in low or "(-2700)" in err:
+        return "photo_not_in_library"
+    if "osascript" in low or "applescript" in low:
+        return "photos_unavailable"
+    return "photos_error"
+
+
+def _run_osascript(
+    script: str, timeout: float, *, timeout_message: str | None = None
+) -> tuple[str, PhotosError | None]:
+    """Run *script* with ``/usr/bin/osascript``; the only place that does.
+
+    Args:
+        script: AppleScript source, passed with ``-e``.
+        timeout: Seconds before the call is abandoned.
+        timeout_message: Message for a timeout; defaults to
+            ``"osascript timed out after <timeout> seconds"``.
+
+    Returns:
+        ``(stdout, None)`` on success, or ``(stdout, PhotosError)`` when the
+        call timed out, could not be launched or exited non-zero.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
+            ["/usr/bin/osascript", "-e", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        message = timeout_message or f"osascript timed out after {timeout:g} seconds"
+        return "", PhotosError(message, kind="timeout")
+    except OSError as exc:
+        return "", PhotosError(f"Failed to launch osascript: {exc}", detail=str(exc), kind="launch")
+    stdout = proc.stdout or ""
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        message = (
+            f"AppleScript error (exit {proc.returncode}): {stderr}"
+            if stderr
+            else f"AppleScript failed with exit code {proc.returncode}"
+        )
+        return stdout, PhotosError(message, detail=stderr, kind="exit")
+    return stdout, None
+
+
 def _write_via_osascript(
     file_name: str,
     tags: list[str],
@@ -252,31 +353,11 @@ def _write_via_osascript(
 ) -> str | None:
     """Write to Photos using raw osascript subprocess."""
     if not is_applescript_available():
-        return "osascript is not available on this system"
+        return PhotosError("osascript is not available on this system")
 
     script = _build_applescript(file_name, tags, summary, title=title)
-
-    try:
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            ["/usr/bin/osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired:
-        return "osascript timed out after 30 seconds"
-    except OSError as exc:
-        return f"Failed to launch osascript: {exc}"
-
-    if proc.returncode != 0:
-        stderr = proc.stderr.strip()
-        return (
-            f"AppleScript error (exit {proc.returncode}): {stderr}"
-            if stderr
-            else (f"AppleScript failed with exit code {proc.returncode}")
-        )
-
-    return None
+    _out, err = _run_osascript(script, 30)
+    return err
 
 
 def _build_read_applescript(file_name: str) -> str:
@@ -320,18 +401,10 @@ def _read_via_osascript(file_name: str) -> list[str] | None:
     if not is_applescript_available():
         return None
     script = _build_read_applescript(file_name)
-    try:
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            ["/usr/bin/osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (subprocess.TimeoutExpired, OSError):
+    out, err = _run_osascript(script, 30)
+    if err is not None:
         return None
-    if proc.returncode != 0:
-        return None
-    raw = proc.stdout.strip()
+    raw = out.strip()
     if not raw:
         return []
     return [k.strip() for k in raw.split("\n") if k.strip()]
@@ -511,28 +584,17 @@ def add_to_album(
         print("osascript is not available on this system", file=sys.stderr)
         return False, 0
 
-    try:
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            ["/usr/bin/osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-    except subprocess.TimeoutExpired:
-        print(f"osascript timed out adding to album {album_name!r}", file=sys.stderr)
-        return False, 0
-    except OSError as exc:
-        print(f"Failed to launch osascript: {exc}", file=sys.stderr)
-        return False, 0
-
-    if proc.returncode != 0:
-        print(
-            f"AppleScript error for album {album_name!r}: {proc.stderr.strip()}",
-            file=sys.stderr,
-        )
+    out, err = _run_osascript(
+        script, 120, timeout_message=f"osascript timed out adding to album {album_name!r}"
+    )
+    if err is not None:
+        if err.kind == "exit":
+            print(f"AppleScript error for album {album_name!r}: {err.detail}", file=sys.stderr)
+        else:
+            print(err, file=sys.stderr)
         return False, 0
     try:
-        return True, int(proc.stdout.strip() or 0)
+        return True, int(out.strip() or 0)
     except ValueError:
         return True, 0
 
@@ -547,33 +609,16 @@ def reveal_in_photos(file_path: str) -> str | None:
     straight to the filename scan.
     """
     if not _IS_MACOS:
-        return "Apple Photos reveal is only available on macOS"
+        return PhotosError("Apple Photos reveal is only available on macOS")
     if not is_applescript_available():
-        return "osascript is not available on this system"
+        return PhotosError("osascript is not available on this system")
 
     file_name = PurePosixPath(file_path).name
     script = _build_reveal_applescript(file_name)
-
-    try:
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            ["/usr/bin/osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-    except subprocess.TimeoutExpired:
-        return "osascript timed out while revealing photo"
-    except OSError as exc:
-        return f"Failed to launch osascript: {exc}"
-
-    if proc.returncode != 0:
-        stderr = proc.stderr.strip()
-        return (
-            f"AppleScript error (exit {proc.returncode}): {stderr}"
-            if stderr
-            else f"AppleScript failed with exit code {proc.returncode}"
-        )
-    return None
+    _out, err = _run_osascript(
+        script, 15, timeout_message="osascript timed out while revealing photo"
+    )
+    return err
 
 
 def _build_membership_applescript() -> str:
@@ -672,20 +717,13 @@ def fetch_photos_membership(
 
     script = _build_membership_applescript()
 
-    try:
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            ["/usr/bin/osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
+    out, err = _run_osascript(script, timeout)
+    if err is not None and err.kind == "timeout":
         return set(), "timeout"
-    except OSError:
+    if err is not None and err.kind == "launch":
         return set(), "osascript_missing"
-
-    if proc.returncode != 0:
-        stderr = (proc.stderr or "").strip()
+    if err is not None:
+        stderr = err.detail
         # The ``-2741`` parse flake is the Photos.app dictionary issue
         # the user has hit before; surface a dedicated category so the
         # drift command can degrade rather than spinning forever.
@@ -693,7 +731,7 @@ def fetch_photos_membership(
             return set(), "parse_error"
         return set(), "applescript_failed"
 
-    return _parse_membership_output(proc.stdout or ""), None
+    return _parse_membership_output(out), None
 
 
 def _build_delete_applescript(file_name: str) -> str:
@@ -772,34 +810,16 @@ def delete_from_photos(file_path: str) -> str | None:
         any AppleScript error).
     """
     if not _IS_MACOS:
-        return "Apple Photos delete is only available on macOS"
+        return PhotosError("Apple Photos delete is only available on macOS")
     if not is_applescript_available():
-        return "osascript is not available on this system"
+        return PhotosError("osascript is not available on this system")
 
     file_name = PurePosixPath(file_path).name
     script = _build_delete_applescript(file_name)
-
-    try:
-        # The UI-scripting path includes two short ``delay`` calls
-        # plus two System Events keystrokes; budget conservatively so
-        # a slow Photos.app launch (cold start, big library) doesn't
-        # trip a spurious timeout.
-        proc = subprocess.run(  # noqa: S603  # nosec B603 B607
-            ["/usr/bin/osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=45,
-        )
-    except subprocess.TimeoutExpired:
-        return "osascript timed out while deleting photo"
-    except OSError as exc:
-        return f"Failed to launch osascript: {exc}"
-
-    if proc.returncode != 0:
-        stderr = proc.stderr.strip()
-        return (
-            f"AppleScript error (exit {proc.returncode}): {stderr}"
-            if stderr
-            else f"AppleScript failed with exit code {proc.returncode}"
-        )
-    return None
+    # The UI-scripting path includes two short ``delay`` calls plus two
+    # System Events keystrokes; budget conservatively so a slow Photos.app
+    # launch (cold start, big library) doesn't trip a spurious timeout.
+    _out, err = _run_osascript(
+        script, 45, timeout_message="osascript timed out while deleting photo"
+    )
+    return err

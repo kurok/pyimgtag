@@ -384,9 +384,11 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         and one of these stable category strings is returned to the
         client: ``image_not_found`` (DB lookup failed),
         ``platform_unsupported`` (non-macOS host), ``photos_timeout``
-        (osascript exceeded its window), ``photos_unavailable``
-        (osascript / AppleScript missing), or ``photos_error`` (any
-        other AppleScript failure). Downstream JS branches on the
+        (osascript exceeded its window), ``accessibility_denied``,
+        ``photo_not_in_library`` (the file is not in Photos.app),
+        ``photos_unavailable`` (osascript / AppleScript missing), or
+        ``photos_error`` (any other failure); the same mapping as the
+        Edit page, from :func:`applescript_writer.categorise_error`. Downstream JS branches on the
         sentinel; the verbose stderr never reaches the browser.
         """
         safe_path = await asyncio.to_thread(db.get_known_file_path, path)
@@ -402,16 +404,11 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         # Map verbose AppleScript errors onto a small set of stable
         # client-facing categories so a script-level trace never reaches
         # the browser.
-        low = err.lower()
-        if "macos" in low:
-            category = "platform_unsupported"
-        elif "timed out" in low or "timeout" in low:
-            category = "photos_timeout"
-        elif "osascript" in low or "applescript" in low:
-            category = "photos_unavailable"
-        else:
-            category = "photos_error"
-        return {"ok": False, "error": category}
+        from pyimgtag.applescript_writer import categorise_error
+
+        # The one shared mapping: a photo missing from Photos.app is
+        # ``photo_not_in_library`` here too, not ``photos_unavailable``.
+        return {"ok": False, "error": categorise_error(err)}
 
     @router.patch("/api/images/tags")
     async def update_tags(body: _TagsBody = Body(...)) -> dict:

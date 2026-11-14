@@ -1568,3 +1568,146 @@ class TestFetchPhotosMembership:
             fetch_photos_membership(timeout=60)
 
         assert captured.get("timeout") == 60
+
+
+# --- one osascript runner, one error classifier (#398) -------------------------
+
+import ast as _ast  # noqa: E402
+import inspect as _inspect  # noqa: E402
+
+from pyimgtag import applescript_writer as _aw  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("raw", "category"),
+    [
+        ("Apple Photos delete is only available on macOS", "platform_unsupported"),
+        ("osascript timed out after 30 seconds", "photos_timeout"),
+        (
+            "AppleScript error (exit 1): not allowed assistive access (-25204)",
+            "accessibility_denied",
+        ),
+        ("AppleScript error (exit 1): System Events got an error (-1719)", "accessibility_denied"),
+        ("AppleScript error (exit 1): Photo not found: IMG_1.HEIC (-2700)", "photo_not_in_library"),
+        ("osascript is not available on this system", "photos_unavailable"),
+        ("AppleScript failed with exit code 1", "photos_unavailable"),
+        ("photoscript error: boom", "photos_error"),
+    ],
+)
+def test_categorise_error_table(raw, category):
+    assert _aw.categorise_error(raw) == category
+
+
+def test_photos_error_is_a_string_with_a_category():
+    err = _aw.PhotosError("AppleScript error (exit 1): Photo not found: x (-2700)", detail="d")
+    assert isinstance(err, str)
+    assert err == "AppleScript error (exit 1): Photo not found: x (-2700)"
+    assert (err.category, err.detail) == ("photo_not_in_library", "d")
+
+
+class TestRunOsascript:
+    def test_success_returns_stdout(self):
+        done = MagicMock(returncode=0, stdout="3\n", stderr="")
+        with patch("pyimgtag.applescript_writer.subprocess.run", return_value=done) as run:
+            assert _aw._run_osascript("return 3", 12) == ("3\n", None)
+        assert run.call_args.args[0] == ["/usr/bin/osascript", "-e", "return 3"]
+        assert run.call_args.kwargs["timeout"] == 12
+
+    def test_timeout_uses_the_callers_message(self):
+        timeout = subprocess.TimeoutExpired(cmd="osascript", timeout=15)
+        with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=timeout):
+            out, err = _aw._run_osascript("x", 15, timeout_message="took too long")
+            _out2, default = _aw._run_osascript("x", 30)
+        assert (out, err, err.category) == ("", "took too long", "photos_timeout")
+        assert default == "osascript timed out after 30 seconds"
+
+    def test_launch_failure(self):
+        with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=OSError("no exec")):
+            out, err = _aw._run_osascript("x", 5)
+        assert err == "Failed to launch osascript: no exec"
+        assert (err.detail, err.category) == ("no exec", "photos_unavailable")
+
+    @pytest.mark.parametrize(
+        ("stderr", "message"),
+        [
+            ("boom (-1728)", "AppleScript error (exit 1): boom (-1728)"),
+            ("", "AppleScript failed with exit code 1"),
+        ],
+    )
+    def test_non_zero_exit(self, stderr, message):
+        done = MagicMock(returncode=1, stdout="partial", stderr=stderr + "\n")
+        with patch("pyimgtag.applescript_writer.subprocess.run", return_value=done):
+            out, err = _aw._run_osascript("x", 5)
+        assert (out, err, err.detail) == ("partial", message, stderr)
+
+
+def test_osascript_is_launched_from_exactly_one_place():
+    tree = _ast.parse(_inspect.getsource(_aw))
+    launches = [
+        node
+        for node in _ast.walk(tree)
+        if isinstance(node, _ast.Call)
+        and _ast.unparse(node.func) == "subprocess.run"
+        and "/usr/bin/osascript" in _ast.unparse(node)
+    ]
+    assert len(launches) == 1
+
+
+@pytest.mark.parametrize(
+    ("func", "timeout", "message"),
+    [
+        ("reveal_in_photos", 15, "osascript timed out while revealing photo"),
+        ("delete_from_photos", 45, "osascript timed out while deleting photo"),
+    ],
+)
+def test_public_functions_keep_their_timeouts_and_messages(func, timeout, message):
+    expired = subprocess.TimeoutExpired(cmd="osascript", timeout=timeout)
+    with (
+        patch.object(_aw, "_IS_MACOS", True),
+        patch.object(_aw, "is_applescript_available", return_value=True),
+        patch("pyimgtag.applescript_writer.subprocess.run", side_effect=expired) as run,
+    ):
+        err = getattr(_aw, func)("/lib/a.jpg")
+    assert err == message
+    assert isinstance(err, _aw.PhotosError) and err.category == "photos_timeout"
+    assert run.call_args.kwargs["timeout"] == timeout
+
+
+class TestFailureKindNotWording:
+    """Callers branch on how a call failed, not on what its text says (#398)."""
+
+    @staticmethod
+    def _membership(**run_kwargs):
+        with (
+            patch.object(_aw, "_IS_MACOS", True),
+            patch.object(_aw, "is_applescript_available", return_value=True),
+            patch("pyimgtag.applescript_writer.subprocess.run", **run_kwargs),
+        ):
+            return _aw.fetch_photos_membership(timeout=60)
+
+    def test_an_appleevent_timeout_in_stderr_is_not_a_runner_timeout(self):
+        done = MagicMock(
+            returncode=1, stdout="", stderr="Photos got an error: AppleEvent timed out. (-1712)"
+        )
+        assert self._membership(return_value=done) == (set(), "applescript_failed")
+
+    def test_an_os_error_mentioning_time_out_is_a_launch_failure(self):
+        assert self._membership(side_effect=OSError(60, "Operation timed out")) == (
+            set(),
+            "osascript_missing",
+        )
+
+    def test_a_real_timeout_is_a_timeout(self):
+        expired = subprocess.TimeoutExpired(cmd="osascript", timeout=60)
+        assert self._membership(side_effect=expired) == (set(), "timeout")
+
+    def test_kinds(self):
+        expired = subprocess.TimeoutExpired(cmd="osascript", timeout=1)
+        with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=expired):
+            assert _aw._run_osascript("x", 1)[1].kind == "timeout"
+        with patch("pyimgtag.applescript_writer.subprocess.run", side_effect=OSError("x")):
+            assert _aw._run_osascript("x", 1)[1].kind == "launch"
+        done = MagicMock(returncode=2, stdout="", stderr="")
+        with patch("pyimgtag.applescript_writer.subprocess.run", return_value=done):
+            assert _aw._run_osascript("x", 1)[1].kind == "exit"
+        assert _aw.PhotosError("osascript is not available on this system").kind == "other"

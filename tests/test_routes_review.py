@@ -603,3 +603,36 @@ def test_open_in_photos_does_not_block_other_requests(tmp_path):
     assert response.status_code == 200
     assert response.json() == {"ok": True}
     assert revealed == [str(img)]
+
+
+# --- one shared error mapping (#398) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("error", "category"),
+    [
+        ("AppleScript error (exit 1): Photo not found: X (-2700)", "photo_not_in_library"),
+        (
+            "AppleScript error (exit 1): System Events got an error: not allowed (-1719)",
+            "accessibility_denied",
+        ),
+        ("osascript timed out while revealing photo", "photos_timeout"),
+        ("Apple Photos reveal is only available on macOS", "platform_unsupported"),
+        ("osascript is not available on this system", "photos_unavailable"),
+        ("something odd", "photos_error"),
+    ],
+)
+def test_a_missing_photo_is_reported_as_not_in_library(tmp_path, error, category):
+    from unittest.mock import patch
+
+    db = ProgressDB(db_path=tmp_path / "progress.db")
+    img = tmp_path / "a.jpg"
+    img.write_bytes(b"\x00")
+    db.mark_done(img, ImageResult(file_path=str(img), file_name="a.jpg", tags=["x"]))
+    app = FastAPI()
+    app.include_router(build_review_router(db, api_base="/review"), prefix="/review")
+
+    with patch("pyimgtag.applescript_writer.reveal_in_photos", return_value=error):
+        r = TestClient(app).post("/review/api/open-in-photos", params={"path": str(img)})
+
+    assert r.json() == {"ok": False, "error": category}
