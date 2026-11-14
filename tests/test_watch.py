@@ -206,6 +206,46 @@ def test_watch_failed_file_not_retried_until_changed(tmp_path, capsys):
     assert "errors 1" in capsys.readouterr().err
 
 
+def test_watch_keeps_looping_while_ollama_is_down(tmp_path, capsys):
+    """``watch`` reuses the tagging loop, not ``cmd_run``: no fail-fast abort (#391)."""
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    (photos / "a.jpg").write_bytes(b"a")
+    db = tmp_path / "p.db"
+    calls: list[str] = []
+
+    def tag_image(path, context=None):
+        calls.append(Path(path).name)
+        return TagResult(error="Ollama request failed: connection refused")
+
+    with (
+        patch(
+            "pyimgtag.commands.run.check_ollama_model", return_value=(False, "not pulled")
+        ) as model_check,
+    ):
+        rc = _run_watch(
+            [
+                "--input-dir",
+                str(photos),
+                "--db",
+                str(db),
+                "--interval",
+                "0.01",
+                "--max-cycles",
+                "4",
+            ],
+            tag_image,
+            ollama_url_ok=False,
+        )
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "[watch] cycle 4:" in err
+    assert "Error: " not in err
+    assert calls == ["a.jpg"]
+    model_check.assert_not_called()
+
+
 def test_watch_second_instance_exits_with_holder_pid(tmp_path, capsys):
     photos = tmp_path / "photos"
     photos.mkdir()

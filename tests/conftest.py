@@ -29,3 +29,19 @@ def _reset_shared_throttles(monkeypatch):
 
     monkeypatch.setattr("pyimgtag.geocoder.ReverseGeocoder._last_request_ts", 0.0)
     monkeypatch.setattr(concurrent_pipeline, "_global_limiter", None)
+
+
+@pytest.fixture(autouse=True)
+def _ollama_model_is_pulled(monkeypatch):
+    """Assume the configured model is pulled unless a test says otherwise.
+
+    ``run`` and ``judge`` check the server and then the model before any work.
+    Tests that fake a reachable server by patching ``check_ollama`` would
+    otherwise reach the real ``/api/tags`` for the model check. Tests of the
+    model check patch ``pyimgtag.commands.<run|judge>.check_ollama_model``
+    themselves; ``pyimgtag.preflight.check_ollama_model`` is never patched.
+    """
+    from pyimgtag.commands import judge, run
+
+    for module in (run, judge):
+        monkeypatch.setattr(module, "check_ollama_model", lambda *_a, **_k: (True, "present"))

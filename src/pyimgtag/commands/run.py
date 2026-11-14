@@ -29,7 +29,7 @@ from pyimgtag.geocoder import ReverseGeocoder
 from pyimgtag.models import ExifData, ImageResult
 from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
-from pyimgtag.preflight import check_ollama
+from pyimgtag.preflight import check_ollama, check_ollama_model
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.prompt_template import (
     DEFAULT_TEMPLATE,
@@ -590,9 +590,18 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if not isinstance(backend, str):
         backend = "ollama"
     if backend == "ollama":
+        # Checked before any file is scanned or DB row written: without a
+        # server or the model every image would fail and be stored as an
+        # error. --dry-run only warns, since it writes nothing.
         ok, msg = check_ollama(args.ollama_url)
+        if ok:
+            ok, msg = check_ollama_model(args.model or "gemma4:e4b", args.ollama_url)
         if not ok:
-            print(f"Warning: {msg}", file=sys.stderr)
+            if args.dry_run:
+                print(f"Warning: {msg}", file=sys.stderr)
+            else:
+                print(f"Error: {msg}", file=sys.stderr)
+                return 1
 
     scan = _scan_files(args, extensions)
     if isinstance(scan, int):

@@ -21,7 +21,7 @@ from pyimgtag.concurrent_pipeline import (
 from pyimgtag.judge_scorer import compute_scores
 from pyimgtag.models import JudgeResult, JudgeScores
 from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
-from pyimgtag.preflight import check_ollama
+from pyimgtag.preflight import check_ollama, check_ollama_model
 from pyimgtag.scanner import scan_directory, scan_photos_library
 from pyimgtag.webapp.bootstrap import start_dashboard_for
 
@@ -179,9 +179,12 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
     if not isinstance(backend, str):
         backend = "ollama"
     if backend == "ollama":
+        # Same up-front checks and messages as `run`: server, then model.
         ok, msg = check_ollama(args.ollama_url)
+        if ok:
+            ok, msg = check_ollama_model(args.model or "gemma4:e4b", args.ollama_url)
         if not ok:
-            print(f"Ollama not available: {msg}", file=sys.stderr)
+            print(f"Error: {msg}", file=sys.stderr)
             return 1
 
     exts = {e.strip().lstrip(".").lower() for e in args.extensions.split(",") if e.strip()}
