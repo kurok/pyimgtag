@@ -113,3 +113,44 @@ def test_build_tags_router_import_error():
         with pytest.MonkeyPatch().context() as mp:
             mp.setitem(sys.modules, "fastapi", None)
             build_tags_router(None)
+
+
+# --- tag mutations run off the event loop (#390) -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("method", "url", "body"),
+    [
+        ("rename_tag", "/tags/api/tags/rename", {"old_tag": "a", "new_tag": "b"}),
+        ("merge_tags", "/tags/api/tags/merge", {"source_tag": "a", "target_tag": "b"}),
+        ("delete_tag", "/tags/api/tags/delete", {"tag": "a"}),
+    ],
+)
+def test_tag_mutations_do_not_block_other_requests(tmp_path, method, url, body):
+    import threading
+    from unittest.mock import patch
+
+    import requests
+
+    from pyimgtag.db.image_db import ImageDB
+    from pyimgtag.webapp.unified_app import create_unified_app
+    from tests.e2e_support import assert_health_stays_responsive
+
+    db_path = tmp_path / "progress.db"
+    ProgressDB(db_path=db_path).close()
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_mutation(self, *args):
+        entered.set()
+        release.wait(15.0)
+        return 7
+
+    with patch.object(ImageDB, method, slow_mutation):
+        response = assert_health_stays_responsive(
+            create_unified_app(db_path=db_path),
+            lambda base: requests.post(f"{base}{url}", json=body, timeout=30),
+            entered,
+            release,
+        )
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "count": 7}

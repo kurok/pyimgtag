@@ -564,3 +564,42 @@ def test_review_page_template_markers(tmp_path):
     assert '<nav class="nav">' in html  # nav shell injected
     assert "/review/api/stats" in html  # api_base injected
     assert not re.findall(r"__[A-Z][A-Z0-9_]+__", html)
+
+
+# --- open-in-photos runs off the event loop (#390) ---------------------------
+
+
+def test_open_in_photos_does_not_block_other_requests(tmp_path):
+    import threading
+    from unittest.mock import patch
+
+    import requests
+
+    from pyimgtag.webapp.unified_app import create_unified_app
+    from tests.e2e_support import assert_health_stays_responsive
+
+    db_path = tmp_path / "progress.db"
+    img = tmp_path / "a.jpg"
+    img.write_bytes(b"\x00")
+    with ProgressDB(db_path=db_path) as db:
+        db.mark_done(img, ImageResult(file_path=str(img), file_name="a.jpg", tags=["x"]))
+    entered, release = threading.Event(), threading.Event()
+    revealed: list[str] = []
+
+    def slow_reveal(path):
+        entered.set()
+        release.wait(15.0)
+        revealed.append(path)
+
+    with patch("pyimgtag.applescript_writer.reveal_in_photos", slow_reveal):
+        response = assert_health_stays_responsive(
+            create_unified_app(db_path=db_path),
+            lambda base: requests.post(
+                f"{base}/review/api/open-in-photos", params={"path": str(img)}, timeout=30
+            ),
+            entered,
+            release,
+        )
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert revealed == [str(img)]

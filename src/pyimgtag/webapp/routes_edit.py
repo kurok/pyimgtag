@@ -24,6 +24,7 @@ Implementation notes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
@@ -34,6 +35,11 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pyimgtag.progress_db import ProgressDB
+
+# Upper bound for the Photos membership probe behind ``GET /edit/api/drift``.
+# The CLI's ``cleanup-drift`` keeps the probe's 30-minute default; a browser
+# request should give up long before that and report it.
+WEB_DRIFT_PROBE_TIMEOUT_SECONDS = 60
 
 logger = logging.getLogger(__name__)
 
@@ -376,16 +382,24 @@ def build_edit_router(db: ProgressDB, api_base: str = "") -> Any:
     async def get_drift() -> dict:
         """Summarise stale ``processed_images`` rows for the panel.
 
-        Runs the full drift scan synchronously — the panel pulls counts
-        + a 20-row sample on page load. The bulk Photos.app probe is
-        capped server-side so a single slow library call cannot hang
-        the request indefinitely. ``photos_probe_error`` is forwarded
+        Runs the full drift scan in a worker thread — the panel pulls
+        counts + a 20-row sample on page load. The bulk Photos.app probe
+        is capped at ``WEB_DRIFT_PROBE_TIMEOUT_SECONDS`` (the CLI keeps its
+        longer default) so a slow library call cannot hang the request;
+        a timeout surfaces as ``photos_probe_error``. ``photos_probe_error`` is forwarded
         unchanged so the UI can hint when the macOS-only signal
         degraded.
         """
+        from pyimgtag.applescript_writer import fetch_photos_membership
         from pyimgtag.cleanup_drift import DRIFT_SAMPLE_SIZE, scan_drift
 
-        report = scan_drift(db)
+        def probe() -> tuple[set[str], str | None]:
+            return fetch_photos_membership(timeout=WEB_DRIFT_PROBE_TIMEOUT_SECONDS)
+
+        # The scan walks every row and the Photos probe shells out to
+        # osascript: run both off the event loop so /health and the run
+        # controls stay responsive while it works.
+        report = await asyncio.to_thread(scan_drift, db, fetch_membership=probe)
         return {
             "total": report.total,
             "disk_missing": report.disk_missing,

@@ -467,3 +467,68 @@ def test_edit_page_template_markers():
     assert ":root{--bg:" in html  # nav_styles (design CSS) injected
     assert '<nav class="nav">' in html  # nav shell injected
     assert not re.findall(r"__[A-Z][A-Z0-9_]+__", html)
+
+
+# --- the drift scan runs off the event loop (#390) ---------------------------
+
+
+def _seed_one_image(tmp_path):
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    img = tmp_path / "a.jpg"
+    img.write_bytes(b"\x00")
+    db.mark_done(img, ImageResult(file_path=str(img), file_name="a.jpg", tags=["x"]))
+    db.close()
+    return db_path, img
+
+
+def test_drift_scan_does_not_block_other_requests(tmp_path):
+    import threading
+
+    import requests
+
+    from pyimgtag.webapp.unified_app import create_unified_app
+    from tests.e2e_support import assert_health_stays_responsive
+
+    db_path, _ = _seed_one_image(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_probe(timeout):
+        entered.set()
+        release.wait(15.0)
+        return set(), None
+
+    with patch("pyimgtag.applescript_writer.fetch_photos_membership", slow_probe):
+        response = assert_health_stays_responsive(
+            create_unified_app(db_path=db_path),
+            lambda base: requests.get(f"{base}/edit/api/drift", timeout=30),
+            entered,
+            release,
+        )
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+
+
+def test_the_web_drift_probe_uses_a_short_timeout(tmp_path):
+    seen: list[int] = []
+
+    def probe(timeout):
+        seen.append(timeout)
+        return set(), "probe timed out"
+
+    db, client = _edit_client(tmp_path, seed_delete=1)
+    with patch("pyimgtag.applescript_writer.fetch_photos_membership", probe):
+        r = client.get("/edit/api/drift")
+    assert r.status_code == 200
+    assert seen and all(0 < t <= 60 for t in seen)
+    assert seen == [routes_edit.WEB_DRIFT_PROBE_TIMEOUT_SECONDS]
+    assert r.json()["photos_probe_error"] == "probe timed out"
+
+
+def test_the_cli_drift_probe_keeps_its_long_default():
+    import inspect
+
+    from pyimgtag.applescript_writer import fetch_photos_membership
+
+    default = inspect.signature(fetch_photos_membership).parameters["timeout"].default
+    assert default == 1800
