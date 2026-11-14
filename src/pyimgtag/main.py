@@ -742,6 +742,7 @@ def _add_concurrency_flags(p: argparse.ArgumentParser) -> None:
 def _add_status_reprocess_preflight_subcommands(subparsers: Any) -> None:
     status_p = _sub(subparsers, "status")
     status_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    _add_format_arg(status_p)
 
     reprocess_p = _sub(subparsers, "reprocess")
     reprocess_p.add_argument("--db", help=_DEFAULT_DB_HELP)
@@ -772,6 +773,16 @@ def _add_status_reprocess_preflight_subcommands(subparsers: Any) -> None:
     src_pre.add_argument("--photos-library", help="Path to an Apple Photos library package")
 
 
+def _add_format_arg(parser: argparse.ArgumentParser) -> None:
+    """Add ``--format {table,json}``; JSON goes to stdout and nothing else does."""
+    parser.add_argument(
+        "--format",
+        choices=["table", "json"],
+        default="table",
+        help="Output format (default: table)",
+    )
+
+
 def _add_cleanup_subcommands(subparsers: Any) -> None:
     cleanup_p = _sub(subparsers, "cleanup")
     cleanup_p.add_argument("--db", help=_DEFAULT_DB_HELP)
@@ -780,6 +791,7 @@ def _add_cleanup_subcommands(subparsers: Any) -> None:
         action="store_true",
         help="Also show photos flagged as 'review' (default: delete only)",
     )
+    _add_format_arg(cleanup_p)
 
     drift_p = _sub(subparsers, "cleanup-drift")
     drift_p.add_argument("--db", help=_DEFAULT_DB_HELP)
@@ -901,6 +913,7 @@ def _add_faces_subcommand(subparsers: Any) -> None:
 
     faces_review = faces_sub.add_parser("review", help="List detected persons and face counts")
     faces_review.add_argument("--db", help=_DEFAULT_DB_HELP)
+    _add_format_arg(faces_review)
 
     faces_apply = faces_sub.add_parser("apply", help="Write person keywords to image metadata")
     faces_apply.add_argument("--db", help=_DEFAULT_DB_HELP)
@@ -1458,7 +1471,10 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     )
     judge_p.add_argument("--output-json", metavar="FILE", help="Write results to JSON file")
     judge_p.add_argument(
-        "--verbose", action="store_true", help="Show the score and the model's reason per image"
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show the score and the model's reason per image",
     )
     judge_p.add_argument("--no-recursive", action="store_true", help="Do not scan subdirectories")
     judge_p.add_argument(
@@ -1609,6 +1625,7 @@ def _add_tags_subcommand(subparsers: Any) -> None:
 
     tags_list_p = tags_sub.add_parser("list", help="List all tags with image counts")
     tags_list_p.add_argument("--db", help=_DEFAULT_DB_HELP)
+    _add_format_arg(tags_list_p)
 
     tags_rename_p = tags_sub.add_parser("rename", help="Rename a tag across all images")
     tags_rename_p.add_argument("old_tag", help="Tag to rename")

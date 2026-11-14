@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -505,6 +506,18 @@ def _handle_faces_review(args: argparse.Namespace) -> int:
         persons = db.get_persons()
         total_faces = db.get_face_count()
 
+    if getattr(args, "format", "table") == "json":
+        doc = [
+            {
+                "person_id": p.person_id,
+                "label": p.label,
+                "confirmed": p.confirmed,
+                "face_count": len(p.face_ids),
+            }
+            for p in persons
+        ]
+        print(json.dumps(doc, indent=2))
+        return 0
     if not persons and total_faces == 0:
         print("No faces detected yet. Run 'pyimgtag faces scan' first.", file=sys.stderr)
         return 0

@@ -19,6 +19,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     error = stats["error"]
     pending = total - ok - error
 
+    if getattr(args, "format", "table") == "json":
+        print(json.dumps({"total": total, "ok": ok, "error": error, "pending": pending}, indent=2))
+        return 0
     pct = f"{ok * 100 // total}%" if total > 0 else "0%"
     print(f"Progress: {ok} / {total} ({pct})")
     print(f"  ok:      {ok}")
@@ -61,6 +64,25 @@ def cmd_cleanup(args: argparse.Namespace) -> int:
     with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
         candidates = db.get_cleanup_candidates(include_review=args.include_review)
         dedup_totals = db.get_dedup_totals()
+
+    if getattr(args, "format", "table") == "json":
+        doc = {
+            "candidates": [
+                {
+                    "file_path": item["file_path"],
+                    "cleanup_class": item["cleanup_class"],
+                    "tags": json.loads(item["tags"]) if item.get("tags") else [],
+                    "image_date": item.get("image_date"),
+                    "nearest_city": item.get("nearest_city"),
+                    "nearest_country": item.get("nearest_country"),
+                }
+                for item in candidates
+            ],
+            "duplicate_groups": dedup_totals["groups"],
+            "reclaimable_bytes": dedup_totals["reclaimable_bytes"],
+        }
+        print(json.dumps(doc, indent=2))
+        return 0
 
     if dedup_totals["groups"]:
         from pyimgtag.insights_report import format_bytes
