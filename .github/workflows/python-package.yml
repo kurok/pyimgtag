@@ -74,20 +74,34 @@ jobs:
       run: uv run pre-commit run --all-files
 
   # -------------------------------------------------------------------
-  # Unit tests + Coverage (3 OSes x Python 3.14, parallel).
+  # Unit tests + Coverage: each OS with the Python its users actually get.
   #
-  # CI runs 3.14 only. The repository ruleset on main requires the contexts
-  # "test (<os>, 3.14)", so 3.14 must stay in the matrix or every pull
-  # request sits BLOCKED. pyproject still declares requires-python >=
-  # 3.12; 3.12 and 3.13 are no longer exercised here.
+  # The matrix mirrors real-world installs on the latest OS releases rather
+  # than every supported minor version:
+  #   - Ubuntu 26.04 LTS ships python3 3.14 (the ubuntu-latest image).
+  #   - macOS 27 ships /usr/bin/python3 3.9.6 from the Command Line Tools,
+  #     which is EOL and below requires-python; the standard install is
+  #     Homebrew, whose python3 is 3.15. GitHub has no macOS 27 runner yet,
+  #     so macos-latest (macOS 26) runs it.
+  #   - Windows bundles no Python; the python.org install manager installs
+  #     the latest release, 3.15.
+  # Revisit when a new Ubuntu LTS or macOS ships or the defaults move. The
+  # ruleset on main requires all three legs by name: rename them there too.
+  # pyproject still declares requires-python >= 3.12; 3.12 and 3.13 are no
+  # longer exercised here.
   # -------------------------------------------------------------------
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.14"]
+        include:
+          - os: ubuntu-latest
+            python-version: "3.14"
+          - os: macos-latest
+            python-version: "3.15"
+          - os: windows-latest
+            python-version: "3.15"
     steps:
     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
     - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0

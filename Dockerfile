@@ -1,4 +1,4 @@
-# Pinned to the linux/amd64+linux/arm64 manifest list digest of python:3.12-slim
+# Pinned to the linux/amd64+linux/arm64 manifest list digest of python:3.15-slim
 # published at https://hub.docker.com/_/python. Bump via Dependabot's `docker`
 # ecosystem or manually when a security patch is needed.
 

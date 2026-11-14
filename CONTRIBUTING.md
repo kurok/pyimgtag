@@ -7,7 +7,7 @@ Thank you for your interest in contributing to pyimgtag! This guide covers every
 ### Prerequisites
 
 - macOS (primary platform), Linux, or Windows
-- Python 3.11 or newer (3.14 recommended)
+- Python 3.12 or newer (3.14 recommended)
 - Git
 - [Ollama](https://ollama.ai) (for running the tool, not required for tests)
 - Optional: `exiftool` (`brew install exiftool` on macOS)
@@ -181,7 +181,7 @@ refactor(geocoder): extract rate limiter into separate class
 - **Last push approval** required -- the person who pushes last cannot self-approve
 - **All review threads** must be resolved before merge
 - **Required linear history** -- squash or rebase merges only (no merge commits)
-- **CI must be green** -- the `test (ubuntu-latest, 3.14)` status check must pass
+- **CI must be green** -- the `test (ubuntu-latest, 3.14)`, `test (macos-latest, 3.15)` and `test (windows-latest, 3.15)` status checks must pass
 - **CodeQL** analysis must pass (high or higher severity threshold)
 - No force pushes or branch deletion on `main`
 
@@ -227,7 +227,7 @@ Every push and PR triggers these parallel CI jobs (`.github/workflows/python-pac
 | **lint** | `ruff format --check` + `ruff check` |
 | **typecheck** | mypy type checking |
 | **pre-commit** | Trailing whitespace, EOF, YAML, JSON, merge conflicts, ruff |
-| **test** | Pytest matrix: Ubuntu / macOS / Windows on Python 3.14; coverage uploaded from Ubuntu to Codecov (informational, non-blocking) |
+| **test** | Pytest matrix, each OS with the Python its users get: Ubuntu 3.14, macOS 3.15, Windows 3.15; coverage uploaded from Ubuntu to Codecov (informational, non-blocking) |
 | **security** | bandit + pip-audit (dependency vulnerabilities) |
 | **docker** | Build the Docker image and run smoke tests |
 
@@ -237,7 +237,7 @@ A separate `pr-tests` workflow runs a Playwright Chromium smoke against the dash
 
 ### Style
 
-- **Formatter/linter:** ruff (line length: 100, target Python 3.11)
+- **Formatter/linter:** ruff (line length: 100, target Python 3.12)
 - Follow existing patterns in the codebase
 - Keep functions focused -- one function, one job
 - No unnecessary abstractions; simple and direct is better
