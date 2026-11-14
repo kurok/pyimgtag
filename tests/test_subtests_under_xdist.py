@@ -2,10 +2,13 @@
 
 pytest 9 reports each ``subTest`` separately, and under ``-n`` that report,
 including the subtest's keyword parameters, is sent to the controller over
-execnet, which only serialises builtin types. A ``datetime`` parameter made
+execnet, which only serialises builtin types. Before pytest 9.2 those
+parameters were sent as-is, so a ``datetime`` parameter made
 ``test_timestamps_match_the_specs_date_time_pattern`` fail with
 ``DumpError: can't serialize <class 'datetime.datetime'>`` whenever it ran on a
-worker, and pass when run in-process.
+worker (the lock pinned 9.0.3; CI, installing unpinned, already had 9.2).
+pytest 9.2 converts them with ``saferepr`` first (pytest-dev/pytest-xdist#1273),
+so the floor is ``pytest>=9.2``; the immich test also labels with strings.
 """
 
 from __future__ import annotations
@@ -42,7 +45,12 @@ def test_the_immich_timestamp_test_passes_on_an_xdist_worker():
         check=False,
     )
     assert result.returncode == 0, result.stdout[-2000:] + result.stderr[-2000:]
-    assert "can't serialize" not in result.stdout
+
+
+def test_pytest_is_new_enough_to_send_any_subtest_parameter():
+    """pytest < 9.2 sent subtest kwargs raw over execnet (pytest-xdist#1273)."""
+    major, minor = (int(part) for part in pytest.__version__.split(".")[:2])
+    assert (major, minor) >= (9, 2), pytest.__version__
 
 
 def test_execnet_cannot_carry_a_datetime_but_can_carry_its_iso_string():
