@@ -57,25 +57,32 @@ __MODAL_JS__
 let allTags = [];
 
 // Sends a rename/merge/delete. On success the modal closes and the list
-// reloads; on a 404/422 the server's reason stays visible in the modal.
+// reloads; on any failure the server's reason stays visible in the modal.
 async function postChange(path, body) {
-  const r = await fetch('__API_BASE__' + path, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body),
-  });
-  if (r.ok) { closeModal(); load(); return; }
-  let reason = 'Request failed (HTTP ' + r.status + ')';
   try {
-    const data = await r.json();
-    if (typeof data.detail === 'string') reason = data.detail;
-  } catch (_e) { /* not JSON: keep the HTTP status */ }
-  document.getElementById('modal-sub').textContent = 'Error: ' + reason;
+    await apiFetch('__API_BASE__' + path, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    showModalError(err.message);
+    return;
+  }
+  closeModal();
+  load();
 }
 
 async function load() {
-  const r = await fetch('__API_BASE__/api/tags');
-  allTags = await r.json();
-  document.getElementById('status').textContent = allTags.length + ' tags';
+  const status = document.getElementById('status');
+  status.textContent = 'Loading\u2026';
+  try {
+    allTags = await apiFetch('__API_BASE__/api/tags');
+  } catch (err) {
+    status.textContent = 'Could not load tags';
+    showLoadError('list', err.message, load);
+    return;
+  }
+  status.textContent = allTags.length + ' tags';
   render(allTags);
 }
 

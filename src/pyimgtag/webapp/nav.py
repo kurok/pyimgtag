@@ -112,6 +112,11 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-seri
 .modal-title{font-size:17px;font-weight:600;letter-spacing:-.2px;margin-bottom:4px}
 .modal-sub{font-size:13px;color:var(--muted);margin-bottom:18px;line-height:1.5}
 .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+.load-error{display:flex;gap:12px;align-items:center;margin:12px 0;padding:12px 14px;
+            border-radius:8px;background:rgba(255,59,48,.08);color:var(--danger);
+            font-size:13px;line-height:1.4}
+.load-error-text{flex:1}
+.modal-sub.modal-error{color:var(--danger)}
 """
 
 # Backward-compatibility alias — used by the routes_*.py page templates (__NAV_STYLES__).
@@ -133,6 +138,7 @@ MODAL_JS = """<script>
 function openModal(title, sub, fieldHtml, confirmLabel, confirmCls, onConfirm) {
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-sub').textContent = sub;
+  document.getElementById('modal-sub').classList.remove('modal-error');
   document.getElementById('modal-field').innerHTML = fieldHtml;
   const btn = document.getElementById('modal-confirm');
   btn.textContent = confirmLabel;
@@ -142,6 +148,74 @@ function openModal(title, sub, fieldHtml, confirmLabel, confirmCls, onConfirm) {
 }
 function closeModal() {
   document.getElementById('modal-overlay').classList.remove('open');
+}
+</script>"""
+
+
+# Shared request helpers, emitted once per page by :func:`render_nav` so every
+# page can use them without its own copy.
+#
+# - ``apiFetch(url, opts)`` resolves to the parsed JSON (or text) of a 2xx
+#   response and rejects with an ``Error`` whose message is the server's
+#   ``detail`` (or the HTTP status) for anything else, or a plain sentence when
+#   the server cannot be reached. ``err.status`` carries the HTTP status.
+# - ``showLoadError(target, message, retry)`` replaces the contents of
+#   *target* (an element or id) with an inline ``role="alert"`` banner and a
+#   Retry button that calls *retry*.
+# - ``showModalError(message)`` keeps the shared modal open and shows why the
+#   action failed in place of its subtitle.
+API_JS = """<script>
+async function apiFetch(url, opts) {
+  let r;
+  try {
+    r = await fetch(url, opts);
+  } catch (_e) {
+    throw new Error('Cannot reach the pyimgtag server. Is it still running?');
+  }
+  if (!r.ok) {
+    let message = 'HTTP ' + r.status + (r.statusText ? ' ' + r.statusText : '');
+    try {
+      const data = await r.json();
+      if (typeof data.detail === 'string') {
+        message = data.detail;
+      } else if (Array.isArray(data.detail)) {
+        message = data.detail.map(d => (d && d.msg) ? d.msg : String(d)).join('; ');
+      }
+    } catch (_e) { /* not JSON: keep the HTTP status */ }
+    const err = new Error(message);
+    err.status = r.status;
+    throw err;
+  }
+  if (r.status === 204) return null;
+  const type = r.headers.get('content-type') || '';
+  return type.includes('json') ? r.json() : r.text();
+}
+function showLoadError(target, message, retry) {
+  const host = typeof target === 'string' ? document.getElementById(target) : target;
+  if (!host) return;
+  host.innerHTML = '';
+  const box = document.createElement('div');
+  box.className = 'load-error';
+  box.setAttribute('role', 'alert');
+  const text = document.createElement('span');
+  text.className = 'load-error-text';
+  text.textContent = message;
+  box.appendChild(text);
+  if (retry) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-secondary btn-sm load-error-retry';
+    btn.textContent = 'Retry';
+    btn.addEventListener('click', () => { box.remove(); retry(); });
+    box.appendChild(btn);
+  }
+  host.appendChild(box);
+}
+function showModalError(message) {
+  const sub = document.getElementById('modal-sub');
+  if (!sub) return;
+  sub.textContent = 'Error: ' + message;
+  sub.classList.add('modal-error');
 }
 </script>"""
 
@@ -187,5 +261,5 @@ def render_nav(active: str, status_html: str = "") -> str:
         '<span class="nav-spacer"></span>'
         f"{status}"
         f"{version_link}"
-        "</nav>"
+        "</nav>" + API_JS
     )

@@ -116,10 +116,14 @@ let _sort = 'path_asc';
 let PAGE = 50;
 
 async function loadStats() {
-  const r = await fetch('{{ api_base }}/api/stats');
-  const d = await r.json();
-  document.getElementById('stats').textContent =
-    d.total + ' images · ' + d.error + ' errors';
+  const stats = document.getElementById('stats');
+  try {
+    const d = await apiFetch('{{ api_base }}/api/stats');
+    stats.textContent = d.total + ' images · ' + d.error + ' errors';
+  } catch (err) {
+    stats.textContent = 'Stats unavailable';
+    stats.title = err.message;
+  }
 }
 
 // If the page was opened with ?file=<path> (typically from the dashboard
@@ -139,8 +143,14 @@ async function load() {
          (_cleanup ? '&cleanup=' + _cleanup : '') +
          (_status ? '&status=' + _status : '');
   }
-  const r = await fetch('{{ api_base }}/api/images' + qs);
-  const d = await r.json();
+  let d;
+  try {
+    d = await apiFetch('{{ api_base }}/api/images' + qs);
+  } catch (err) {
+    document.getElementById('count').textContent = '';
+    showLoadError('grid', err.message, load);
+    return;
+  }
   _total = d.total;
   document.getElementById('count').textContent = _total + ' shown';
   const pageText = _singleFile
@@ -377,31 +387,43 @@ function renderTags(container, img) {
 async function removeTag(img, tag, container) {
   const prev = (img.tags || []).slice();
   img.tags = prev.filter(t => t !== tag);
-  const r = await fetch('{{ api_base }}/api/images/tags', {
-    method: 'PATCH', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({file_path: img.file_path, tags: img.tags}),
-  });
-  if (!r.ok) { img.tags = prev; alert('Failed to remove tag'); }
+  try {
+    await apiFetch('{{ api_base }}/api/images/tags', {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({file_path: img.file_path, tags: img.tags}),
+    });
+  } catch (err) {
+    img.tags = prev;
+    alert('Failed to remove tag: ' + err.message);
+  }
   renderTags(container, img);
 }
 
 async function addTag(img, tag, container) {
   const prev = (img.tags || []).slice();
   img.tags = [...new Set([...prev, tag])];
-  const r = await fetch('{{ api_base }}/api/images/tags', {
-    method: 'PATCH', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({file_path: img.file_path, tags: img.tags}),
-  });
-  if (!r.ok) { img.tags = prev; alert('Failed to add tag'); }
+  try {
+    await apiFetch('{{ api_base }}/api/images/tags', {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({file_path: img.file_path, tags: img.tags}),
+    });
+  } catch (err) {
+    img.tags = prev;
+    alert('Failed to add tag: ' + err.message);
+  }
   renderTags(container, img);
 }
 
 async function setCleanup(img, val) {
-  const r = await fetch('{{ api_base }}/api/images/cleanup', {
-    method: 'PATCH', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({file_path: img.file_path, cleanup_class: val}),
-  });
-  if (!r.ok) { alert('Failed to update'); return; }
+  try {
+    await apiFetch('{{ api_base }}/api/images/cleanup', {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({file_path: img.file_path, cleanup_class: val}),
+    });
+  } catch (err) {
+    alert('Failed to update: ' + err.message);
+    return;
+  }
   load();
 }
 

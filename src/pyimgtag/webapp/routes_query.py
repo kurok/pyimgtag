@@ -140,6 +140,13 @@ __NAV__
 <div id="count"></div>
 <div id="results"></div>
 <script>
+// Enter in any filter runs the search, like the button.
+document.querySelectorAll('.filter-card input, .filter-card select').forEach(el => {
+  el.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); search(); }
+  });
+});
+
 async function search() {
   const params = new URLSearchParams();
   const add = (id, key) => {
@@ -163,10 +170,19 @@ async function search() {
   add('f_sort', 'sort');
   add('f_limit', 'limit');
 
-  const r = await fetch('__API_BASE__/api/images?' + params.toString());
-  const rows = await r.json();
-  document.getElementById('count').textContent = rows.length + ' results';
+  const count = document.getElementById('count');
   const wrap = document.getElementById('results');
+  count.textContent = 'Searching\u2026';
+  let rows;
+  try {
+    rows = await apiFetch('__API_BASE__/api/images?' + params.toString());
+  } catch (err) {
+    // e.g. a 400 for year=abc: show the server's reason, never "undefined results".
+    count.textContent = 'Search failed';
+    showLoadError(wrap, err.message, search);
+    return;
+  }
+  count.textContent = rows.length + ' results';
   wrap.innerHTML = '';
   if (!rows.length) return;
 

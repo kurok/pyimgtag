@@ -240,7 +240,7 @@ def test_the_page_shows_the_server_reason_instead_of_closing():
 
     html = render_tags_html("/tags")
     assert "async function postChange(path, body)" in html
-    assert "document.getElementById('modal-sub').textContent = 'Error: ' + reason" in html
+    assert "showModalError(err.message);" in html  # the dialog stays open with the reason
     assert html.count("postChange('/api/tags/") == 3
     assert "val === t.tag" not in html  # the server decides what is a no-op
 

@@ -48,14 +48,20 @@
   const countersEl = document.getElementById('counters');
   const recentEl = document.getElementById('recent');
   const errorEl = document.getElementById('error');
+  // A refused run control keeps its message for a few seconds; the 1.5 s
+  // poll would otherwise clear it before anyone could read it.
+  let controlErrorUntil = 0;
+  function setError(text) {
+    if (Date.now() < controlErrorUntil) return;
+    errorEl.textContent = text;
+  }
   const pauseBtn = document.getElementById('pauseBtn');
   const unpauseBtn = document.getElementById('unpauseBtn');
   const stopBtn = document.getElementById('stopBtn');
 
   async function refresh() {
     try {
-      const r = await fetch('/api/run/current');
-      const d = await r.json();
+      const d = await apiFetch('/api/run/current');
       if (!d.active) {
         stateEl.textContent = 'idle';
         stateEl.className = 'pill-state';
@@ -63,7 +69,7 @@
         currentEl.textContent = '(no active item)';
         countersEl.innerHTML = '';
         recentEl.innerHTML = '';
-        errorEl.textContent = '';
+        setError('');
         pauseBtn.disabled = true;
         unpauseBtn.disabled = true;
         stopBtn.disabled = true;
@@ -88,7 +94,7 @@
       } else {
         currentEl.textContent = '(no active item)';
       }
-      errorEl.textContent = d.last_error || '';
+      setError(d.last_error || '');
       pauseBtn.disabled = d.state !== 'running';
       // Resuming is also allowed while a pause is still pending — the server
       // cancels a PAUSING state the same way it resumes a PAUSED one.
@@ -135,21 +141,27 @@
         }
         recentEl.appendChild(li);
       }
-    } catch (e) { errorEl.textContent = String(e); }
+    } catch (e) { setError('Status unavailable: ' + e.message); }
   }
 
-  pauseBtn.addEventListener('click', async () => {
-    await fetch('/api/run/current/pause', {method: 'POST'});
+  // Run controls: a refused action (e.g. 404 "no active run") is shown in
+  // the error line instead of silently doing nothing.
+  async function control(action, url) {
+    try {
+      await apiFetch(url, {method: 'POST'});
+    } catch (err) {
+      controlErrorUntil = 0;
+      setError('Could not ' + action + ': ' + err.message);
+      controlErrorUntil = Date.now() + 6000;
+      return;
+    }
     refresh();
-  });
-  unpauseBtn.addEventListener('click', async () => {
-    await fetch('/api/run/current/unpause', {method: 'POST'});
-    refresh();
-  });
-  stopBtn.addEventListener('click', async () => {
+  }
+  pauseBtn.addEventListener('click', () => control('pause', '/api/run/current/pause'));
+  unpauseBtn.addEventListener('click', () => control('unpause', '/api/run/current/unpause'));
+  stopBtn.addEventListener('click', () => {
     if (!confirm('Stop the run after the current image finishes?')) return;
-    await fetch('/api/run/current/stop', {method: 'POST'});
-    refresh();
+    control('stop', '/api/run/current/stop');
   });
 
   refresh();
