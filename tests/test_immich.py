@@ -268,7 +268,10 @@ class TestRequestsConformToTheSpec(unittest.TestCase):
             datetime(2024, 6, 1, 10, 0, 0, 123456),
             datetime(2024, 2, 29, 23, 59, 59, tzinfo=timezone(timedelta(hours=3))),
         ):
-            with self.subTest(value=value):
+            # subTest parameters travel to the xdist controller through
+            # execnet, which cannot serialise a datetime (#408): label the
+            # subtest with the ISO string instead.
+            with self.subTest(value=value.isoformat()):
                 self.assertRegex(immich._isoformat(value), pattern)
 
 
