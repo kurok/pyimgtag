@@ -1758,6 +1758,19 @@ def main(argv: list[str] | None = None) -> int:
 
     _check_for_update()
 
+    from pyimgtag.db.progress_db import MigrationBackupError, SchemaTooNewError
+
+    try:
+        return _dispatch(args, parser)
+    except (SchemaTooNewError, MigrationBackupError) as exc:
+        # Raised by whichever handler opens the database first; one place
+        # turns it into a message instead of a traceback.
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
+def _dispatch(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Run the handler for ``args.subcommand`` and return its exit code."""
     from pyimgtag.commands.cleanup_drift import cmd_cleanup_drift
     from pyimgtag.commands.db import cmd_cleanup, cmd_reprocess, cmd_status
     from pyimgtag.commands.dedup import cmd_dedup
