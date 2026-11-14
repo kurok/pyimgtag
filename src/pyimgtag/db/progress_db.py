@@ -83,7 +83,7 @@ class DatabaseNotFoundError(FileNotFoundError):
     ``--db`` look like an empty library.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path | str) -> None:
         self.path = path
         super().__init__(f"no database at {path}. Run 'pyimgtag run' first, or check --db.")
 
@@ -368,8 +368,17 @@ class ProgressDB:
         if db_path is None:
             db_path = Path.home() / ".cache" / "pyimgtag" / "progress.db"
         self._path = Path(db_path)
-        if must_exist and not self._path.is_file():
-            raise DatabaseNotFoundError(self._path)
+        if must_exist:
+            # Path("") is ".", so an empty --db is reported as such rather
+            # than as a missing "."; an unreadable parent counts as missing.
+            if str(db_path) == "":
+                raise DatabaseNotFoundError("''")
+            try:
+                present = self._path.is_file()
+            except OSError:
+                present = False
+            if not present:
+                raise DatabaseNotFoundError(self._path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         try:

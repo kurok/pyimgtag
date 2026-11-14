@@ -2862,3 +2862,23 @@ def test_the_default_still_creates_a_missing_database(tmp_path):
     db_path = tmp_path / "new" / "x.db"
     ProgressDB(db_path).close()
     assert db_path.is_file()
+
+
+def test_must_exist_reports_an_empty_path_as_such(tmp_path, monkeypatch):
+    from pyimgtag.db.progress_db import DatabaseNotFoundError
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(DatabaseNotFoundError) as info:
+        ProgressDB("", must_exist=True)
+    assert str(info.value).startswith("no database at ''.")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_must_exist_treats_an_unreadable_parent_as_missing(tmp_path):
+    from pyimgtag.db.progress_db import DatabaseNotFoundError
+
+    target = tmp_path / "locked" / "x.db"
+    with mock.patch.object(Path, "is_file", side_effect=PermissionError("denied")):
+        with pytest.raises(DatabaseNotFoundError):
+            ProgressDB(target, must_exist=True)
+    assert not (tmp_path / "locked").exists()
