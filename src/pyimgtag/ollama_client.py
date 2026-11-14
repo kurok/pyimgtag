@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import threading
 from typing import Any
 
 import requests
@@ -113,7 +114,52 @@ def _build_prompt_with_context(context: dict) -> str:
     )
 
 
-class OllamaClient:
+# Reasons a judge call failed, as reported by ``last_error``.
+JUDGE_IMAGE_UNREADABLE = "image could not be loaded"
+JUDGE_UNPARSEABLE = "response could not be parsed"
+
+
+def short_request_error(exc: requests.RequestException) -> str:
+    """Name a request failure in a few words: ``request failed: <reason>``."""
+    response = getattr(exc, "response", None)
+    if response is not None and getattr(response, "status_code", None) is not None:
+        reason = f"HTTP {response.status_code}"
+    elif isinstance(exc, requests.Timeout):
+        reason = "timed out"
+    elif isinstance(exc, requests.ConnectionError):
+        reason = "could not connect"
+    else:
+        reason = type(exc).__name__
+    return f"request failed: {reason}"
+
+
+class JudgeErrorMixin:
+    """Per-thread ``last_error`` for ``judge_image``, which returns only ``None``.
+
+    ``judge -j N`` calls one client from several worker threads, so the reason
+    is kept per thread: a worker reads the reason for its own call.
+    """
+
+    @property
+    def _judge_error_slot(self) -> threading.local:
+        slot = self.__dict__.get("_judge_error_local")
+        if slot is None:
+            slot = self.__dict__.setdefault("_judge_error_local", threading.local())
+        return slot
+
+    @property
+    def last_error(self) -> str | None:
+        """Why this thread's last ``judge_image`` returned ``None``; else ``None``."""
+        return getattr(self._judge_error_slot, "value", None)
+
+    def _judge_failed(self, reason: str) -> None:
+        self._judge_error_slot.value = reason
+
+    def _judge_ok(self) -> None:
+        self._judge_error_slot.value = None
+
+
+class OllamaClient(JudgeErrorMixin):
     """Client for local Ollama vision model."""
 
     #: Optional :class:`pyimgtag.prompt_template.PromptBuilder`. When set,
@@ -168,22 +214,33 @@ class OllamaClient:
         return parsed
 
     def judge_image(self, file_path: str) -> JudgeScores | None:
-        """Score an image with the photo-judge rubric. Returns None on failure."""
+        """Score an image with the photo-judge rubric.
+
+        Returns None on failure; :attr:`last_error` then says why (image load,
+        request or parse) and is cleared by the next success.
+        """
         try:
             img_b64 = self._prepare_image(file_path)
         except (OSError, ValueError, RuntimeError):
+            self._judge_failed(JUDGE_IMAGE_UNREADABLE)
             return None
 
         try:
             resp = self._post_chat(_JUDGE_PROMPT, img_b64)
-        except requests.RequestException:
+        except requests.RequestException as e:
+            self._judge_failed(short_request_error(e))
             return None
 
         try:
             text = resp.json().get("message", {}).get("content", "")
-            return _parse_judge_response(text)
+            scores = _parse_judge_response(text)
         except (KeyError, ValueError, AttributeError):
+            scores = None
+        if scores is None:
+            self._judge_failed(JUDGE_UNPARSEABLE)
             return None
+        self._judge_ok()
+        return scores
 
     def _post_chat(self, prompt: str, img_b64: str) -> requests.Response:
         """Send a single chat request to Ollama and return the raw Response.

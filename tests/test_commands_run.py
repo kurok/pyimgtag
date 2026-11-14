@@ -2745,3 +2745,53 @@ class TestHydrateGeocodeFailure:
 
         assert result is not None
         assert stats["geocode_failures"] == 1
+
+
+# --- exit-code contract (#392) -----------------------------------------------
+
+
+class TestRunExitCodeContract:
+    def _run(self, tmp_path: Path, results):
+        from pyimgtag.commands.run import cmd_run
+        from pyimgtag.models import TagResult
+
+        files = []
+        for i, _ in enumerate(results):
+            f = tmp_path / f"p{i}.jpg"
+            f.write_bytes(b"\xff\xd8\xff\xd9")
+            files.append(f)
+        args = _base_args(tmp_path)
+        with (
+            patch("pyimgtag.commands.run.check_ollama", return_value=(True, "up")),
+            patch("pyimgtag.commands.run.OllamaClient") as cls,
+            patch("pyimgtag.commands.run.scan_directory", return_value=files),
+            patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        ):
+            cls.return_value.tag_image.side_effect = [
+                TagResult(error="Ollama request failed: boom") if bad else _ok_tag()
+                for bad in results
+            ]
+            cls.return_value.prompt_builder = None
+            return cmd_run(args, MagicMock())
+
+    def test_every_model_call_failing_exits_3(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, [True, True, True]) == 3
+
+    def test_a_partial_failure_exits_0(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, [True, False, True]) == 0
+
+    def test_nothing_to_process_exits_0(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, []) == 0
+
+    def test_all_succeeding_exits_0(self, tmp_path: Path) -> None:
+        assert self._run(tmp_path, [False, False]) == 0
+
+
+def test_exit_code_for_table() -> None:
+    from pyimgtag.exit_codes import EXIT_ALL_MODEL_CALLS_FAILED, exit_code_for
+
+    assert EXIT_ALL_MODEL_CALLS_FAILED == 3
+    assert exit_code_for(0, 0) == 0
+    assert exit_code_for(3, 3) == 3
+    assert exit_code_for(3, 2) == 0
+    assert exit_code_for(1, 0) == 0

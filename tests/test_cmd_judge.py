@@ -188,3 +188,58 @@ class TestJudgeOllamaChecksMatchRun:
         ):
             cmd_judge(_make_args(input_dir=str(tmp_path), model=None), MagicMock())
         model_check.assert_called_once_with("gemma4:e4b", "http://localhost:11434")
+
+
+class TestJudgeExitCodeAndReason:
+    """``judge`` exits 3 when every call failed and says why each failed (#392)."""
+
+    def _judge(self, tmp_path, outcomes, jobs=1):
+        files = []
+        for i, _ in enumerate(outcomes):
+            f = tmp_path / f"p{i}.jpg"
+            f.write_bytes(b"\xff\xd8\xff\xd9")
+            files.append(f)
+
+        class Client:
+            def __init__(self):
+                self._outcomes = iter(outcomes)
+                self.last_error = None
+
+            def judge_image(self, path):
+                ok = next(self._outcomes)
+                self.last_error = None if ok else "request failed: HTTP 500"
+                return _make_scores() if ok else None
+
+            def close(self):
+                pass
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.scan_directory", return_value=files),
+            patch("pyimgtag.commands.judge.OllamaClient", return_value=Client()),
+        ):
+            return cmd_judge(_make_args(input_dir=str(tmp_path), jobs=jobs), MagicMock())
+
+    def test_every_call_failing_exits_3_and_prints_the_reason(self, tmp_path, capsys):
+        assert self._judge(tmp_path, [False, False]) == 3
+        err = capsys.readouterr().err
+        assert "judge failed (request failed: HTTP 500), skipping" in err
+
+    def test_a_partial_failure_exits_0(self, tmp_path):
+        assert self._judge(tmp_path, [False, True]) == 0
+
+    def test_nothing_to_judge_exits_0(self, tmp_path):
+        assert self._judge(tmp_path, []) == 0
+
+    def test_the_session_records_the_reason(self, tmp_path):
+        from pyimgtag.commands.judge import _judge_path
+
+        client = MagicMock()
+        client.judge_image.return_value = None
+        client.last_error = "image could not be loaded"
+        assert _judge_path(client, tmp_path / "a.jpg", _make_args()) == (
+            None,
+            "image could not be loaded",
+        )
+        client.last_error = MagicMock()  # a client without a real reason
+        assert _judge_path(client, tmp_path / "a.jpg", _make_args())[1] == "unknown error"

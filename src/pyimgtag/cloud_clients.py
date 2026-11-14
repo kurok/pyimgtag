@@ -44,10 +44,14 @@ from pyimgtag.models import JudgeScores, TagResult
 from pyimgtag.ollama_client import (
     _JUDGE_PROMPT,
     _PROMPT_BASE,
+    JUDGE_IMAGE_UNREADABLE,
+    JUDGE_UNPARSEABLE,
+    JudgeErrorMixin,
     _build_prompt_with_context,
     _parse_judge_response,
     _parse_response,
     prepare_image_b64,
+    short_request_error,
 )
 
 
@@ -154,7 +158,7 @@ def _require_api_key(explicit: str | None, env_var: str, backend: str) -> str:
     return key
 
 
-class BaseCloudClient(ABC):
+class BaseCloudClient(JudgeErrorMixin, ABC):
     """Shared tag/judge flow for the cloud vision clients.
 
     Concrete subclasses provide only the provider-specific hooks: API-key
@@ -244,15 +248,23 @@ class BaseCloudClient(ABC):
 
         Returns None on any failure (image load, request, or parse) — unlike
         :meth:`tag_image`, which reports failures via ``TagResult.error``.
+        :attr:`last_error` then says why, and is cleared by the next success.
         """
         try:
             img_b64 = prepare_image_b64(file_path, self.max_dim)
         except (OSError, ValueError, RuntimeError):
+            self._judge_failed(JUDGE_IMAGE_UNREADABLE)
             return None
         text = self._call(_JUDGE_PROMPT, img_b64, on_error_msg=None)
         if not isinstance(text, str):
+            # _call recorded the request or response-shape reason.
             return None
-        return _parse_judge_response(text)
+        scores = _parse_judge_response(text)
+        if scores is None:
+            self._judge_failed(JUDGE_UNPARSEABLE)
+            return None
+        self._judge_ok()
+        return scores
 
     def _call(
         self,
@@ -286,7 +298,10 @@ class BaseCloudClient(ABC):
             try:
                 resp = self._session.post(url, json=payload, timeout=self.timeout)
             except requests.RequestException as e:
-                return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
+                if on_error_msg:
+                    return TagResult(error=f"{on_error_msg}: {e}")
+                self._judge_failed(short_request_error(e))
+                return None
 
             status = getattr(resp, "status_code", None)
             if status in _RETRY_STATUSES and attempt < _MAX_ATTEMPTS:
@@ -305,22 +320,40 @@ class BaseCloudClient(ABC):
                 detail = (
                     f"{self._backend} rate limited (HTTP {status}) after {_MAX_ATTEMPTS} attempts"
                 )
-                return TagResult(error=detail) if on_error_msg else None
+                if on_error_msg:
+                    return TagResult(error=detail)
+                self._judge_failed(
+                    f"request failed: rate limited (HTTP {status}) after {_MAX_ATTEMPTS} attempts"
+                )
+                return None
 
             try:
                 resp.raise_for_status()
                 data = resp.json()
             except requests.RequestException as e:
-                return TagResult(error=f"{on_error_msg}: {e}") if on_error_msg else None
+                if on_error_msg:
+                    return TagResult(error=f"{on_error_msg}: {e}")
+                # requests' JSONDecodeError is both a RequestException and a
+                # ValueError: a body that is not JSON is a parse failure.
+                self._judge_failed(
+                    JUDGE_UNPARSEABLE if isinstance(e, ValueError) else short_request_error(e)
+                )
+                return None
             try:
                 return self._extract_text(data)
             except (KeyError, IndexError, TypeError):
                 detail = f"{self._backend} response shape unexpected: {str(data)[:160]!r}"
-                return TagResult(error=detail) if on_error_msg else None
+                if on_error_msg:
+                    return TagResult(error=detail)
+                self._judge_failed(JUDGE_UNPARSEABLE)
+                return None
 
         # Unreachable: the loop's final attempt always returns.
         detail = f"{self._backend} request failed (HTTP {status})"
-        return TagResult(error=detail) if on_error_msg else None
+        if on_error_msg:
+            return TagResult(error=detail)
+        self._judge_failed(f"request failed: HTTP {status}")  # pragma: no cover
+        return None  # pragma: no cover
 
     def close(self) -> None:
         """Release the underlying HTTP session."""

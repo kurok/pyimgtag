@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -884,3 +884,66 @@ class TestRepairTruncatedJson:
 
         result = _repair_truncated_json('{"desc": "Château d\'If"}')
         assert result == {"desc": "Château d'If"}
+
+
+# --- last_error: why judge_image returned None (#392) -------------------------
+
+
+class TestOllamaJudgeLastError:
+    def _client(self):
+        from pyimgtag.ollama_client import OllamaClient
+
+        return OllamaClient(model="m", base_url="http://127.0.0.1:1")
+
+    def _jpg(self, tmp_path):
+        from PIL import Image
+
+        path = tmp_path / "a.jpg"
+        Image.new("RGB", (20, 20)).save(path)
+        return str(path)
+
+    def _reply(self, content):
+        resp = MagicMock()
+        resp.json.return_value = {"message": {"content": content}}
+        return resp
+
+    def test_image_load_failure(self, tmp_path):
+        client = self._client()
+        assert client.judge_image(str(tmp_path / "missing.jpg")) is None
+        assert client.last_error == "image could not be loaded"
+
+    def test_request_failure(self, tmp_path):
+        import requests
+
+        client = self._client()
+        with patch.object(client, "_post_chat", side_effect=requests.ConnectionError("x")):
+            assert client.judge_image(self._jpg(tmp_path)) is None
+        assert client.last_error == "request failed: could not connect"
+
+    def test_unparseable_reply(self, tmp_path):
+        client = self._client()
+        with patch.object(client, "_post_chat", return_value=self._reply("not json")):
+            assert client.judge_image(self._jpg(tmp_path)) is None
+        assert client.last_error == "response could not be parsed"
+
+    def test_malformed_body(self, tmp_path):
+        client = self._client()
+        resp = MagicMock()
+        resp.json.side_effect = ValueError("bad")
+        with patch.object(client, "_post_chat", return_value=resp):
+            assert client.judge_image(self._jpg(tmp_path)) is None
+        assert client.last_error == "response could not be parsed"
+
+    def test_success_clears_it(self, tmp_path):
+        import requests
+
+        client = self._client()
+        jpg = self._jpg(tmp_path)
+        with patch.object(client, "_post_chat", side_effect=requests.Timeout("x")):
+            client.judge_image(jpg)
+        assert client.last_error == "request failed: timed out"
+        with patch.object(
+            client, "_post_chat", return_value=self._reply('{"score": 7, "reason": "ok"}')
+        ):
+            assert client.judge_image(jpg) is not None
+        assert client.last_error is None

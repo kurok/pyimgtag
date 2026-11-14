@@ -246,6 +246,27 @@ def test_watch_keeps_looping_while_ollama_is_down(tmp_path, capsys):
     model_check.assert_not_called()
 
 
+def test_watch_keeps_looping_after_an_all_failed_cycle(tmp_path, capsys):
+    """An all-failed cycle is exit code 3 for ``run``; ``watch`` must not stop (#392)."""
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    (photos / "a.jpg").write_bytes(b"a")
+    (photos / "b.jpg").write_bytes(b"b")
+    db = tmp_path / "p.db"
+
+    def tag_image(path, context=None):
+        return TagResult(error="Ollama request failed: HTTP 500")
+
+    rc = _run_watch(
+        ["--input-dir", str(photos), "--db", str(db), "--interval", "0.01", "--max-cycles", "5"],
+        tag_image,
+    )
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "errors 2" in err
+    assert "[watch] cycle 5:" in err
+
+
 def test_watch_second_instance_exits_with_holder_pid(tmp_path, capsys):
     photos = tmp_path / "photos"
     photos.mkdir()
