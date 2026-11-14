@@ -2809,3 +2809,152 @@ def test_exit_code_for_table() -> None:
     assert exit_code_for(3, 3) == 3
     assert exit_code_for(3, 2) == 0
     assert exit_code_for(1, 0) == 0
+
+
+# --- one context, one session recorder, creators close what they open (#403) ---
+
+
+def test_resources_are_closed_when_the_dashboard_fails_to_start(tmp_path: Path) -> None:
+    from pyimgtag.commands.run import cmd_run
+
+    args = _base_args(tmp_path)
+    args.dry_run = False
+    args.no_cache = False
+    args.include_video = False
+    photo = tmp_path / "a.jpg"
+    photo.write_bytes(b"\xff\xd8\xff\xd9")
+    with (
+        patch("pyimgtag.commands.run.check_ollama", return_value=(True, "up")),
+        patch("pyimgtag.commands.run.scan_directory", return_value=[photo]),
+        patch("pyimgtag.commands.run.OllamaClient") as client_cls,
+        patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+        patch("pyimgtag.commands.run.ProgressDB") as db_cls,
+        patch(
+            "pyimgtag.webapp.bootstrap.start_dashboard_for",
+            side_effect=RuntimeError("port in use"),
+        ),
+    ):
+        client_cls.return_value.prompt_builder = None
+        with pytest.raises(RuntimeError, match="port in use"):
+            cmd_run(args, MagicMock())
+
+    client_cls.return_value.close.assert_called_once_with()
+    geo_cls.return_value.close.assert_called_once_with()
+    db_cls.return_value.close.assert_called_once_with()
+
+
+def test_cmd_run_closes_each_resource_exactly_once_on_success(tmp_path: Path) -> None:
+    from pyimgtag.commands.run import cmd_run
+
+    args = _base_args(tmp_path)
+    args.dry_run = False
+    args.no_cache = False
+    args.include_video = False
+    args.web = False
+    args.no_web = True
+    photo = tmp_path / "a.jpg"
+    photo.write_bytes(b"\xff\xd8\xff\xd9")
+    with (
+        patch("pyimgtag.commands.run.check_ollama", return_value=(True, "up")),
+        patch("pyimgtag.commands.run.scan_directory", return_value=[photo]),
+        patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+        patch("pyimgtag.commands.run.OllamaClient") as client_cls,
+        patch("pyimgtag.commands.run.ReverseGeocoder") as geo_cls,
+        patch("pyimgtag.commands.run.ProgressDB") as db_cls,
+        patch("pyimgtag.webapp.bootstrap.start_dashboard_for", return_value=(None, None)),
+    ):
+        client_cls.return_value.tag_image.return_value = _ok_tag()
+        client_cls.return_value.prompt_builder = None
+        db_cls.return_value.is_fresh.return_value = False
+        db_cls.return_value.get_cached_result.return_value = None
+        cmd_run(args, MagicMock())
+
+    client_cls.return_value.close.assert_called_once_with()
+    geo_cls.return_value.close.assert_called_once_with()
+    db_cls.return_value.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    ("jobs", "use_threaded"),
+    [(1, False), (1, True), (4, False)],
+    ids=["j1", "resume-threaded", "j4"],
+)
+def test_all_three_modes_record_the_same_session_events(
+    tmp_path: Path, jobs: int, use_threaded: bool
+) -> None:
+    from pyimgtag.commands.run import _new_stats, _RunContext, _tag
+    from pyimgtag.models import TagResult
+    from pyimgtag.progress_db import ProgressDB
+
+    files = []
+    for i in range(6):
+        f = tmp_path / f"p{i}.jpg"
+        f.write_bytes(b"\xff\xd8\xff\xd9")
+        files.append(f)
+    args = _base_args(tmp_path)
+    args.dry_run = False
+    args.no_cache = False
+    args.include_video = False
+    args.jobs = jobs
+    args.max_rps = None
+    args.resume_from_db = use_threaded
+    args.resume_threaded = use_threaded
+    client = MagicMock()
+    client.tag_image.side_effect = lambda path, context=None: (
+        TagResult(error="boom") if path.endswith("p3.jpg") else _ok_tag()
+    )
+    session = MagicMock()
+    stats = _new_stats(len(files))
+    db = ProgressDB(db_path=tmp_path / "p.db")
+    try:
+        with patch("pyimgtag.commands.run.read_exif", return_value=ExifData()):
+            interrupted = _tag(
+                _RunContext(
+                    files=files,
+                    source_type="directory",
+                    args=args,
+                    client=client,
+                    geocoder=MagicMock(),
+                    progress_db=db,
+                    phash_map={},
+                    skipped_dedup={str(files[5])},
+                    results=[],
+                    stats=stats,
+                    session=session,
+                    use_threaded=use_threaded,
+                )
+            )
+    finally:
+        db.close()
+
+    assert interrupted is False
+    recorded = sorted(
+        (c.args[0], c.args[1], c.kwargs.get("error"), c.kwargs.get("detail"))
+        for c in session.record_item.call_args_list
+    )
+    assert recorded == sorted(
+        [(str(f), "ok", None, "x") for i, f in enumerate(files[:5]) if i != 3]
+        + [(str(files[3]), "error", "boom", None)]
+    )
+    # The final counters every mode must end with (cmd_run publishes these
+    # to the session once the pass returns).
+    assert {k: v for k, v in stats.items() if v} == {
+        "scanned": 6,
+        "processed": 5,
+        "model_calls": 5,
+        "model_failures": 1,
+        "skipped_dedup": 1,
+    }
+    client.close.assert_not_called()  # the creator closes, not the tagging pass
+
+
+def test_args_vocabulary_is_no_longer_assigned_anywhere() -> None:
+    import re
+
+    src = Path(__file__).resolve().parent.parent / "src" / "pyimgtag"
+    offenders = [
+        str(p.relative_to(src))
+        for p in src.rglob("*.py")
+        if re.search(r"\bargs\._vocabulary\s*=", p.read_text("utf-8"))
+    ]
+    assert offenders == []

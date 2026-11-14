@@ -431,3 +431,80 @@ def test_watch_sigterm_finishes_inflight_and_releases_lock(tmp_path):
     with ProgressDB(db_path=db) as pdb:
         assert [Path(r["file_path"]).name for r in pdb.query_images()] == ["a.jpg"]
     assert not lock_path_for_db(db).exists()
+
+
+def test_each_cycle_closes_its_own_client_geocoder_and_db_once(tmp_path, monkeypatch):
+    """The cycle that opens them closes them; the tagging pass does not (#403)."""
+    from pyimgtag.commands import run as run_mod
+    from pyimgtag.commands import watch as watch_mod
+
+    photos = tmp_path / "photos"
+    photos.mkdir()
+    (photos / "a.jpg").write_bytes(b"a")
+    db = tmp_path / "p.db"
+    opened: dict[str, list] = {"geocoder": [], "db": []}
+
+    real_geo = watch_mod.ReverseGeocoder
+    real_db = watch_mod.ProgressDB
+
+    def geo(*a, **k):
+        g = real_geo(*a, **k)
+        g.close = MagicMock(wraps=g.close)
+        opened["geocoder"].append(g)
+        return g
+
+    def progress(*a, **k):
+        d = real_db(*a, **k)
+        d.close = MagicMock(wraps=d.close)
+        opened["db"].append(d)
+        return d
+
+    monkeypatch.setattr(watch_mod, "ReverseGeocoder", geo)
+    monkeypatch.setattr(watch_mod, "ProgressDB", progress)
+    tag_passes = MagicMock(wraps=run_mod._tag)
+    monkeypatch.setattr(run_mod, "_tag", tag_passes)
+
+    clients: list = []
+
+    def tag_image(path, context=None):
+        return TagResult(tags=["t"], summary="s")
+
+    with (
+        patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+        patch("pyimgtag.commands.run.OllamaClient") as cls,
+    ):
+
+        def new_client(*a, **k):
+            c = MagicMock()
+            c.tag_image.side_effect = tag_image
+            c.prompt_builder = None
+            clients.append(c)
+            return c
+
+        cls.side_effect = new_client
+        rc = main(
+            [
+                "watch",
+                "--input-dir",
+                str(photos),
+                "--db",
+                str(db),
+                "--interval",
+                "0.01",
+                "--max-cycles",
+                "4",
+            ]
+        )
+
+    assert rc == 0
+    passes = tag_passes.call_count
+    assert passes >= 1
+    assert len(clients) == passes
+    assert all(c.close.call_count == 1 for c in clients)
+    # Geocoders and DBs opened by tagging cycles (the candidate scan opens
+    # its own DB with a ``with`` block, which closes it too).
+    assert len(opened["geocoder"]) == passes
+    assert all(g.close.call_count == 1 for g in opened["geocoder"])
+    assert all(d.close.call_count >= 1 for d in opened["db"])
+    cycle_dbs = [d for d in opened["db"] if d.close.call_count == 1]
+    assert len(cycle_dbs) == len(opened["db"])
