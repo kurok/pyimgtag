@@ -549,7 +549,7 @@ class TestJudgeVideo(unittest.TestCase):
         args = argparse.Namespace(include_video=True, video_extensions=None)
         still = Path("/photos/a.jpg")
         result = _judge_path(_Client(), still, args)
-        self.assertEqual(result, "scored")
+        self.assertEqual(result, ("scored", None))
         # Compared through str(Path(...)): Windows renders the same path with
         # backslashes, and the claim here is "the file itself was scored".
         self.assertEqual(seen, [str(still)])
@@ -570,7 +570,7 @@ class TestJudgeVideo(unittest.TestCase):
         with mock.patch(
             "pyimgtag.video.extract_frames", side_effect=AssertionError("extracted a frame")
         ):
-            self.assertEqual(_judge_path(_Client(), clip, args), str(clip))
+            self.assertEqual(_judge_path(_Client(), clip, args), (str(clip), None))
 
     def test_a_clip_is_scored_on_an_extracted_frame(self):
         import argparse
@@ -591,7 +591,7 @@ class TestJudgeVideo(unittest.TestCase):
         with mock.patch("pyimgtag.video.extract_frames", return_value=[frame]) as extract:
             result = _judge_path(_Client(), Path("/v/clip.mp4"), args)
 
-        self.assertEqual(result, "scored")
+        self.assertEqual(result, ("scored", None))
         self.assertEqual(seen, [str(frame)])
         # One frame, not three: a photo judge scores a composition, and
         # averaging three compositions describes none of them.
@@ -610,7 +610,10 @@ class TestJudgeVideo(unittest.TestCase):
 
         args = argparse.Namespace(include_video=True, video_extensions=None)
         with mock.patch("pyimgtag.video.extract_frames", side_effect=VideoToolError("no ffmpeg")):
-            self.assertIsNone(_judge_path(_Client(), Path("/v/clip.mp4"), args))
+            self.assertEqual(
+                _judge_path(_Client(), Path("/v/clip.mp4"), args),
+                (None, "clip could not be decoded"),
+            )
 
 
 class TestNonAsciiPaths(unittest.TestCase):

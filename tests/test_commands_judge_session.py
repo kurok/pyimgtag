@@ -32,7 +32,7 @@ def test_judge_no_web_does_not_register_session(tmp_path):
         ollama_cls.return_value = ollama
         rc = cmd_judge(args, None)
 
-    assert rc == 0
+    assert rc == 3  # the only image failed at the model
     assert run_registry.get_current() is None
 
 

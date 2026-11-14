@@ -527,3 +527,125 @@ class TestRateLimitRetries:
             with patch.object(client._session, "post", return_value=_ok_tag_response()):
                 client.tag_image(jpg)
         assert acquire.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# last_error: why judge_image returned None (#392)
+# ---------------------------------------------------------------------------
+
+
+def _anthropic_text(text: str) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.headers = {}
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"content": [{"type": "text", "text": text}]}
+    return resp
+
+
+class TestCloudJudgeLastError:
+    def test_starts_empty(self):
+        assert AnthropicClient(api_key="x").last_error is None
+
+    def test_image_load_failure(self, tmp_path):
+        client = AnthropicClient(api_key="x")
+        assert client.judge_image(str(tmp_path / "missing.jpg")) is None
+        assert client.last_error == "image could not be loaded"
+
+    @pytest.mark.parametrize(
+        ("error", "reason"),
+        [
+            (requests.ConnectionError("refused"), "request failed: could not connect"),
+            (requests.Timeout("slow"), "request failed: timed out"),
+            (requests.RequestException("odd"), "request failed: RequestException"),
+        ],
+    )
+    def test_request_failure(self, jpg, error, reason):
+        client = AnthropicClient(api_key="x")
+        with patch.object(client._session, "post", side_effect=error):
+            assert client.judge_image(jpg) is None
+        assert client.last_error == reason
+
+    def test_http_error_names_the_status(self, jpg):
+        client = AnthropicClient(api_key="x")
+        resp = MagicMock(status_code=500, headers={})
+        http_error = requests.HTTPError("500 Server Error", response=resp)
+        resp.raise_for_status.side_effect = http_error
+        with patch.object(client._session, "post", return_value=resp):
+            assert client.judge_image(jpg) is None
+        assert client.last_error == "request failed: HTTP 500"
+
+    def test_rate_limit_exhausted(self, jpg):
+        client = AnthropicClient(api_key="x")
+        with (
+            patch.object(client._session, "post", return_value=_limited(429)),
+            patch("pyimgtag.cloud_clients.time.sleep"),
+        ):
+            assert client.judge_image(jpg) is None
+        assert client.last_error.startswith("request failed: rate limited (HTTP 429)")
+
+    def test_unparseable_reply(self, jpg):
+        client = AnthropicClient(api_key="x")
+        with patch.object(client._session, "post", return_value=_anthropic_text("no json here")):
+            assert client.judge_image(jpg) is None
+        assert client.last_error == "response could not be parsed"
+
+    def test_unexpected_shape(self, jpg):
+        client = AnthropicClient(api_key="x")
+        resp = _anthropic_text("")
+        resp.json.return_value = {"nope": []}
+        with patch.object(client._session, "post", return_value=resp):
+            assert client.judge_image(jpg) is None
+        assert client.last_error == "response could not be parsed"
+
+    def test_non_json_body(self, jpg):
+        client = AnthropicClient(api_key="x")
+        resp = _anthropic_text("")
+        resp.json.side_effect = requests.JSONDecodeError("bad", "doc", 0)
+        with patch.object(client._session, "post", return_value=resp):
+            assert client.judge_image(jpg) is None
+        assert client.last_error == "response could not be parsed"
+
+    def test_success_clears_it(self, jpg):
+        client = AnthropicClient(api_key="x")
+        with patch.object(client._session, "post", side_effect=requests.Timeout("slow")):
+            client.judge_image(jpg)
+        with patch.object(
+            client._session, "post", return_value=_anthropic_text(json.dumps(_judge_payload()))
+        ):
+            assert client.judge_image(jpg) is not None
+        assert client.last_error is None
+
+    def test_tag_image_does_not_touch_it(self, jpg):
+        client = AnthropicClient(api_key="x")
+        with patch.object(client._session, "post", side_effect=requests.Timeout("slow")):
+            assert client.tag_image(jpg).error
+        assert client.last_error is None
+
+    def test_it_is_kept_per_thread(self, jpg):
+        import threading
+
+        client = AnthropicClient(api_key="x")
+        with patch.object(client._session, "post", side_effect=requests.Timeout("slow")):
+            client.judge_image(jpg)
+        seen: list[str | None] = []
+        worker = threading.Thread(target=lambda: seen.append(client.last_error))
+        worker.start()
+        worker.join(5)
+        assert seen == [None]
+        assert client.last_error == "request failed: timed out"
+
+
+def test_a_reply_with_no_text_still_gets_a_reason(jpg):
+    """OpenAI ``content: null`` (refusal / filter) must not leave a stale reason."""
+    client = OpenAIClient(api_key="x")
+    with patch.object(client._session, "post", side_effect=requests.Timeout("slow")):
+        client.judge_image(jpg)
+    assert client.last_error == "request failed: timed out"
+
+    resp = MagicMock(status_code=200, headers={})
+    resp.raise_for_status = MagicMock()
+    resp.json.return_value = {"choices": [{"message": {"content": None}}]}
+    with patch.object(client._session, "post", return_value=resp):
+        assert client.judge_image(jpg) is None
+    assert client.last_error == "response could not be parsed"

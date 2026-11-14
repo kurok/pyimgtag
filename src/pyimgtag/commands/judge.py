@@ -18,6 +18,7 @@ from pyimgtag.concurrent_pipeline import (
     run_pipeline,
     set_global_rate_limit,
 )
+from pyimgtag.exit_codes import exit_code_for
 from pyimgtag.judge_scorer import compute_scores
 from pyimgtag.models import JudgeResult, JudgeScores
 from pyimgtag.ollama_client import OllamaClient  # noqa: F401  (kept for test patching)
@@ -82,7 +83,7 @@ def _judge_concurrent(
     session: Any,
     skip_judged: bool,
     db: Any,
-    finalize: Callable[[int, Path, JudgeScores | None], None],
+    finalize: Callable[[int, Path, JudgeScores | None, str | None], None],
     args: Any = None,
 ) -> bool:
     """Score ``files`` with ``jobs`` in-flight model calls. True if interrupted.
@@ -101,10 +102,14 @@ def _judge_concurrent(
                 continue
             yield idx, file_path
 
-    def _prepare(item: _JudgeItem) -> tuple[int, Path, JudgeScores | None]:
-        return item[0], item[1], _judge_path(client, item[1], args)
+    def _prepare(item: _JudgeItem) -> tuple[int, Path, JudgeScores | None, str | None]:
+        # The reason is read on the worker thread that made the call:
+        # clients keep ``last_error`` per thread.
+        return (item[0], item[1], *_judge_path(client, item[1], args))
 
-    def _finalize(_seq: int, _item: _JudgeItem, done: tuple[int, Path, JudgeScores | None]) -> None:
+    def _finalize(
+        _seq: int, _item: _JudgeItem, done: tuple[int, Path, JudgeScores | None, str | None]
+    ) -> None:
         finalize(*done)
 
     def _on_interrupt() -> None:
@@ -123,8 +128,18 @@ def _judge_concurrent(
     )
 
 
-def _judge_path(client: Any, file_path: Path, args: argparse.Namespace) -> Any:
+def _failure_reason(client: Any) -> str:
+    reason = getattr(client, "last_error", None)
+    return reason if isinstance(reason, str) and reason else "unknown error"
+
+
+def _judge_path(
+    client: Any, file_path: Path, args: argparse.Namespace
+) -> tuple[JudgeScores | None, str | None]:
     """Score one file, sampling a frame first when it is a clip.
+
+    Returns ``(scores, None)`` on success, or ``(None, reason)`` with a short
+    reason taken from the client's ``last_error``.
 
     v1 heuristic, and documented as one: the middle frame stands for the clip.
     A photo judge scores composition and exposure, which a single
@@ -135,7 +150,7 @@ def _judge_path(client: Any, file_path: Path, args: argparse.Namespace) -> Any:
     than taking the run down.
     """
     if not getattr(args, "include_video", False):
-        return client.judge_image(str(file_path))
+        return _judge_once(client, str(file_path))
 
     from pyimgtag.video import DEFAULT_VIDEO_EXTENSIONS, VideoToolError, extract_frames
 
@@ -146,7 +161,7 @@ def _judge_path(client: Any, file_path: Path, args: argparse.Namespace) -> Any:
         else DEFAULT_VIDEO_EXTENSIONS
     )
     if file_path.suffix.lstrip(".").lower() not in exts:
-        return client.judge_image(str(file_path))
+        return _judge_once(client, str(file_path))
 
     import shutil as _shutil
 
@@ -154,12 +169,19 @@ def _judge_path(client: Any, file_path: Path, args: argparse.Namespace) -> Any:
     try:
         frames = extract_frames(file_path, count=1)
         temp_dir = frames[0].parent
-        return client.judge_image(str(frames[0]))
+        return _judge_once(client, str(frames[0]))
     except VideoToolError:
-        return None
+        return None, "clip could not be decoded"
     finally:
         if temp_dir is not None:
             _shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _judge_once(client: Any, path: str) -> tuple[JudgeScores | None, str | None]:
+    scores = client.judge_image(path)
+    if scores is None:
+        return None, _failure_reason(client)
+    return scores, None
 
 
 def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
@@ -259,16 +281,23 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
         session.set_counter("jobs", jobs)
         session.mark_running()
 
-    def _finalize(idx: int, file_path: Path, scores: JudgeScores | None) -> None:
+    attempts = {"called": 0, "failed": 0}
+
+    def _finalize(
+        idx: int, file_path: Path, scores: JudgeScores | None, reason: str | None = None
+    ) -> None:
         """Persist, filter, write back, and print one score — main thread only."""
+        attempts["called"] += 1
         if scores is None:
+            attempts["failed"] += 1
+            reason = reason or "unknown error"
             print(
-                f"  [{idx}/{total}] {file_path.name}: judge failed, skipping",
+                f"  [{idx}/{total}] {file_path.name}: judge failed ({reason}), skipping",
                 file=sys.stderr,
             )
             if session is not None:
                 session.increment("judge_failed")
-                session.record_item(str(file_path), "error", error="judge failed")
+                session.record_item(str(file_path), "error", error=f"judge failed: {reason}")
             return
 
         weighted, core, visible = compute_scores(scores)
@@ -338,7 +367,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
                             session.set_current(None)
                         continue
 
-                    _finalize(idx, file_path, _judge_path(ollama, file_path, args))
+                    _finalize(idx, file_path, *_judge_path(ollama, file_path, args))
                     if session is not None:
                         session.set_current(None)
             except KeyboardInterrupt:
@@ -365,4 +394,6 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
             dashboard.stop()
         run_registry.set_current(None)
 
-    return 1 if interrupted else 0
+    if interrupted:
+        return 1
+    return exit_code_for(attempts["called"], attempts["failed"])

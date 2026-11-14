@@ -188,3 +188,71 @@ class TestJudgeOllamaChecksMatchRun:
         ):
             cmd_judge(_make_args(input_dir=str(tmp_path), model=None), MagicMock())
         model_check.assert_called_once_with("gemma4:e4b", "http://localhost:11434")
+
+
+class TestJudgeExitCodeAndReason:
+    """``judge`` exits 3 when every call failed and says why each failed (#392)."""
+
+    def _judge(self, tmp_path, outcomes, jobs=1):
+        from pyimgtag.ollama_client import JudgeErrorMixin
+
+        files = []
+        for i, _ in enumerate(outcomes):
+            f = tmp_path / f"p{i}.jpg"
+            f.write_bytes(b"\xff\xd8\xff\xd9")
+            files.append(f)
+        ok_names = {f"p{i}.jpg" for i, ok in enumerate(outcomes) if ok}
+
+        class Client(JudgeErrorMixin):
+            # The real per-thread last_error, so -j N workers each read their own.
+            def judge_image(self, path):
+                from pathlib import Path
+
+                if Path(path).name in ok_names:
+                    self._judge_ok()
+                    return _make_scores()
+                self._judge_failed(f"request failed: HTTP 500 for {Path(path).name}")
+                return None
+
+            def close(self):
+                pass
+
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.scan_directory", return_value=files),
+            patch("pyimgtag.commands.judge.OllamaClient", return_value=Client()),
+        ):
+            return cmd_judge(_make_args(input_dir=str(tmp_path), jobs=jobs), MagicMock())
+
+    def test_every_call_failing_exits_3_and_prints_the_reason(self, tmp_path, capsys):
+        assert self._judge(tmp_path, [False, False]) == 3
+        err = capsys.readouterr().err
+        assert "p0.jpg: judge failed (request failed: HTTP 500 for p0.jpg), skipping" in err
+
+    def test_a_partial_failure_exits_0(self, tmp_path):
+        assert self._judge(tmp_path, [False, True]) == 0
+
+    def test_concurrent_all_failing_exits_3_with_each_items_own_reason(self, tmp_path, capsys):
+        assert self._judge(tmp_path, [False] * 6, jobs=3) == 3
+        err = capsys.readouterr().err
+        for i in range(6):
+            assert f"p{i}.jpg: judge failed (request failed: HTTP 500 for p{i}.jpg)" in err
+
+    def test_concurrent_partial_failure_exits_0(self, tmp_path):
+        assert self._judge(tmp_path, [False, True, False, False], jobs=2) == 0
+
+    def test_nothing_to_judge_exits_0(self, tmp_path):
+        assert self._judge(tmp_path, []) == 0
+
+    def test_judge_path_returns_the_clients_reason(self, tmp_path):
+        from pyimgtag.commands.judge import _judge_path
+
+        client = MagicMock()
+        client.judge_image.return_value = None
+        client.last_error = "image could not be loaded"
+        assert _judge_path(client, tmp_path / "a.jpg", _make_args()) == (
+            None,
+            "image could not be loaded",
+        )
+        client.last_error = MagicMock()  # a client without a real reason
+        assert _judge_path(client, tmp_path / "a.jpg", _make_args())[1] == "unknown error"

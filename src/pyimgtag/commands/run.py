@@ -24,6 +24,7 @@ from pyimgtag.concurrent_pipeline import (
     set_global_rate_limit,
 )
 from pyimgtag.exif_reader import read_exif
+from pyimgtag.exit_codes import exit_code_for
 from pyimgtag.filters import passes_date_filter
 from pyimgtag.geocoder import ReverseGeocoder
 from pyimgtag.models import ExifData, ImageResult
@@ -704,7 +705,9 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         if dashboard is not None:
             dashboard.stop()
         run_registry.set_current(None)
-    return 1 if interrupted else 0
+    if interrupted:
+        return 1
+    return exit_code_for(stats["model_calls"], stats["model_failures"])
 
 
 def _is_video(file_path: Path, args: argparse.Namespace) -> bool:
@@ -861,10 +864,10 @@ def _prepare_one(
 
     def bump(key: str) -> None:
         if stats_lock is None:
-            stats[key] += 1
+            stats[key] = stats.get(key, 0) + 1
             return
         with stats_lock:
-            stats[key] += 1
+            stats[key] = stats.get(key, 0) + 1
 
     if args.skip_if_tagged and source_type == "photos_library":
         existing = read_keywords_from_photos(str(file_path))
@@ -921,6 +924,7 @@ def _prepare_one(
             context["country"] = geo.nearest_country
 
     # --- tag with model ---
+    bump("model_calls")
     if _is_video(file_path, args):
         tag_result = _tag_video(file_path, args, ollama, context, result)
     else:
@@ -1154,6 +1158,7 @@ def _new_stats(scanned: int) -> dict[str, int]:
         "skipped_existing": 0,
         "skipped_dedup": 0,
         "skipped_tagged": 0,
+        "model_calls": 0,
         "model_failures": 0,
         "geocode_failures": 0,
         "resumed_from_db": 0,

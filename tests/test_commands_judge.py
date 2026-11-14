@@ -205,10 +205,10 @@ class TestCmdJudgeSession:
             mock_cls.return_value = mock_client
             rc = cmd_judge(args, None)
 
-        assert rc == 0
+        assert rc == 3  # the only image failed at the model
         session.increment.assert_any_call("judge_failed")
         session.record_item.assert_any_call(
-            str(tmp_path / "photo.jpg"), "error", error="judge failed"
+            str(tmp_path / "photo.jpg"), "error", error="judge failed: unknown error"
         )
         dashboard.stop.assert_called_once()
 
@@ -507,7 +507,7 @@ class TestCmdJudgeBasic:
             mock_cls.return_value = mock_client
             rc = cmd_judge(args, MagicMock())
 
-        assert rc == 0  # must not crash
+        assert rc == 3  # handled (no crash); every model call failed
 
     def test_sort_by_score_descending(self, tmp_path: Path) -> None:
         """Results sorted by score descending when sort_by='score'."""
