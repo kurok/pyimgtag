@@ -22,8 +22,7 @@ logger = logging.getLogger(__name__)
 # Statuses worth retrying: 429 is the providers' rate-limit signal, 503 their
 # "overloaded, come back" signal. Anything else is a real failure.
 RETRY_STATUSES = frozenset({429, 503})
-_RETRY_STATUSES = RETRY_STATUSES
-_MAX_ATTEMPTS = 5
+MAX_ATTEMPTS = 5
 _BACKOFF_BASE = 1.0  # seconds
 _BACKOFF_CAP = 30.0  # seconds
 _JITTER_FRACTION = 0.25
@@ -79,7 +78,7 @@ def post_with_retry(
     *,
     json: Any,
     timeout: float,
-    attempts: int = _MAX_ATTEMPTS,
+    attempts: int = MAX_ATTEMPTS,
     label: str = "backend",
 ) -> Any:
     """POST *json* to *url*, retrying 429 and 503 with backoff.
@@ -102,6 +101,8 @@ def post_with_retry(
     Raises:
         requests.RequestException: On a network error; not retried.
     """
+    if attempts < 1:
+        raise ValueError(f"attempts must be at least 1, got {attempts}")
     resp: Any = None
     for attempt in range(1, attempts + 1):
         acquire_global_rate_limit()

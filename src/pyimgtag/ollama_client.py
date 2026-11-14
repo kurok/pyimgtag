@@ -18,7 +18,7 @@ from typing import Any
 import requests
 from PIL import Image
 
-from pyimgtag._http_retry import RETRY_STATUSES, post_with_retry
+from pyimgtag._http_retry import MAX_ATTEMPTS, RETRY_STATUSES, post_with_retry
 from pyimgtag.heic_converter import convert_heic_to_jpeg, is_heic, sips_available
 from pyimgtag.models import JudgeScores, TagResult, normalize_tags
 from pyimgtag.ollama_defaults import (  # noqa: F401 — re-exported
@@ -126,6 +126,9 @@ JUDGE_UNPARSEABLE = "response could not be parsed"
 
 def short_request_error(exc: requests.RequestException) -> str:
     """Name a request failure in a few words: ``request failed: <reason>``."""
+    if isinstance(exc, OllamaRateLimited):
+        # Same wording as the cloud backends' exhausted retry.
+        return f"request failed: {exc}"
     response = getattr(exc, "response", None)
     if response is not None and getattr(response, "status_code", None) is not None:
         reason = f"HTTP {response.status_code}"
@@ -164,11 +167,16 @@ class JudgeErrorMixin:
         self._judge_error_slot.value = None
 
 
+class OllamaRateLimited(requests.HTTPError):
+    """Ollama still answered 429/503 after every retry."""
+
+
 def _raise_for_ollama_status(resp: requests.Response) -> None:
     """``raise_for_status``, naming an exhausted 429/503 retry as a rate limit."""
-    if resp.status_code in RETRY_STATUSES:
-        raise requests.HTTPError(
-            f"ollama rate limited (HTTP {resp.status_code}) after retrying", response=resp
+    status = getattr(resp, "status_code", None)
+    if status in RETRY_STATUSES:
+        raise OllamaRateLimited(
+            f"rate limited (HTTP {status}) after {MAX_ATTEMPTS} attempts", response=resp
         )
     resp.raise_for_status()
 

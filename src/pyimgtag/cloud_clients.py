@@ -30,23 +30,14 @@ from __future__ import annotations
 
 import logging
 import os
-import time  # noqa: F401 — tests patch pyimgtag.cloud_clients.time.sleep
 from abc import ABC, abstractmethod
 from typing import Any, Protocol
 
 import requests
 
-from pyimgtag._http_retry import (  # noqa: F401 — re-exported for callers and tests
-    _BACKOFF_BASE,
-    _BACKOFF_CAP,
-    _JITTER_FRACTION,
-    _MAX_ATTEMPTS,
-    _RETRY_STATUSES,
-    _backoff_delay,
-    _parse_retry_after,
-    _retry_after_seconds,
-    post_with_retry,
-)
+from pyimgtag._http_retry import MAX_ATTEMPTS as _MAX_ATTEMPTS
+from pyimgtag._http_retry import RETRY_STATUSES as _RETRY_STATUSES
+from pyimgtag._http_retry import post_with_retry
 from pyimgtag.models import JudgeScores, TagResult
 from pyimgtag.ollama_client import (
     _JUDGE_PROMPT,
@@ -519,7 +510,9 @@ def make_image_client(
 
         client = (ollama_class or OllamaClient)(
             model=model or DEFAULT_OLLAMA_MODEL,
-            base_url=api_base or DEFAULT_OLLAMA_URL,
+            # Only a missing URL falls back; an explicit one (even "") is
+            # passed through, as the commands always did.
+            base_url=DEFAULT_OLLAMA_URL if api_base is None else api_base,
             max_dim=max_dim,
             timeout=timeout,
         )

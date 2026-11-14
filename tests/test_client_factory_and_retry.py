@@ -66,7 +66,7 @@ class TestOllamaRetries:
             result = client.tag_image(jpg)
         assert post.call_count == 5
         assert sleep.call_count == 4
-        assert result.error and "rate limited" in result.error
+        assert result.error == "Ollama request failed: rate limited (HTTP 429) after 5 attempts"
 
     def test_retry_after_is_honoured(self, jpg):
         client = _client()
@@ -145,31 +145,17 @@ def test_run_builds_its_client_through_the_factory(backend):
 
 def test_judge_builds_its_client_through_the_factory(tmp_path):
     from pyimgtag.commands import judge
+    from pyimgtag.main import build_parser
 
-    args = argparse.Namespace(
-        backend="ollama",
-        ollama_url="http://ollama.lan:11434",
-        model=None,
-        max_dim=640,
-        timeout=9,
-        api_key=None,
-        api_base=None,
-        extensions="jpg",
-        input_dir=str(tmp_path),
-        photos_library=None,
-        limit=None,
-        min_score=None,
-        sort_by="score",
-        output_json=None,
-        verbose=False,
-        write_back=False,
-        write_back_mode="overwrite",
-        no_recursive=False,
-        web=False,
-        no_web=True,
-        web_host="127.0.0.1",
-        web_port=8770,
-        no_browser=True,
+    args = build_parser().parse_args(
+        [
+            "judge",
+            "--input-dir",
+            str(tmp_path),
+            "--ollama-url",
+            "http://ollama.lan:11434",
+            "--no-web",
+        ]
     )
     photo = tmp_path / "a.jpg"
     photo.write_bytes(b"x")
@@ -225,3 +211,35 @@ def test_importing_the_cli_stays_light():
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     ).stdout.split()
     assert out == ["0", "0"]
+
+
+def test_an_exhausted_ollama_retry_reads_like_the_cloud_one_for_judge(jpg):
+    client = _client()
+    with (
+        patch.object(client._session, "post", side_effect=[_resp(503)] * 5),
+        patch("pyimgtag._http_retry.time.sleep"),
+    ):
+        assert client.judge_image(jpg) is None
+    assert client.last_error == "request failed: rate limited (HTTP 503) after 5 attempts"
+
+
+def test_zero_attempts_is_a_programming_error():
+    from pyimgtag._http_retry import post_with_retry
+
+    with pytest.raises(ValueError, match="at least 1"):
+        post_with_retry(MagicMock(), "http://x", json={}, timeout=1, attempts=0)
+
+
+def test_an_explicit_empty_ollama_url_is_passed_through():
+    from pyimgtag.cloud_clients import make_image_client
+
+    seen = {}
+
+    class Fake:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    make_image_client("ollama", api_base="", ollama_class=Fake)
+    assert seen["base_url"] == ""
+    make_image_client("ollama", ollama_class=Fake)
+    assert seen["base_url"] == DEFAULT_OLLAMA_URL

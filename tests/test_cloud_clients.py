@@ -422,7 +422,7 @@ class TestRetryAfterParsing:
         from datetime import datetime, timedelta, timezone
         from email.utils import format_datetime
 
-        from pyimgtag.cloud_clients import _parse_retry_after
+        from pyimgtag._http_retry import _parse_retry_after
 
         assert _parse_retry_after("3") == 3.0
         assert _parse_retry_after(" 2.5 ") == 2.5
@@ -436,7 +436,7 @@ class TestRetryAfterParsing:
         assert parsed is not None and 25 <= parsed <= 31
 
     def test_backoff_is_exponential_capped_and_jittered(self):
-        from pyimgtag.cloud_clients import _BACKOFF_CAP, _backoff_delay
+        from pyimgtag._http_retry import _BACKOFF_CAP, _backoff_delay
 
         for attempt in range(1, 8):
             base = min(_BACKOFF_CAP, 2 ** (attempt - 1))
@@ -471,7 +471,7 @@ class TestRateLimitRetries:
             patch.object(
                 client._session, "post", side_effect=[_limited(429, "1"), _ok_tag_response()]
             ) as post,
-            patch("pyimgtag.cloud_clients.time.sleep", side_effect=delays.append),
+            patch("pyimgtag._http_retry.time.sleep", side_effect=delays.append),
         ):
             result = client.tag_image(jpg)
         assert post.call_count == 2
@@ -484,20 +484,20 @@ class TestRateLimitRetries:
             patch.object(
                 client._session, "post", side_effect=[_limited(503), _ok_tag_response()]
             ) as post,
-            patch("pyimgtag.cloud_clients.time.sleep"),
+            patch("pyimgtag._http_retry.time.sleep"),
         ):
             result = client.tag_image(jpg)
         assert post.call_count == 2
         assert result.error is None
 
     def test_sustained_429_fails_the_image_in_bounded_time(self, jpg):
-        from pyimgtag.cloud_clients import _MAX_ATTEMPTS
+        from pyimgtag._http_retry import MAX_ATTEMPTS as _MAX_ATTEMPTS
 
         client = AnthropicClient(api_key="x")
         delays: list[float] = []
         with (
             patch.object(client._session, "post", return_value=_limited(429)) as post,
-            patch("pyimgtag.cloud_clients.time.sleep", side_effect=delays.append),
+            patch("pyimgtag._http_retry.time.sleep", side_effect=delays.append),
         ):
             result = client.tag_image(jpg)
         assert post.call_count == _MAX_ATTEMPTS
@@ -512,7 +512,7 @@ class TestRateLimitRetries:
         client = AnthropicClient(api_key="x")
         with (
             patch.object(client._session, "post", return_value=_limited(429)),
-            patch("pyimgtag.cloud_clients.time.sleep"),
+            patch("pyimgtag._http_retry.time.sleep"),
         ):
             assert client.judge_image(jpg) is None
 
@@ -579,7 +579,7 @@ class TestCloudJudgeLastError:
         client = AnthropicClient(api_key="x")
         with (
             patch.object(client._session, "post", return_value=_limited(429)),
-            patch("pyimgtag.cloud_clients.time.sleep"),
+            patch("pyimgtag._http_retry.time.sleep"),
         ):
             assert client.judge_image(jpg) is None
         assert client.last_error.startswith("request failed: rate limited (HTTP 429)")
