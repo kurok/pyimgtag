@@ -222,3 +222,40 @@ def test_a_real_change_keeps_its_response_shape(tmp_path):
         "ok": True,
         "count": 1,
     }
+
+
+def test_the_api_matches_names_the_way_the_database_does(tmp_path):
+    db, client = _api(tmp_path)
+    assert client.post(
+        "/tags/api/tags/rename", json={"old_tag": "sunset", "new_tag": " dusk "}
+    ).json() == {"ok": True, "count": 1}
+    r = client.post("/tags/api/tags/delete", json={"tag": "dusk"})
+    assert (r.status_code, r.json()) == (404, {"detail": "no tag 'dusk'"})
+    r = client.post("/tags/api/tags/rename", json={"old_tag": " dusk ", "new_tag": "dusk"})
+    assert r.json() == {"ok": True, "count": 1}
+
+
+def test_the_page_shows_the_server_reason_instead_of_closing():
+    from pyimgtag.webapp.routes_tags import render_tags_html
+
+    html = render_tags_html("/tags")
+    assert "async function postChange(path, body)" in html
+    assert "document.getElementById('modal-sub').textContent = 'Error: ' + reason" in html
+    assert html.count("postChange('/api/tags/") == 3
+    assert "val === t.tag" not in html  # the server decides what is a no-op
+
+
+def test_check_and_write_run_under_one_lock(tmp_path):
+    """A delete cannot slip between the check and the write (no silent 0)."""
+    db, client = _api(tmp_path)
+    real_delete = db.delete_tag
+    seen_lock_owned: list[bool] = []
+
+    def spy_delete(tag):
+        # RLock._is_owned() is private but stable; it says this thread holds it.
+        seen_lock_owned.append(db._lock._is_owned())
+        return real_delete(tag)
+
+    db.delete_tag = spy_delete  # type: ignore[method-assign]
+    assert client.post("/tags/api/tags/delete", json={"tag": "ocean"}).json()["count"] == 1
+    assert seen_lock_owned == [True]

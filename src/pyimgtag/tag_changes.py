@@ -2,7 +2,9 @@
 
 A typo in a tag name used to look like success ("renamed in 0 images"). These
 checks run before any write, against the tag counts the database already
-reports, using the same lower-casing the database applies to tags.
+reports. Names are compared the way the database compares them, lower-cased
+only (it does not trim whitespace), so a check that passes always means the
+write will change at least one image; whitespace counts only for "empty".
 """
 
 from __future__ import annotations
@@ -25,7 +27,10 @@ class TagChangeError(ValueError):
 
 
 def _normalise(tag: str) -> str:
-    return tag.strip().lower()
+    # Must match ImageDB.rename_tag / merge_tags / delete_tag, which lower-case
+    # but do not strip; stripping here would let "shore" pass the check for a
+    # stored " shore " and then change 0 images.
+    return tag.lower()
 
 
 def check_tag_change(
@@ -44,11 +49,11 @@ def check_tag_change(
             Request problems are reported before the lookup.
     """
     src = _normalise(source)
-    if not src:
+    if not source.strip():
         raise TagChangeError("invalid", "tag name is empty")
     if target is not None:
         tgt = _normalise(target)
-        if not tgt:
+        if not target.strip():
             raise TagChangeError("invalid", "new tag name is empty")
         if tgt == src:
             raise TagChangeError("invalid", "source and target are the same tag")

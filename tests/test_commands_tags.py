@@ -94,3 +94,21 @@ def test_check_reports_request_problems_before_the_lookup():
         check_tag_change([], "missing", "other")
     assert info.value.kind == "not_found"
     check_tag_change([("Beach", 1)], "beach", "shore")  # case-insensitive match
+
+
+def test_names_are_matched_the_way_the_database_matches_them(tmp_path, capsys):
+    """Lower-cased but not trimmed: a check that passes always changes images."""
+    db_path = _db(tmp_path)
+    # The CLI stores the new name as typed, padding included.
+    assert main(["tags", "rename", "beach", " shore ", "--db", db_path]) == 0
+    assert _counts(db_path) == {" shore ": 2, "sun": 1}
+
+    # "shore" is not the stored tag: refused, rather than "deleted from 0".
+    assert main(["tags", "delete", "shore", "--db", db_path]) == 1
+    assert "Error: no tag 'shore'" in capsys.readouterr().err
+    # Cleaning the padding is a real change, not "the same tag".
+    assert main(["tags", "rename", " shore ", "shore", "--db", db_path]) == 0
+    assert _counts(db_path) == {"shore": 2, "sun": 1}
+    # A padded name for an existing tag is a different tag.
+    assert main(["tags", "delete", " sun", "--db", db_path]) == 1
+    assert _counts(db_path) == {"shore": 2, "sun": 1}
