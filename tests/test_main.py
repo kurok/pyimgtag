@@ -86,7 +86,7 @@ class TestBuildParser:
 
     def test_run_extensions_default(self):
         args = build_parser().parse_args(["run", "--input-dir", "/tmp"])
-        assert args.extensions == "jpg,jpeg,heic,png"
+        assert args.extensions == "jpg,jpeg,heic,png,tif,tiff,webp"
 
     def test_run_extensions_custom(self):
         args = build_parser().parse_args(["run", "--input-dir", "/tmp", "--extensions", "jpg,png"])

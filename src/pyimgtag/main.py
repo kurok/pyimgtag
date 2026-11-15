@@ -9,6 +9,7 @@ from typing import Any
 
 from pyimgtag import __version__
 from pyimgtag.ollama_defaults import DEFAULT_OLLAMA_MODEL, ollama_url_from_env
+from pyimgtag.scanner import DEFAULT_EXTENSIONS_ARG
 
 _DEFAULT_DB_HELP = (
     "Path to progress database (default: $PYIMGTAG_DB if set, else ~/.cache/pyimgtag/progress.db)"
@@ -582,9 +583,9 @@ def _add_run_flags(run_p: argparse.ArgumentParser) -> None:
     )
     run_p.add_argument(
         "--extensions",
-        default="jpg,jpeg,heic,png",
+        default=DEFAULT_EXTENSIONS_ARG,
         help=(
-            "Comma-separated file extensions to scan (default: jpg,jpeg,heic,png). "
+            f"Comma-separated file extensions to scan (default: {DEFAULT_EXTENSIONS_ARG}). "
             "Add RAW formats as needed, e.g. jpg,jpeg,cr2,nef,arw,dng,raf,orf,rw2"
         ),
     )
@@ -1197,8 +1198,8 @@ def _add_index_subcommand(subparsers: Any) -> None:
     index_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     index_p.add_argument(
         "--extensions",
-        default="jpg,jpeg,heic,png,tiff,webp",
-        help="Comma-separated file extensions (default: jpg,jpeg,heic,png,tiff,webp)",
+        default=DEFAULT_EXTENSIONS_ARG,
+        help=f"Comma-separated file extensions (default: {DEFAULT_EXTENSIONS_ARG})",
     )
     index_p.add_argument(
         "--rebuild",
@@ -1439,8 +1440,8 @@ def _add_judge_subcommand(subparsers: Any) -> None:
     )
     judge_p.add_argument(
         "--extensions",
-        default="jpg,jpeg,heic,png,tiff,webp",
-        help="Comma-separated file extensions (default: jpg,jpeg,heic,png,tiff,webp)",
+        default=DEFAULT_EXTENSIONS_ARG,
+        help=f"Comma-separated file extensions (default: {DEFAULT_EXTENSIONS_ARG})",
     )
     judge_p.add_argument(
         "--limit", type=_non_negative_int, metavar="N", help="Process at most N images"
