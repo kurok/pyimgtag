@@ -1247,6 +1247,13 @@ pyimgtag tags merge source-tag target-tag
 pyimgtag preflight --input-dir ~/Pictures/exported
 ```
 
+Ollama, the model and the source path are required: if one fails the line
+reads `[FAIL]` and the exit code is 1. exiftool and ffmpeg are optional
+(`[WARN]`, exit code unaffected): tagging works without them, but exiftool
+is needed for `--write-exif` (and RAW files without rawpy) and ffmpeg for
+`--include-video`. A check that could not run because an earlier one failed
+reads `[SKIP]`.
+
 #### `pyimgtag judge` — score photo quality
 
 Score each image with a single overall quality score — an **integer on a 1–10 scale** — plus a short natural-language `reason` written by the model. The prompt asks the model to weigh impact/creativity/storytelling, technical quality, and composition, but only the one score and the reason are returned. Outputs a ranked list. Uses the same pluggable vision backends as `run` — local Ollama by default, or `--backend anthropic` / `openai` / `gemini`.

@@ -70,7 +70,8 @@ Examples:
     "preflight": (
         "Run preflight checks for prerequisites and exit",
         "Check that prerequisites are in place (Ollama reachable, model pulled,\n"
-        "exiftool installed, source path readable) and exit without tagging.",
+        "source path readable) and exit without tagging. Optional tools\n"
+        "(exiftool, ffmpeg) are reported as warnings.",
         """\
 Examples:
   pyimgtag preflight
