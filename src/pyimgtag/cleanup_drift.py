@@ -28,6 +28,7 @@ AppleScript call (see
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -35,6 +36,9 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from pyimgtag.applescript_writer import _looks_like_uuid, fetch_photos_membership
+
+#: ``photos_probe_error`` when the host has no Apple Photos at all.
+PLATFORM_UNSUPPORTED = "platform_unsupported"
 
 if TYPE_CHECKING:
     from pyimgtag.progress_db import ProgressDB
@@ -141,9 +145,9 @@ def scan_drift(
             callers leave it ``None`` to use
             :func:`pyimgtag.applescript_writer.fetch_photos_membership`.
             The callback returns ``(membership_set, error_or_none)``.
-        progress: Optional callback receiving status strings (banner +
-            heartbeat + final summary). When ``None`` no progress is
-            emitted.
+        progress: Optional callback receiving status strings (the probe
+            banner on macOS, then a heartbeat every few thousand rows). The
+            caller prints the one summary. When ``None`` nothing is emitted.
 
     Returns:
         :class:`DriftReport` describing the full scan.
@@ -151,10 +155,15 @@ def scan_drift(
     emit = progress if progress is not None else (lambda _msg: None)
     fetcher = fetch_membership if fetch_membership is not None else fetch_photos_membership
 
-    emit("Probing Apple Photos library for media-item ids…")
-    membership, probe_error = fetcher()
     usable: set[str] | None
-    if probe_error is not None:
+    if sys.platform == "darwin":
+        emit("Probing Apple Photos library for media-item ids…")
+    membership, probe_error = fetcher()
+    if probe_error == PLATFORM_UNSUPPORTED:
+        # No Photos.app on this host: the disk-only check is the whole story,
+        # so say nothing about a probe that could never have worked.
+        usable = None
+    elif probe_error is not None:
         emit(f"Photos probe unavailable ({probe_error}); falling back to disk-only drift check.")
         # An empty set + no membership signal means we cannot tell
         # photos_missing from present, so collapse them — this matches
@@ -193,13 +202,10 @@ def scan_drift(
         if report.total % _PROGRESS_EVERY == 0:
             elapsed = int(time.monotonic() - started)
             emit(
-                f"\r[drift] scanned {report.total} rows · "
+                f"[drift] scanned {report.total} rows · "
                 f"{report.dead_count} dead · elapsed {elapsed}s"
             )
 
-    elapsed = int(time.monotonic() - started)
-    emit(f"\r[drift] scanned {report.total} rows · {report.dead_count} dead · elapsed {elapsed}s")
-    emit("")
     return report
 
 

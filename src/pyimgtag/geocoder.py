@@ -24,8 +24,27 @@ import requests
 from pyimgtag import __version__
 from pyimgtag.cache import DiskCache
 from pyimgtag.models import GeoResult
+from pyimgtag.place_names import (
+    COUNTRY_SEPARATORS,
+    LOCALITY_SEPARATORS,
+    REGION_SEPARATORS,
+    native_name,
+)
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+
+
+# One name per place field (#434, #460): the rules live in place_names so the
+# DB migration that cleans older rows applies exactly the same ones.
+def _normalise(result: GeoResult) -> GeoResult:
+    """One name per field, applied to fresh lookups and old cache entries."""
+    result.nearest_place = native_name(result.nearest_place, LOCALITY_SEPARATORS)
+    result.nearest_city = native_name(result.nearest_city, LOCALITY_SEPARATORS)
+    result.nearest_region = native_name(result.nearest_region, REGION_SEPARATORS)
+    result.nearest_country = native_name(result.nearest_country, COUNTRY_SEPARATORS)
+    return result
+
+
 # Nominatim's usage policy requires an identifying User-Agent; keep the version
 # in sync with the package so OSM operators see the real release.
 _USER_AGENT = f"pyimgtag/{__version__} (https://github.com/kurok/pyimgtag)"
@@ -103,7 +122,7 @@ class ReverseGeocoder:
         if cached is None:
             return None
         try:
-            return GeoResult(**cached)
+            return _normalise(GeoResult(**cached))
         except TypeError:
             return None  # stale cache entry with unexpected keys — re-fetch
 
@@ -142,11 +161,13 @@ class ReverseGeocoder:
             return GeoResult(error=f"Geocoding failed for {lat},{lon}: {data['error']}")
 
         addr = data.get("address", {})
-        return GeoResult(
-            nearest_place=addr.get("village") or addr.get("town") or addr.get("suburb"),
-            nearest_city=addr.get("city") or addr.get("town") or addr.get("municipality"),
-            nearest_region=addr.get("state") or addr.get("region"),
-            nearest_country=addr.get("country"),
+        return _normalise(
+            GeoResult(
+                nearest_place=addr.get("village") or addr.get("town") or addr.get("suburb"),
+                nearest_city=addr.get("city") or addr.get("town") or addr.get("municipality"),
+                nearest_region=addr.get("state") or addr.get("region"),
+                nearest_country=addr.get("country"),
+            )
         )
 
     def _rate_limit(self) -> None:

@@ -53,6 +53,12 @@ from pyimgtag.ollama_client import (
 )
 
 
+def _tag_error(prefix: str, exc: requests.RequestException) -> str:
+    """ "<backend> request failed: <reason>" then the raw exception on a second line."""
+    reason = short_request_error(exc).removeprefix("request failed: ")
+    return f"{prefix}: {reason}\n{type(exc).__name__}: {exc}"
+
+
 class ImageClient(Protocol):
     """Structural type implemented by every vision-model client.
 
@@ -252,7 +258,7 @@ class BaseCloudClient(JudgeErrorMixin, ABC):
             )
         except requests.RequestException as e:
             if on_error_msg:
-                return TagResult(error=f"{on_error_msg}: {e}")
+                return TagResult(error=_tag_error(on_error_msg, e))
             self._judge_failed(short_request_error(e))
             return None
 
@@ -271,7 +277,7 @@ class BaseCloudClient(JudgeErrorMixin, ABC):
             data = resp.json()
         except requests.RequestException as e:
             if on_error_msg:
-                return TagResult(error=f"{on_error_msg}: {e}")
+                return TagResult(error=_tag_error(on_error_msg, e))
             # requests' JSONDecodeError is both a RequestException and a
             # ValueError: a body that is not JSON is a parse failure.
             self._judge_failed(

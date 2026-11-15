@@ -237,6 +237,9 @@ ollama pull gemma4:e4b
 
 # Install pyimgtag
 pip install "pyimgtag[heic]"   # includes pillow-heif for HEIC
+# [all] works here too: the macOS-only parts (photoscript, osxphotos, Vision
+# OCR) are skipped, but face-recognition builds dlib from source and needs
+# CMake and a C++ compiler first: sudo apt-get install build-essential cmake
 # or from source
 git clone https://github.com/kurok/pyimgtag.git
 cd pyimgtag
@@ -276,6 +279,8 @@ ollama pull gemma4:e4b
 
 # Install pyimgtag
 pip install "pyimgtag[heic]"
+# [all] works here too (the macOS-only parts are skipped), but face-recognition
+# builds dlib from source: install CMake and Visual Studio Build Tools (C++) first
 # or from source
 git clone https://github.com/kurok/pyimgtag.git
 cd pyimgtag
@@ -410,11 +415,11 @@ identically for `pyimgtag judge`.
 | `--jsonl-stdout` | JSONL output to stdout |
 | `--no-recursive` | Only scan the top-level directory (no subdirectories) |
 | `--newest-first` | Process newest files first (by modification time) |
-| `--write-back` | Write tags/description back to Apple Photos *(macOS only; uses osascript by default — set `PYIMGTAG_USE_PHOTOSCRIPT=1` to opt into the faster in-process photoscript path on stable hosts)* |
+| `--write-back` | Write tags/description back to Apple Photos *(macOS only; uses osascript by default — set `PYIMGTAG_USE_PHOTOSCRIPT=1` to opt into the faster in-process photoscript path on stable hosts)*. Each progress line ends with `\| photos` when the write succeeds; the summary adds `Written back` and `Photos failures` |
 | `--write-back-mode overwrite\|append` | Write-back strategy: replace all keywords (`overwrite`, default) or merge with existing (`append`) |
 | `--skip-if-tagged` | Skip the model for photos that already have keywords in Apple Photos *(`--photos-library` only)* |
-| `--write-exif` | Write description and keywords to image EXIF via exiftool |
-| `--sidecar-only` | Write metadata to an XMP sidecar (`.xmp`) instead of modifying the original |
+| `--write-exif` | Write description and keywords to image EXIF via exiftool. Each progress line ends with `\| exif` (or `\| sidecar` for formats exiftool cannot write in place), and the summary adds `Metadata written`, `Sidecars written` and `Write failures` |
+| `--sidecar-only` | Write metadata to an XMP sidecar (`.xmp`) instead of modifying the original. Each progress line ends with `\| sidecar`; the summary adds `Sidecars written` and `Write failures` |
 | `--metadata-format auto\|xmp\|iptc\|exif` | Which metadata fields to write with `--write-exif` (default: `auto`, all fields) |
 | `--dedup` | Skip duplicates via perceptual hash |
 | `--dedup-threshold N` | Hamming distance threshold (default: 5) |
@@ -518,9 +523,9 @@ pyimgtag query --no-text
 # Filter by a geographic box — the same slice the /map page shows
 pyimgtag query --bbox 39.30,-9.30,39.42,-9.10
 
-# A box crossing the antimeridian: pass lon1 > lon2. Use the --bbox=...
-# form whenever the first value is negative, or argparse reads it as a flag.
-pyimgtag query --bbox=-20,170,-10,-170
+# A box crossing the antimeridian: pass lon1 > lon2. A negative first value
+# works with a space or with "=".
+pyimgtag query --bbox -20,170,-10,-170
 
 # Filter by capture year or month (mutually exclusive)
 pyimgtag query --year 2024
@@ -958,6 +963,9 @@ runs `<current python> -m pyimgtag watch …` so it does not depend on PATH,
 sets `PYIMGTAG_NO_WEB=1`, and restarts on failure. Logs go to
 `~/Library/Logs/pyimgtag-watch.log` (macOS) or `journalctl --user -u pyimgtag-watch`
 (Linux). An existing unit is never overwritten without `--force`.
+If `systemctl`/`launchctl` reports a failure, install and uninstall print
+its error and exit 1; a failed uninstall keeps the unit file so it can be
+retried, while a job that was never loaded is simply removed.
 
 #### Controlled vocabulary & custom prompts
 
@@ -1083,7 +1091,13 @@ pyimgtag dedup undo                                # move quarantined copies bac
 2. **Move is the recommended action.** `--move-to DIR` relocates each losing
    copy to `DIR` + its original path (`/a/b/c.jpg` → `DIR/a/b/c.jpg`), records
    where it went, and marks the group resolved. `pyimgtag dedup undo` puts
-   every file back and un-resolves the group.
+   every file back and un-resolves the group. If the quarantine is not
+   reachable (an unplugged drive) undo keeps the record and asks you to
+   reconnect. Only if you are sure you deleted that folder (not just unmounted
+   it or mounted it under another name),
+   `pyimgtag dedup undo --group ID --forget-missing` forgets those copies so the
+   group can be planned again; it never forgets while the library folder itself
+   is unreachable too.
 3. **Trash is opt-in twice.** `--delete` needs `--yes` and uses `send2trash`
    (the OS trash) — pyimgtag never calls `os.remove` on your photos. Undo can
    clear the DB record but cannot un-trash files; restore those from the trash.
@@ -1244,6 +1258,13 @@ pyimgtag tags merge source-tag target-tag
 pyimgtag preflight --input-dir ~/Pictures/exported
 ```
 
+Ollama, the model and the source path are required: if one fails the line
+reads `[FAIL]` and the exit code is 1. exiftool and ffmpeg are optional
+(`[WARN]`, exit code unaffected): tagging works without them, but exiftool
+is needed for `--write-exif` (and RAW files without rawpy) and ffmpeg for
+`--include-video`. A check that could not run because an earlier one failed
+reads `[SKIP]`.
+
 #### `pyimgtag judge` — score photo quality
 
 Score each image with a single overall quality score — an **integer on a 1–10 scale** — plus a short natural-language `reason` written by the model. The prompt asks the model to weigh impact/creativity/storytelling, technical quality, and composition, but only the one score and the reason are returned. Outputs a ranked list. Uses the same pluggable vision backends as `run` — local Ollama by default, or `--backend anthropic` / `openai` / `gemini`.
@@ -1268,6 +1289,21 @@ pyimgtag judge --photos-library ~/Pictures/Photos\ Library.photoslibrary \
 # Save full ranking to JSON
 pyimgtag judge --input-dir ~/Pictures/exported \
   --output-json ranking.json
+```
+
+Every run that starts scoring ends with a summary on stderr: the counters
+(scanned, judged, skipped as already judged, below the minimum score, model
+failures) and one verdict line. A run where every model call failed says so
+and exits 3.
+
+```
+--- Summary ---
+  Scanned:          6
+  Judged:           6
+  Skipped (judged): 0
+  Below min score:  6
+  Model failures:   0
+Judged 6 photo(s): 0 at or above 7.
 ```
 
 **Sample output (brief mode):**
@@ -1318,17 +1354,24 @@ code, so cron jobs, `watch` wrappers and CI can tell a dead run from a quiet one
 
 | Code | Meaning |
 |---|---|
-| 0 | at least one item succeeded, or nothing needed processing |
+| 0 | at least one item succeeded (and, for `run`, at least one requested write succeeded), or nothing needed processing |
 | 1 | interrupted, or a setup error detected by the command (for example Ollama not reachable, or the model not pulled) |
 | 2 | argparse usage error (an unknown flag, a missing required argument) |
 | 3 | at least one item was attempted and **every** attempt failed at the model |
+| 4 | `run` only: tagging worked, but **every** metadata write that was asked for (`--write-exif`, `--sidecar-only`, `--write-back`) failed — e.g. exiftool missing or a read-only folder |
 
 A partial failure (some images tagged, some not) is still `0`; for `run` the
-summary's `Model failures` line counts them. When `judge` cannot score an image
+summary's `Model failures` line counts them. Likewise a run where some writes
+succeeded is `0`, with the rest counted under `Write failures` / `Photos
+failures`; `--dry-run` writes nothing and never returns `4`. The write targets
+count together: with `--write-exif --write-back`, one successful write of either
+kind keeps the run at `0`. When `judge` cannot score an image
 it says why, e.g. `judge failed (request failed: HTTP 500), skipping`. A video
 clip that cannot be decoded (no ffmpeg) counts as a failed attempt too, so a run
 over only undecodable clips also exits `3`. `pyimgtag watch` keeps looping
-through cycles where every call failed.
+through cycles where every call or every write failed (its cycle line shows
+`write failures`); codes `3` and `4` are for a one-shot `run` from cron or a
+script.
 
 ### Sample verbose output
 
@@ -1348,13 +1391,13 @@ through cycles where every call failed.
   Status:   ok
 
 --- Summary ---
-  Scanned:          200
-  Processed:        50
-  Skipped (date):   0
-  Skipped (no GPS): 0
-  Skipped (no file):0
-  Model failures:   2
-  Geocode failures: 0
+  Scanned:           200
+  Processed:         50
+  Skipped (date):    0
+  Skipped (no GPS):  0
+  Skipped (no file): 0
+  Model failures:    2
+  Geocode failures:  0
 ```
 
 ### Output schema
@@ -1509,7 +1552,7 @@ An older pyimgtag refuses a database written by a newer one rather than
 running against a schema it does not know:
 
 ```text
-Error: database ~/.cache/pyimgtag/progress.db has schema v18, but this pyimgtag supports up to v17. Upgrade pyimgtag, or point --db at another file.
+Error: database ~/.cache/pyimgtag/progress.db has schema v19, but this pyimgtag supports up to v18. Upgrade pyimgtag, or point --db at another file.
 ```
 
 To go back to an older release, stop every pyimgtag process (CLI, dashboard,
@@ -1766,15 +1809,16 @@ Claude Code (`.mcp.json` in the project, or `claude mcp add`):
 
 | Tool | Returns |
 |---|---|
-| `query_photos` | Metadata search with `pyimgtag query` semantics: `tag`, `tags_any`, `city`, `country`, `scene_category`, `cleanup_class`, `status`, `has_text`, `min_score`, `max_score`, `judged`, `sort`, `limit` (max 500), `offset` |
+| `query_photos` | Metadata search with `pyimgtag query` semantics: `tag`, `tags_any`, `city`, `country`, `scene_category`, `cleanup_class`, `status`, `has_text`, `min_score`, `max_score`, `judged`, `event_id` (from `list_events`; filtered before paging), `sort`, `limit` (max 500), `offset` |
 | `get_photo` | Full metadata row for one path |
 | `get_thumbnail` | MCP image content — a JPEG thumbnail, `size` capped at 512 px |
 | `list_tags` | Tag vocabulary with per-tag photo counts |
 | `list_people` | Named face clusters with face counts |
-| `list_events` | Roadmap placeholder — always empty, with a note |
+| `list_events` | Events from `pyimgtag events detect`, newest first (id, name, date range, place, trip, photo count), as `events list --format json`; `limit` (0 = all), plus `total` |
+| `get_event` | One event with its member photo paths, as `pyimgtag events show <id> --format json`; events over 500 photos are paged (`limit`, `offset`, `member_count`, `truncated`) |
 | `judge_ranking` | Best-of ranking over judged photos (`min_score`, `max_score`, `sort`, `limit`, `offset`) |
 | `library_stats` | The `pyimgtag insights` aggregates as JSON |
-| `search_photos` | Semantic search — not implemented yet; returns an actionable error pointing at `query_photos` |
+| `search_photos` | Semantic search over the CLIP index from `pyimgtag index`: `query`, `limit`; returns `{file_path, score}` best first, as `pyimgtag search --format json`. Default `limit` 20, as `--top`. Needs the `[search]` extra and models already downloaded (run `pyimgtag search` once; pass `pyimgtag mcp --model-dir` if `index` used one); otherwise an actionable error |
 
 ### Write tools (opt-in)
 
@@ -1830,7 +1874,7 @@ a default server cannot see them at all. No tool deletes anything.
 | `PYIMGTAG_NO_WEB` | All commands that start the dashboard | `1` / `true` / `yes` disables the dashboard by default (same as `--no-web`). |
 | `PYIMGTAG_MAP_TILES` | `/map` page | Raster tile URL template (default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`). Point at a LAN/offline tile server to keep browsing private — see [Map tiles and privacy](#map-tiles-and-privacy). |
 | `PYIMGTAG_MAP_TILES_ATTRIBUTION` | `/map` page | Attribution line drawn on the map (default `© OpenStreetMap contributors`). |
-| `PYIMGTAG_SEARCH_MODEL_DIR` | `pyimgtag index` / `search` / `/search` | Directory holding the CLIP ONNX files. Point it at pre-downloaded models for an air-gapped install (default `~/.cache/pyimgtag/search_models/`). Overridden by `--model-dir`. |
+| `PYIMGTAG_SEARCH_MODEL_DIR` | `pyimgtag index` / `search` / `/search` / `mcp` (`search_photos`) | Directory holding the CLIP ONNX files. Point it at pre-downloaded models for an air-gapped install (default `~/.cache/pyimgtag/search_models/`). Overridden by `--model-dir`. |
 | `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
 | `PYIMGTAG_NO_MIGRATION_BACKUP` | Anything that opens the progress DB | `1` skips the `<db>.bak-v<N>` copy written before an existing database is migrated to a newer schema (see [Database upgrades](#database-upgrades)). |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |

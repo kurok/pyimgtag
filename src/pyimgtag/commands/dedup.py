@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -29,9 +28,13 @@ from typing import Any
 from pyimgtag.db.dedup_db import ACTION_MOVE, ACTION_TAG, ACTION_TRASH
 from pyimgtag.dedup_groups import (
     DEFAULT_THRESHOLD,
+    action_never_completed,
+    free_destination,
     is_photos_library_path,
     parse_prefer,
+    pick_keeper,
     quarantine_destination,
+    safe_move,
     summarize_group,
 )
 from pyimgtag.insights_report import format_bytes
@@ -191,10 +194,9 @@ def _apply_photos_tag(file_path: str, write_back: bool) -> str | None:
 
 def _move_loser(file_path: str, move_to: str) -> tuple[str | None, str | None]:
     """Move one loser into the quarantine dir. Returns ``(moved_to, error)``."""
-    dest = quarantine_destination(file_path, move_to)
+    dest = free_destination(quarantine_destination(file_path, move_to))
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(file_path, str(dest))
+        safe_move(file_path, dest)
     except OSError as exc:
         return None, str(exc)
     return str(dest), None
@@ -211,6 +213,32 @@ def _trash_loser(file_path: str) -> str | None:
     except Exception as exc:  # noqa: BLE001 — send2trash raises backend-specific errors
         return str(exc)
     return None
+
+
+def _say(*args: object, **kwargs: Any) -> None:
+    """Print, but never let a console problem stop a resolve or undo half-way.
+
+    A line the console cannot encode is printed with escapes instead, so the
+    file name is still there to read.
+    """
+    stream = kwargs.get("file") or sys.stdout
+    text = " ".join(str(a) for a in args)
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        text.encode(encoding)
+    except (UnicodeError, LookupError):
+        text = text.encode(encoding, "backslashreplace").decode(encoding, "replace")
+    try:
+        print(text, **kwargs)
+    except (UnicodeError, OSError):
+        # A console that cannot show the line must not stop a resolve or undo
+        # half-way; the DB records what was done.
+        pass
+
+
+def _has_actions(db: ProgressDB, group_id: int) -> bool:
+    group = db.get_dedup_group(group_id)
+    return bool(group and any(m.get("action") for m in group["members"]))
 
 
 def _handle_resolve(args: argparse.Namespace) -> int:  # noqa: C901 — one plan loop, one action switch
@@ -243,52 +271,92 @@ def _handle_resolve(args: argparse.Namespace) -> int:  # noqa: C901 — one plan
         errors = 0
         reclaimed = 0
         for group in groups:
-            print(f"{prefix}group {group['id']} ({group['kind']}, {group['count']} copies)")
-            print(f"{prefix}  keep {group['best_path']}")
+            keeper = pick_keeper(group)
+            _say(f"{prefix}group {group['id']} ({group['kind']}, {group['count']} copies)")
+            if keeper is None:
+                _say(
+                    f"{prefix}  skipped: every copy was already moved or trashed by an "
+                    "earlier run (see 'pyimgtag dedup undo')",
+                    file=sys.stderr,
+                )
+                errors += 1
+                continue
+            _say(f"{prefix}  keep {keeper}")
+            if acting and group.get("keep_path") != keeper:
+                # Pin the keeper before acting, so a re-run keeps the same copy.
+                db.set_dedup_keep_path(group["id"], keeper)
             group_acted = False
             for member in group["members"]:
                 path = member["file_path"]
-                if member["is_best"]:
+                if path == keeper:
+                    if acting and action_never_completed(member):
+                        db.clear_dedup_action(group["id"], path)  # stale record
+                    continue
+                done = member.get("action")
+                if done in (ACTION_MOVE, ACTION_TRASH) and action_never_completed(member):
+                    # Recorded just before a move/trash that was interrupted.
+                    leftover = member.get("moved_to")
+                    if leftover and Path(leftover).exists():
+                        _say(f"{prefix}  leftover copy in quarantine: {leftover}")
+                    if acting:
+                        db.clear_dedup_action(group["id"], path)
+                    done = None
+                if done in (ACTION_MOVE, ACTION_TRASH):
+                    # Acted on by an earlier run that stopped part-way.
+                    _say(f"{prefix}  already {done}: {path}")
+                    group_acted = True
                     continue
                 if is_photos_library_path(path):
-                    print(f"{prefix}  tag  {path}  (Apple Photos original — never touched on disk)")
+                    _say(f"{prefix}  tag  {path}  (Apple Photos original — never touched on disk)")
                     if acting:
                         err = _apply_photos_tag(path, bool(args.write_back))
                         if err:
-                            print(f"       write-back failed: {err}", file=sys.stderr)
+                            _say(f"       write-back failed: {err}", file=sys.stderr)
                             errors += 1
                         db.record_dedup_action(group["id"], path, ACTION_TAG)
                         group_acted = True
                     continue
                 if args.delete:
-                    print(f"{prefix}  trash {path}")
+                    _say(f"{prefix}  trash {path}")
                     if acting:
+                        # Record first: a crash after the trash then still knows.
+                        db.record_dedup_action(group["id"], path, ACTION_TRASH)
                         err = _trash_loser(path)
                         if err:
-                            print(f"       trash failed: {err}", file=sys.stderr)
+                            db.clear_dedup_action(group["id"], path)
+                            _say(f"       trash failed: {err}", file=sys.stderr)
                             errors += 1
                             continue
-                        db.record_dedup_action(group["id"], path, ACTION_TRASH)
                         group_acted = True
                         reclaimed += int(member.get("file_size") or 0)
                     continue
                 if args.move_to:
-                    dest = quarantine_destination(path, args.move_to)
-                    print(f"{prefix}  move {path} -> {dest}")
+                    dest = free_destination(quarantine_destination(path, args.move_to))
+                    _say(f"{prefix}  move {path} -> {dest}")
                     if acting:
+                        # Record where it goes *before* moving it, so no file can
+                        # reach the quarantine without undo knowing about it.
+                        db.record_dedup_action(group["id"], path, ACTION_MOVE, str(dest))
                         moved_to, err = _move_loser(path, args.move_to)
                         if err or moved_to is None:
-                            print(f"       move failed: {err}", file=sys.stderr)
+                            db.clear_dedup_action(group["id"], path)
+                            _say(f"       move failed: {err}", file=sys.stderr)
                             errors += 1
                             continue
-                        db.record_dedup_action(group["id"], path, ACTION_MOVE, moved_to)
                         group_acted = True
                         reclaimed += int(member.get("file_size") or 0)
                     continue
-                print(f"{prefix}  keep-for-now {path}  (no action flag given)")
+                _say(f"{prefix}  keep-for-now {path}  (no action flag given)")
+            # Only a loop that ran to the end resolves the group. One that was
+            # interrupted leaves it unresolved, so the copies it did not reach
+            # stay listed and plannable, while undo still sees what was moved.
             if acting and group_acted:
-                db.mark_dedup_resolved(group["id"], group["best_path"])
+                db.mark_dedup_resolved(group["id"], keeper)
                 acted_groups += 1
+            elif acting and not _has_actions(db, group["id"]):
+                # Nothing was done (every action failed): drop the pin, so the
+                # next run ranks the copies afresh.
+                db.set_dedup_keep_path(group["id"], None)
 
     if not acting:
         total = sum(g["reclaimable_bytes"] for g in groups)
@@ -310,24 +378,35 @@ def _handle_resolve(args: argparse.Namespace) -> int:  # noqa: C901 — one plan
 
 def _handle_undo(args: argparse.Namespace) -> int:
     """Move quarantined copies back and un-resolve their groups."""
+    forget_missing = bool(getattr(args, "forget_missing", False))
+    if forget_missing and args.group is None:
+        # Forgetting is irreversible: only for one group the user names.
+        print("error: --forget-missing needs --group ID (nothing was changed)", file=sys.stderr)
+        return 2
     restored = 0
     errors = 0
     cleared = 0
     trashed = 0
+    forgotten = 0
     with ProgressDB(db_path=args.db) as db:
         groups = db.list_dedup_groups(include_resolved=True)
-        groups = [g for g in groups if g.get("resolved_at")]
+        # A group counts once anything was done to it, even if the resolve run
+        # stopped before marking it resolved.
+        groups = [
+            g for g in groups if g.get("resolved_at") or any(m.get("action") for m in g["members"])
+        ]
         if args.group is not None:
             groups = [g for g in groups if g["id"] == args.group]
             if not groups:
-                print(f"No resolved group with id {args.group}.", file=sys.stderr)
+                print(f"No resolved or partly applied group with id {args.group}.", file=sys.stderr)
                 return 1
         if not groups:
-            print("Nothing to undo — no resolved groups.", file=sys.stderr)
+            print("Nothing to undo — no resolved or partly applied groups.", file=sys.stderr)
             return 0
 
         for group in groups:
             group_failed = False
+            group_forgotten = 0
             for member in group["members"]:
                 if member.get("action") == ACTION_TRASH:
                     trashed += 1
@@ -336,26 +415,86 @@ def _handle_undo(args: argparse.Namespace) -> int:
                     continue
                 source = Path(member["moved_to"])
                 target = Path(member["file_path"])
+                if target.exists():
+                    # The original is in place (an earlier undo put it back, or
+                    # the move never finished). Never overwrite it; a leftover
+                    # quarantine copy is reported, not used.
+                    if source.exists():
+                        _say(f"kept the original; leftover copy in quarantine: {source}")
+                    continue
+                if not source.exists() and not source.parent.is_dir():
+                    library_here = target.parent.is_dir()
+                    if forget_missing and library_here:
+                        # The library is reachable and the user is sure the
+                        # quarantine was deleted: forget this copy.
+                        _say(f"forgot: {target} (its quarantine copy {source} is gone)")
+                        group_forgotten += 1
+                        continue
+                    if not library_here:
+                        # Library and quarantine both missing: almost certainly
+                        # one unplugged drive. Never forget on that guess.
+                        _say(
+                            f"neither the library ({target.parent}) nor the quarantine "
+                            f"({source.parent}) is reachable; connect the drive and run "
+                            "undo again",
+                            file=sys.stderr,
+                        )
+                    else:
+                        # The quarantine is not there (an unplugged or unmounted
+                        # drive): keep the record so a later undo can finish.
+                        _say(
+                            f"quarantine not reachable: {source}. Connect the drive and "
+                            "run undo again. Only if you are sure that folder was "
+                            "deleted (not just unmounted or mounted under another "
+                            "name), run 'pyimgtag dedup undo --group "
+                            f"{group['id']} --forget-missing'",
+                            file=sys.stderr,
+                        )
+                    errors += 1
+                    group_failed = True
+                    continue
                 if not source.exists():
-                    print(f"missing quarantined file: {source}", file=sys.stderr)
+                    # The quarantine is there but neither copy exists: nothing
+                    # can bring it back. Forget the record so the rest of the
+                    # group can still be undone and rescanned.
+                    _say(f"lost: neither {target} nor {source} exists", file=sys.stderr)
+                    errors += 1
+                    continue
+                if not target.parent.is_dir():
+                    # The library folder is gone (an unplugged library drive, an
+                    # empty mount point): restoring would re-create it on the
+                    # wrong disk. Keep the record for a later undo.
+                    _say(
+                        f"original location not reachable: {target.parent} (connect the "
+                        "drive and run undo again)",
+                        file=sys.stderr,
+                    )
                     errors += 1
                     group_failed = True
                     continue
                 try:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(source), str(target))
+                    safe_move(source, target, create_parents=False)
                 except OSError as exc:
-                    print(f"restore failed for {target}: {exc}", file=sys.stderr)
+                    _say(f"restore failed for {target}: {exc}", file=sys.stderr)
                     errors += 1
                     group_failed = True
                     continue
                 restored += 1
             if group_failed:
                 # Leave the DB record alone so the undo can be retried.
+                if group_forgotten:
+                    _say(
+                        f"group {group['id']}: nothing forgotten yet; fix the errors above "
+                        "and run undo again",
+                        file=sys.stderr,
+                    )
                 continue
+            forgotten += group_forgotten
             cleared += db.undo_dedup_group(group["id"])
 
     print(f"Restored {restored} file(s); cleared {cleared} member record(s).")
+    if forgotten:
+        print(f"Forgot {forgotten} copy/copies whose quarantine folder is gone.")
     if trashed:
         print(
             f"{trashed} copy/copies were sent to the trash and must be restored "

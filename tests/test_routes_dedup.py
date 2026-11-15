@@ -272,12 +272,59 @@ def test_api_undo_unknown_group(tmp_path):
     db.close()
 
 
-def test_api_undo_keeps_the_record_when_a_file_is_gone(tmp_path):
+def test_api_undo_reports_a_lost_copy_and_unlocks_the_group(tmp_path):
     db, small, big = _seeded_db(tmp_path)
     group_id = db.list_dedup_groups()[0]["id"]
     db.record_dedup_action(group_id, small, ACTION_MOVE, str(tmp_path / "gone.jpg"))
     db.mark_dedup_resolved(group_id, big)
+    Path(small).unlink()  # neither the quarantined copy nor the original is left
+    (tmp_path / "gone.jpg").parent.mkdir(exist_ok=True)
     result = _client(db).post("/dedup/api/undo", json={"group_id": group_id}).json()
     assert result["ok"] is False
+    assert "neither the original nor the quarantined copy exists" in result["errors"][0]
+    # Reported, but no longer able to lock the group out of every later scan.
+    assert db.get_dedup_group(group_id)["resolved_at"] is None
+    db.close()
+
+
+def test_api_apply_skips_copies_an_earlier_run_moved_and_refuses_a_moved_keeper(tmp_path):
+    """#450: the web apply shares the CLI's part-done-group rules."""
+    db, small, big = _seeded_db(tmp_path)
+    group_id = db.list_dedup_groups()[0]["id"]
+    moved = tmp_path / "q" / "small.jpg"
+    moved.parent.mkdir(parents=True)
+    Path(small).rename(moved)
+    db.record_dedup_action(group_id, small, ACTION_MOVE, str(moved))
+
+    refused = (
+        _client(db)
+        .post(
+            "/dedup/api/apply",
+            json={
+                "group_ids": [group_id],
+                "keep": {str(group_id): small},
+                "move_to": str(tmp_path / "q2"),
+            },
+        )
+        .json()
+    )
+    assert refused["ok"] is False
+    assert "already moved" in refused["errors"][0]
+
+    applied = (
+        _client(db)
+        .post(
+            "/dedup/api/apply",
+            json={
+                "group_ids": [group_id],
+                "keep": {str(group_id): big},
+                "move_to": str(tmp_path / "q2"),
+            },
+        )
+        .json()
+    )
+    assert applied["ok"] is True
+    assert applied["moved"] == 0  # the small copy was already in quarantine
+    assert Path(big).exists()
     assert db.get_dedup_group(group_id)["resolved_at"] is not None
     db.close()

@@ -1162,13 +1162,13 @@ class TestWriteBackMode:
         import importlib
         import pkgutil
 
-        import pyimgtag.commands
+        commands_pkg = importlib.import_module("pyimgtag.commands")
 
         # main() imports the command modules lazily, and each binds
         # ``ProgressDB`` at import time. Import them before patching, or a
         # worker whose first main() call is this test keeps the mock in every
         # command module for the rest of the session.
-        for mod in pkgutil.iter_modules(pyimgtag.commands.__path__):
+        for mod in pkgutil.iter_modules(commands_pkg.__path__):
             importlib.import_module(f"pyimgtag.commands.{mod.name}")
         db_path = str(tmp_path / "judge.db")
         with (

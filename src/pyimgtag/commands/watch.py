@@ -264,13 +264,22 @@ class _Watcher:
             "tagged": stats["processed"],
             "errors": stats["model_failures"],
         }
+        writes = ""
+        if _run._writes_requested(self.args):
+            summary["written"] = (
+                stats["metadata_written"] + stats["sidecars_written"] + stats["written_back"]
+            )
+            summary["write_failures"] = (
+                stats["metadata_write_failures"] + stats["write_back_failures"]
+            )
+            writes = f" · written {summary['written']} · write failures {summary['write_failures']}"
         for k, v in summary.items():
             self.session.set_counter(k, v)
         self.session.set_current(None)
         _log(
             f"cycle {summary['cycles']}: checked {summary['checked']:,} · "
             f"pending {summary['pending']} · new {summary['new']} · "
-            f"tagged {summary['tagged']} · errors {summary['errors']}"
+            f"tagged {summary['tagged']} · errors {summary['errors']}{writes}"
         )
         if self.interrupted or self.stop.is_set() or self.session.is_stop_requested():
             return False

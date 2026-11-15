@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,20 +46,26 @@ SERVER_NAME = "pyimgtag"
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
+#: Same default as ``pyimgtag search --top``.
+DEFAULT_SEARCH_LIMIT = 20
 DEFAULT_THUMB_SIZE = 256
 MAX_THUMB_SIZE = 512
 MAX_TOP_N = 50
 
 CLEANUP_CLASSES = ("keep", "review", "delete")
 
-_SEARCH_HINT = (
-    "Semantic search is not implemented yet (roadmap issue #323). "
-    "Use query_photos with tag/tags_any, city, country or scene_category filters instead."
+_NO_INDEX_HINT = (
+    "No photos are in the semantic index yet. Build it with: "
+    "pyimgtag index --input-dir <DIR>  (or use query_photos with tag, city, country "
+    "or scene_category filters meanwhile)."
 )
-_EVENTS_NOTE = (
-    "Event grouping is not implemented yet — 'pyimgtag events' is a roadmap item. "
-    "Use query_photos with a date-bearing filter, or list_tags, to approximate events."
+_NO_MODELS_HINT = (
+    "The CLIP model files are not downloaded. The MCP server does not download them "
+    "itself (about 153 MB); run 'pyimgtag search \"anything\"' once in a terminal to "
+    "fetch them. If 'pyimgtag index' used --model-dir, start the server with the same "
+    "--model-dir (or set PYIMGTAG_SEARCH_MODEL_DIR in the MCP client's env)."
 )
+_NO_EVENTS_HINT = "No events yet: run 'pyimgtag events detect' to group photos into events."
 
 
 def writes_enabled_from_env(env: dict[str, str] | None = None) -> bool:
@@ -106,6 +113,27 @@ def _photo_detail(row: dict) -> dict:
     return detail
 
 
+#: SQLite integers are signed 64-bit; anything outside cannot be an event id.
+_SQLITE_INT_MAX = 2**63 - 1
+
+
+def _valid_event_id(event_id: object) -> bool:
+    return isinstance(event_id, int) and 0 < event_id <= _SQLITE_INT_MAX
+
+
+def _event_exists(db: ProgressDB, event_id: object) -> bool:
+    return _valid_event_id(event_id) and db.get_event(int(event_id)) is not None  # type: ignore[call-overload]
+
+
+def _no_event(event_id: object) -> dict:
+    """Uniform payload for an event id the database does not know."""
+    return {
+        "error": "no such event",
+        "event_id": event_id,
+        "hint": "Use list_events to see the event ids.",
+    }
+
+
 def _not_found(path: str) -> dict:
     """Uniform 404-style payload for a path the database does not know."""
     return {
@@ -133,6 +161,7 @@ def build_server(
     *,
     enable_writes: bool = False,
     export_root: str | None = None,
+    model_dir: str | Path | None = None,
 ) -> MCPServer:
     """Build the MCP server exposing the pyimgtag database.
 
@@ -143,6 +172,8 @@ def build_server(
             registered.
         export_root: Directory that ``export_photos`` may copy into. When
             ``None``, ``export_photos`` refuses every request.
+        model_dir: Folder with the CLIP model files for ``search_photos``;
+            ``None`` uses the search model cache.
 
     Returns:
         A configured MCP server ready for a transport.
@@ -159,24 +190,27 @@ def build_server(
         version=__version__,
         instructions=(
             "Read-only access to a pyimgtag photo library (tags, places, people, "
-            "judge scores, thumbnails). Paths returned by these tools are the only "
+            "events, judge scores, thumbnails). Paths returned by these tools are the only "
             "valid input for get_photo and get_thumbnail."
         ),
     )
 
-    _register_read_tools(server, db, image_cls)
+    _register_read_tools(server, db, image_cls, Path(model_dir) if model_dir else None)
     if enable_writes:
         _register_write_tools(server, db, root)
     return server
 
 
-def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Image]) -> None:
+def _register_read_tools(
+    server: MCPServer, db: ProgressDB, image_cls: type[Image], model_dir: Path | None = None
+) -> None:
     """Register the always-available read tools on *server*."""
 
     @server.tool(
         description=(
             "Search the photo library by metadata filters. Mirrors 'pyimgtag query'. "
-            "Returns compact records: path, tags, place, date, judge score."
+            "Returns compact records: path, tags, place, date, judge score. "
+            "event_id (from list_events) keeps only that event's photos."
         )
     )
     def query_photos(
@@ -191,12 +225,15 @@ def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Imag
         min_score: int | None = None,
         max_score: int | None = None,
         judged: bool | None = None,
+        event_id: int | None = None,
         sort: str = "path_asc",
         limit: int = DEFAULT_LIMIT,
         offset: int = 0,
     ) -> dict:
         capped = _clamp(limit, 1, MAX_LIMIT)
         start = max(0, int(offset))
+        if event_id is not None and not _event_exists(db, event_id):
+            return _no_event(event_id)
         rows = db.query_images(
             tag=tag,
             has_text=has_text,
@@ -211,6 +248,7 @@ def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Imag
             judged=judged,
             sort=sort,
             tags_any=tags_any,
+            event_id=event_id,  # filtered in SQL, so the page is always full
         )
         page = rows[start:]
         return {
@@ -218,6 +256,34 @@ def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Imag
             "limit": capped,
             "offset": start,
             "photos": [_photo_summary(r) for r in page],
+        }
+
+    @server.tool(
+        description=(
+            "One event from list_events with its member photo paths: name, date range, "
+            "place, trip_id and members. Same as 'pyimgtag events show <id> --format json' "
+            f"for events up to {MAX_LIMIT} photos; larger ones are paged with limit/offset "
+            "(member_count is the full size)."
+        )
+    )
+    def get_event(event_id: int, limit: int = MAX_LIMIT, offset: int = 0) -> dict:
+        if not _valid_event_id(event_id):
+            return _no_event(event_id)
+        event = db.get_event(int(event_id))
+        if event is None:
+            return _no_event(event_id)
+        members = event["members"]
+        capped = _clamp(limit, 1, MAX_LIMIT)
+        start = max(0, int(offset))
+        page = members[start : start + capped]
+        if len(page) == len(members):
+            return event  # small events: exactly 'events show --format json'
+        return {
+            **event,
+            "members": page,
+            "member_count": len(members),
+            "offset": start,
+            "truncated": start + len(page) < len(members),
         }
 
     @server.tool(description="Full metadata for one photo, addressed by its database path.")
@@ -284,9 +350,24 @@ def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Imag
         ]
         return {"count": len(people), "people": people}
 
-    @server.tool(description="Event groupings (roadmap feature — currently always empty).")
-    def list_events() -> dict:
-        return {"events": [], "note": _EVENTS_NOTE}
+    @server.tool(
+        description=(
+            "Events detected by 'pyimgtag events detect', newest first: id, name, "
+            "date range (started_at/ended_at), place, trip_id and photo_count. "
+            "Same rows as 'pyimgtag events list --format json'. Pass an id to get_event, "
+            "or to query_photos(event_id=...) for its photos. Optional limit "
+            f"(1-{MAX_LIMIT}); omit it, or pass 0, for every event. 'total' is the "
+            "number of events before the limit."
+        )
+    )
+    def list_events(limit: int | None = None) -> dict:
+        everything = db.list_events()
+        # As in the CLI, a limit of 0 (or less) means no limit.
+        events = everything[: _clamp(limit, 1, MAX_LIMIT)] if limit and limit > 0 else everything
+        payload: dict = {"total": len(everything), "count": len(events), "events": events}
+        if not events:
+            payload["hint"] = _NO_EVENTS_HINT
+        return payload
 
     @server.tool(
         description=(
@@ -334,18 +415,106 @@ def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Imag
     def library_stats(top_n: int = 10) -> dict:
         return db.get_insights(top_n=_clamp(top_n, 1, MAX_TOP_N))
 
+    embedder_cache: dict[str, Any] = {}
+    embedder_lock = threading.Lock()
+
+    def _embedder() -> Any:
+        """Load the CLIP text embedder once, from local files only.
+
+        The ONNX text session and tokenizer load lazily on the first
+        ``embed_text``; that warm-up happens here, under the lock, so two
+        first calls cannot each build a session. A failure is not cached:
+        models downloaded later work without restarting the server.
+        """
+        with embedder_lock:
+            if "embedder" not in embedder_cache:
+                embedder = _load_local_embedder(model_dir)
+                embedder.embed_text("photo")
+                embedder_cache["embedder"] = embedder
+            return embedder_cache["embedder"]
+
     @server.tool(
         description=(
-            "Semantic (natural-language) photo search. Not available yet — returns an "
-            "actionable error explaining which metadata filters to use instead."
+            "Semantic (natural-language) photo search over the local CLIP index built "
+            "by 'pyimgtag index': best matches first, as {file_path, score}, the same "
+            "ranking as 'pyimgtag search <query> --format json'. Returns an error with "
+            "the fix when no index has been built or the [search] extra is missing."
         )
     )
-    def search_photos(query: str, limit: int = DEFAULT_LIMIT) -> dict:
-        return {
-            "error": "no semantic index",
+    def search_photos(query: str, limit: int = DEFAULT_SEARCH_LIMIT) -> dict:
+        query = query.strip()
+        if not query:
+            return {"error": "empty query", "hint": "Describe the photos you are looking for."}
+        stats = db.embedding_stats()
+        if not stats["count"]:
+            return {"error": "no semantic index", "query": query, "hint": _NO_INDEX_HINT}
+        try:
+            embedder = _embedder()
+        except ImportError:
+            return {
+                "error": "semantic search is not installed",
+                "query": query,
+                "hint": "Install it with: pip install 'pyimgtag[search]'",
+            }
+        except FileNotFoundError:
+            return {"error": "search models missing", "query": query, "hint": _NO_MODELS_HINT}
+        except Exception as exc:  # noqa: BLE001 — a broken model must not kill the tool
+            return _search_failed(query, exc)
+        try:
+            hits = db.search_similar(embedder.embed_text(query), limit=_clamp(limit, 1, MAX_LIMIT))
+        except Exception as exc:  # noqa: BLE001 — e.g. an index built with another model
+            return _search_failed(query, exc)
+        payload: dict = {
             "query": query,
-            "hint": _SEARCH_HINT,
+            "count": len(hits),
+            "results": [{"file_path": p, "score": round(s, 6)} for p, s in hits],
         }
+        if stats["model"] and stats["model"] != embedder.model_id:
+            payload["warning"] = (
+                f"The index was built with {stats['model']!r} but this install uses "
+                f"{embedder.model_id!r}; re-run 'pyimgtag index --rebuild'."
+            )
+        return payload
+
+
+def _search_failed(query: str, exc: Exception) -> dict:
+    """An actionable payload for a model or index that fails at search time."""
+    return {
+        "error": "semantic search failed",
+        "query": query,
+        "hint": (
+            f"{type(exc).__name__}: {exc}. A model file may be corrupt (delete the model "
+            "folder and run 'pyimgtag search \"anything\"' to fetch it again), or the "
+            "index was built with another model ('pyimgtag index --rebuild')."
+        ),
+    }
+
+
+def _load_local_embedder(model_dir: Path | None = None) -> Any:
+    """Build the CLIP embedder from already-downloaded model files.
+
+    The stdio server must not start a 153 MB download (nor print its progress
+    on stdout, which carries the protocol), so missing files raise
+    ``FileNotFoundError`` instead of being fetched.
+
+    Raises:
+        ImportError: The ``[search]`` extra is not installed.
+        FileNotFoundError: A model file is not in the model cache.
+    """
+    from pyimgtag.search.embedder import _require, load_embedder
+    from pyimgtag.search.model_cache import TEXT_MODEL, TOKENIZER, VISION_MODEL, cache_dir
+
+    # The missing extra first: its fix comes before fetching models.
+    _require("onnxruntime")
+    _require("tokenizers")
+    # load_embedder() wants all three files and would download a missing one.
+    directory = model_dir or cache_dir()
+    missing = [
+        m.name for m in (VISION_MODEL, TEXT_MODEL, TOKENIZER) if not (directory / m.name).exists()
+    ]
+    if missing:
+        raise FileNotFoundError(", ".join(missing))
+    return load_embedder(directory, progress=False)
 
 
 def _register_write_tools(server: MCPServer, db: ProgressDB, export_root: Path | None) -> None:
@@ -460,6 +629,7 @@ def serve_stdio(
     *,
     enable_writes: bool = False,
     export_root: str | None = None,
+    model_dir: str | Path | None = None,
 ) -> None:
     """Run the MCP server over stdio until the client disconnects.
 
@@ -467,9 +637,12 @@ def serve_stdio(
         db_path: Progress database to serve.
         enable_writes: Register the gated write tools.
         export_root: Directory ``export_photos`` may copy into.
+        model_dir: Folder with the CLIP model files for ``search_photos``.
 
     Raises:
         ImportError: If the ``[mcp]`` extra is not installed.
     """
-    server = build_server(db_path, enable_writes=enable_writes, export_root=export_root)
+    server = build_server(
+        db_path, enable_writes=enable_writes, export_root=export_root, model_dir=model_dir
+    )
     server.run(transport="stdio")

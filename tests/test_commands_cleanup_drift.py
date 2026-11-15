@@ -338,3 +338,47 @@ class TestDriftReport:
     def test_dead_count_sums_disk_and_photos(self) -> None:
         report = DriftReport(disk_missing=3, photos_missing=4)
         assert report.dead_count == 7
+
+
+class TestTerminalPolish:
+    """#441: no Photos probe off macOS, and one summary."""
+
+    def test_no_photos_probe_noise_off_macos(self, tmp_path: Path, monkeypatch) -> None:
+        from pyimgtag import cleanup_drift
+
+        db_path = tmp_path / "drift.db"
+        _seed(db_path, tmp_path)
+        monkeypatch.setattr(cleanup_drift.sys, "platform", "linux")
+        # What the real probe answers off macOS.
+        monkeypatch.setattr(
+            cleanup_drift, "fetch_photos_membership", lambda: (set(), "platform_unsupported")
+        )
+        messages: list[str] = []
+        with ProgressDB(db_path=db_path) as db:
+            report = cleanup_drift.scan_drift(db, progress=messages.append)
+        assert messages == []
+        assert report.photos_probe_error == "platform_unsupported"
+        assert report.photos_missing == 0
+
+    def test_one_summary_and_no_degraded_note_off_macos(self, tmp_path: Path, capsys, monkeypatch):
+        from pyimgtag import cleanup_drift
+
+        db_path = tmp_path / "drift.db"
+        _seed(db_path, tmp_path)
+        monkeypatch.setattr(cleanup_drift.sys, "platform", "linux")
+        monkeypatch.setattr(
+            cleanup_drift, "fetch_photos_membership", lambda: (set(), "platform_unsupported")
+        )
+        assert cmd_cleanup_drift(self._ns(db_path)) == 0
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        assert "[drift] scanned" not in output  # small DB: no heartbeat, no repeat
+        assert output.count("rows in DB") == 1
+        assert "probe degraded" not in output
+        assert "Probing Apple Photos" not in output
+
+    @staticmethod
+    def _ns(db_path: Path) -> argparse.Namespace:
+        return argparse.Namespace(
+            db=str(db_path), dry_run=True, prune=False, prune_photos_missing=False
+        )

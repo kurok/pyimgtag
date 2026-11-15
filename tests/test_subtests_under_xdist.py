@@ -36,7 +36,7 @@ def test_the_immich_timestamp_test_passes_on_an_xdist_worker():
             "no:cacheprovider",
             "--no-cov",
             "tests/test_immich.py::TestRequestsConformToTheSpec"
-            "::test_timestamps_match_the_specs_date_time_pattern",
+            + "::test_timestamps_match_the_specs_date_time_pattern",
         ],
         cwd=_ROOT,
         capture_output=True,

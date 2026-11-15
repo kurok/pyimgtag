@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Generate minimal JPEG fixtures with fake EXIF GPS for demo/capture use."""
+"""Generate minimal JPEG fixtures with fake EXIF GPS for demo/capture use.
+
+The GPS block is written with Pillow alone (no piexif or exiftool needed).
+"""
 
 from __future__ import annotations
 
+import argparse
+from fractions import Fraction
 from pathlib import Path
 
 from PIL import Image
@@ -49,47 +54,59 @@ FIXTURES = [
 ]
 
 
-def _deg_to_dms(deg: float) -> tuple[int, int, float]:
-    d = int(deg)
-    m_float = (deg - d) * 60
-    m = int(m_float)
-    s = (m_float - m) * 60
-    return d, m, s
+_GPS_IFD = 0x8825  # EXIF pointer to the GPS IFD
+# GPS IFD tags (EXIF 2.3, section 4.6.6)
+_VERSION, _LAT_REF, _LAT, _LON_REF, _LON = 0, 1, 2, 3, 4
 
 
-def _make_exif_gps(lat: float, lon: float) -> bytes:
-    try:
-        import piexif
+def _dms(deg: float) -> tuple[Fraction, Fraction, Fraction]:
+    """Degrees as the (degrees, minutes, seconds) rationals EXIF stores."""
+    # Whole hundredths of a second, so rounding can never produce 60".
+    hundredths = round(deg * 360_000)
+    d, rest = divmod(hundredths, 360_000)
+    m, s = divmod(rest, 6_000)
+    return Fraction(d), Fraction(m), Fraction(s, 100)
 
-        lat_d, lat_m, lat_s = _deg_to_dms(abs(lat))
-        lon_d, lon_m, lon_s = _deg_to_dms(abs(lon))
 
-        gps_ifd = {
-            piexif.GPSIFD.GPSLatitudeRef: b"N" if lat >= 0 else b"S",
-            piexif.GPSIFD.GPSLatitude: [(lat_d, 1), (lat_m, 1), (int(lat_s * 100), 100)],
-            piexif.GPSIFD.GPSLongitudeRef: b"E" if lon >= 0 else b"W",
-            piexif.GPSIFD.GPSLongitude: [(lon_d, 1), (lon_m, 1), (int(lon_s * 100), 100)],
+def make_exif(gps: tuple[float, float] | None) -> Image.Exif:
+    """Return an EXIF block carrying *gps* as decimal (lat, lon), if given.
+
+    Written with Pillow alone, so the fixtures get their coordinates on any
+    machine that can run the script (no piexif or exiftool needed).
+    """
+    exif = Image.Exif()
+    if gps is not None:
+        lat, lon = gps
+        exif[_GPS_IFD] = {
+            _VERSION: b"\x02\x03\x00\x00",
+            _LAT_REF: "N" if lat >= 0 else "S",
+            _LAT: _dms(abs(lat)),
+            _LON_REF: "E" if lon >= 0 else "W",
+            _LON: _dms(abs(lon)),
         }
-        return piexif.dump({"GPS": gps_ifd})
-    except ImportError:
-        return b""
+    return exif
 
 
-def main() -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=OUTPUT_DIR,
+        help="Where to write the JPEGs (default: the folder next to this script)",
+    )
+    out_dir = parser.parse_args(argv).output_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
     for spec in FIXTURES:
         img = Image.new("RGB", spec["size"], spec["color"])
-        out_path = OUTPUT_DIR / spec["name"]
-        if spec["gps"]:
-            exif_bytes = _make_exif_gps(*spec["gps"])
-            if exif_bytes:
-                img.save(str(out_path), format="JPEG", exif=exif_bytes)
-            else:
-                img.save(str(out_path), format="JPEG")
-        else:
-            img.save(str(out_path), format="JPEG")
-        print(f"  created {out_path.name} ({spec['size'][0]}x{spec['size'][1]})")
-    print(f"Done — {len(FIXTURES)} fixtures in {OUTPUT_DIR}")
+        out_path = out_dir / spec["name"]
+        gps = spec["gps"]
+        # No EXIF segment at all for the screenshot, as before.
+        extra = {"exif": make_exif(gps)} if gps else {}
+        img.save(str(out_path), format="JPEG", **extra)
+        where = f"GPS {gps[0]:.4f}, {gps[1]:.4f}" if gps else "no GPS (by design)"
+        print(f"  created {out_path.name} ({spec['size'][0]}x{spec['size'][1]}, {where})")
+    print(f"Done — {len(FIXTURES)} fixtures in {out_dir}")
 
 
 if __name__ == "__main__":

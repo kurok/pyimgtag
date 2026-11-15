@@ -409,4 +409,7 @@ def test_preflight_skips_the_model_check_when_ollama_is_down(
 ) -> None:
     results = {name: (ok, msg) for name, ok, msg in run_preflight("http://x", "gemma4")}
     model.assert_not_called()
-    assert results["Ollama model"] == (False, "skipped: Ollama is not reachable")
+    assert results["Ollama model"] == (
+        False,
+        "skipped: model not checked because Ollama is not reachable",
+    )

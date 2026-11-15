@@ -16,6 +16,7 @@ def cmd_mcp(args: argparse.Namespace) -> int:
             db_path=getattr(args, "db", None),
             enable_writes=enable_writes,
             export_root=getattr(args, "export_root", None),
+            model_dir=getattr(args, "model_dir", None),
         )
     except ImportError as exc:
         print(f"Error: {exc}", file=sys.stderr)

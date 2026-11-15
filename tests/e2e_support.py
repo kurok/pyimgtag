@@ -8,14 +8,17 @@ binds to a free loopback port; no test reaches the network or Ollama.
 
 from __future__ import annotations
 
+import itertools
+import json
 import os
 import socket
 import subprocess  # nosec B404 — the tests run the package's own entry points
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import requests
@@ -124,6 +127,7 @@ def _start_dashboard(
             if requests.get(f"{base}/health", timeout=1).status_code == 200:
                 return proc, base
         except requests.RequestException:
+            # Not listening yet: keep polling until the deadline.
             pass
         if time.monotonic() > deadline:
             proc.kill()
@@ -172,3 +176,61 @@ def assert_health_stays_responsive(
         server.stop()
     assert "r" in result, "the slow request never completed"
     return result["r"]
+
+
+@contextmanager
+def fake_ollama(
+    *,
+    models: tuple[str, ...] = ("gemma4:latest",),
+    chat_status: int = 200,
+    judge_reply: str = '{"score": 7, "reason": "fine"}',
+    tag_reply: str = "{}",
+    tag_replies: Sequence[str] | None = None,
+) -> Iterator[str]:
+    """Serve a minimal Ollama on loopback; yield its base URL.
+
+    ``GET /api/tags`` lists *models*. ``POST /api/chat`` answers with
+    *chat_status*; on 200 the reply is *judge_reply* for a judge prompt (one
+    that asks for a ``"score"``) and *tag_reply* otherwise. *tag_replies*,
+    when given, are served in turn (cycling) instead of *tag_reply*.
+    """
+    tag_turn = itertools.count()
+
+    class Handler(BaseHTTPRequestHandler):
+        def _send(self, status: int, payload: object) -> None:
+            body = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:  # noqa: N802 — http.server API
+            self._send(200, {"models": [{"name": m} for m in models]})
+
+        def do_POST(self) -> None:  # noqa: N802 — http.server API
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if chat_status != 200:
+                self._send(chat_status, {"error": "model crashed"})
+                return
+            prompt = request["messages"][-1]["content"]
+            if '"score"' in prompt:
+                reply = judge_reply
+            elif tag_replies:
+                reply = tag_replies[next(tag_turn) % len(tag_replies)]
+            else:
+                reply = tag_reply
+            self._send(200, {"message": {"content": reply}})
+
+        def log_message(self, *_args: object) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)

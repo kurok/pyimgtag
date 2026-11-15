@@ -70,7 +70,8 @@ Examples:
     "preflight": (
         "Run preflight checks for prerequisites and exit",
         "Check that prerequisites are in place (Ollama reachable, model pulled,\n"
-        "exiftool installed, source path readable) and exit without tagging.",
+        "source path readable) and exit without tagging. Optional tools\n"
+        "(exiftool, ffmpeg) are reported as warnings.",
         """\
 Examples:
   pyimgtag preflight
@@ -1135,8 +1136,9 @@ def _add_query_subcommand(subparsers: Any) -> None:
         type=_arg_type(parse_bbox),
         help=(
             "Only photos whose EXIF coordinates fall inside this box (inclusive). "
-            "Pass lon1 > lon2 for a box crossing the antimeridian. Requires "
-            "coordinates in the DB — see 'run --resume-from-db'."
+            "Pass lon1 > lon2 for a box crossing the antimeridian. A negative first "
+            "value works as --bbox -20,170,-10,-170 or --bbox=-20,170,-10,-170. "
+            "Requires coordinates in the DB — see 'run --resume-from-db'."
         ),
     )
     query_date_grp = query_p.add_mutually_exclusive_group()
@@ -1571,6 +1573,14 @@ def _add_mcp_subcommand(subparsers: Any) -> None:
         "--export-root",
         help="Directory export_photos may copy into; without it exports are refused",
     )
+    mcp_p.add_argument(
+        "--model-dir",
+        help=(
+            "Folder holding the CLIP model files for search_photos (default: "
+            "$PYIMGTAG_SEARCH_MODEL_DIR, else ~/.cache/pyimgtag/search_models); use the "
+            "same --model-dir you gave 'pyimgtag index'"
+        ),
+    )
 
 
 def _add_prompt_subcommand(subparsers: Any) -> None:
@@ -1728,6 +1738,15 @@ def _add_dedup_subcommand(subparsers: Any) -> None:
     undo_p = dedup_sub.add_parser("undo", help="Move quarantined copies back and un-resolve")
     undo_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     undo_p.add_argument("--group", type=int, metavar="ID", help="Only undo this group id")
+    undo_p.add_argument(
+        "--forget-missing",
+        action="store_true",
+        help=(
+            "With --group: forget copies whose quarantine folder you are sure was deleted "
+            "(not just unmounted or mounted under another name), so the group can be "
+            "planned again. Only applies while the library itself is reachable"
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1788,6 +1807,67 @@ def _check_for_update() -> None:
         )
 
 
+def force_utf8_console() -> None:
+    """Make stdout/stderr write UTF-8, replacing what still cannot be encoded.
+
+    On Windows, when stdout/stderr is piped or redirected (CI, ``> file``,
+    PowerShell capture), Python 3.12-3.14 encodes with the ANSI code page
+    (cp1252, ...), so printing "→", "·" or a Cyrillic file name raised
+    UnicodeEncodeError and killed the command. (An interactive console is
+    already UTF-8, and Python 3.15 defaults to UTF-8 mode.) The check is on the
+    stream's encoding rather than the platform: a UTF-8 stream is left alone,
+    and a stream that cannot be reconfigured (a test capture) is skipped. A
+    non-UTF-8 POSIX locale therefore also gets UTF-8 output.
+    """
+    import codecs
+
+    for stream in (sys.stdout, sys.stderr):
+        encoding = getattr(stream, "encoding", None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not encoding or reconfigure is None:
+            continue
+        try:
+            if codecs.lookup(encoding).name == "utf-8":
+                continue
+            reconfigure(encoding="utf-8", errors="replace")
+        except (LookupError, ValueError, OSError):
+            continue
+
+
+#: Options whose value may start with "-" (a negative coordinate). On Python
+#: 3.12/3.13 argparse reads "--bbox -20,170,-10,-170" as two options (3.14
+#: accepts it); joining them as "--bbox=-20,..." works on every version.
+_NEGATIVE_VALUE_OPTIONS = ("--bbox",)
+#: Shortest abbreviation argparse would accept for these options.
+_MIN_ABBREV = 4
+
+
+def _join_negative_option_values(argv: list[str]) -> list[str]:
+    """Rewrite ``--bbox -20,...`` to ``--bbox=-20,...`` before argparse sees it."""
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == "--":  # nosec B105 — the argv separator, not a password
+            out.extend(argv[i:])  # everything after "--" is positional
+            break
+        nxt = argv[i + 1] if i + 1 < len(argv) else None
+        if (
+            len(token) >= _MIN_ABBREV
+            and any(opt.startswith(token) for opt in _NEGATIVE_VALUE_OPTIONS)
+            and nxt is not None
+            and len(nxt) > 1
+            and nxt[0] == "-"
+            and (nxt[1].isdigit() or nxt[1] == ".")
+        ):
+            out.append(f"{token}={nxt}")
+            i += 2
+            continue
+        out.append(token)
+        i += 1
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, dispatch to the selected subcommand, and return its exit code.
 
@@ -1798,8 +1878,9 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code; 1 when no subcommand or an unknown one is given,
         otherwise the handler's exit code.
     """
+    force_utf8_console()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_join_negative_option_values(sys.argv[1:] if argv is None else argv))
     # The raw argv is what `watch --install-service` bakes into the unit file.
     args._argv = list(argv) if argv is not None else sys.argv[1:]
     # --db, else $PYIMGTAG_DB, else the default (None) for every subcommand

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -30,6 +31,7 @@ READ_TOOLS = {
     "list_tags",
     "list_people",
     "list_events",
+    "get_event",
     "judge_ranking",
     "library_stats",
     "search_photos",
@@ -314,11 +316,75 @@ def test_list_people_only_named(tmp_path):
     assert person["confirmed"] is True
 
 
-def test_list_events_is_a_documented_stub(tmp_path):
+def _seed_events(db_path: Path) -> None:
+    db = ProgressDB(db_path=db_path)
+    db.reconcile_events(
+        [
+            {
+                "members": ["/p/a.jpg", "/p/b.jpg"],
+                "started_at": "2025-06-01T10:00:00",
+                "ended_at": "2025-06-03T18:00:00",
+                "place": "Óbidos",
+                "trip": None,
+                "fallback_name": "Óbidos, June 2025",
+            },
+            {
+                "members": ["/p/c.jpg"],
+                "started_at": "2025-08-10T09:00:00",
+                "ended_at": "2025-08-10T20:00:00",
+                "place": "Lisbon",
+                "trip": None,
+                "fallback_name": "Lisbon, August 2025",
+            },
+        ]
+    )
+    db.close()
+
+
+def test_list_events_returns_the_stored_events(tmp_path):
+    """#430: the tool reads the events tables, like 'events list --format json'."""
+    db_path = _seed_db(tmp_path)
+    _seed_events(db_path)
+    server = _server(db_path)
+    data = _payload(_call(server, "list_events", {}))
+    assert (data["total"], data["count"]) == (2, 2)
+    assert [e["name"] for e in data["events"]] == ["Lisbon, August 2025", "Óbidos, June 2025"]
+    assert [e["photo_count"] for e in data["events"]] == [1, 2]
+    assert {"id", "started_at", "ended_at", "place", "trip_id"} <= set(data["events"][0])
+    assert "not implemented" not in json.dumps(data)
+    assert "hint" not in data
+
+    db = ProgressDB(db_path=db_path)
+    assert data["events"] == db.list_events()
+    db.close()
+
+    limited = _payload(_call(server, "list_events", {"limit": 1}))
+    assert [e["name"] for e in limited["events"]] == ["Lisbon, August 2025"]
+    assert (limited["total"], limited["count"]) == (2, 1)
+    # As in 'events list --limit 0': zero means every event.
+    assert _payload(_call(server, "list_events", {"limit": 0}))["count"] == 2
+
+
+def test_list_events_on_a_library_without_events_says_how_to_make_them(tmp_path):
     server = _server(_seed_db(tmp_path))
     data = _payload(_call(server, "list_events", {}))
-    assert data["events"] == []
-    assert "roadmap" in data["note"]
+    assert data == {
+        "total": 0,
+        "count": 0,
+        "events": [],
+        "hint": "No events yet: run 'pyimgtag events detect' to group photos into events.",
+    }
+
+
+def test_list_events_description_no_longer_says_roadmap(tmp_path):
+    async def _run():
+        async with Client(_server(_seed_db(tmp_path))) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            return tools["list_events"].description
+
+    description = anyio.run(_run)
+    assert "roadmap" not in description.lower()
+    assert "events detect" in description
 
 
 def test_judge_ranking(tmp_path):
@@ -339,12 +405,155 @@ def test_library_stats(tmp_path):
     assert data["places"]["countries"][0]["value"] == "Portugal"
 
 
-def test_search_photos_degrades_with_actionable_error(tmp_path):
+def test_search_photos_without_an_index_says_how_to_build_one(tmp_path):
     server = _server(_seed_db(tmp_path))
     data = _payload(_call(server, "search_photos", {"query": "alice at the beach"}))
     assert data["error"] == "no semantic index"
     assert data["query"] == "alice at the beach"
-    assert "query_photos" in data["hint"]
+    assert "pyimgtag index --input-dir" in data["hint"]
+    assert "not implemented" not in json.dumps(data)
+
+
+class _FakeEmbedder:
+    model_id = "fake-clip"
+
+    def embed_text(self, text: str):
+        import numpy as np
+
+        return np.array([1.0, 0.0, 0.0], dtype=np.float32)
+
+
+def _seed_index(db_path: Path) -> None:
+    import numpy as np
+
+    db = ProgressDB(db_path=db_path)
+    for name, vec in (
+        ("beach.jpg", [0.9, 0.1, 0.0]),
+        ("city.jpg", [0.1, 0.9, 0.0]),
+        ("dog.jpg", [0.6, 0.0, 0.8]),
+    ):
+        v = np.array(vec, dtype=np.float32)
+        db.upsert_embedding(Path("/lib") / name, "fake-clip", v / np.linalg.norm(v))
+    db.close()
+
+
+def test_search_photos_ranks_the_index_like_the_cli(tmp_path):
+    """#431: the tool searches the CLIP index, best match first."""
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    with patch.object(mcp_server, "_load_local_embedder", return_value=_FakeEmbedder()):
+        server = _server(db_path)
+        data = _payload(_call(server, "search_photos", {"query": "sunny beach", "limit": 2}))
+    assert data["query"] == "sunny beach"
+    lib = Path("/lib")
+    assert [r["file_path"] for r in data["results"]] == [
+        str(lib / "beach.jpg"),
+        str(lib / "dog.jpg"),
+    ]
+    assert data["count"] == 2
+    assert data["results"][0]["score"] > data["results"][1]["score"]
+    assert "warning" not in data
+
+    # Same ranking the CLI's --format json path computes.
+    db = ProgressDB(db_path=db_path)
+    expected = db.search_similar(_FakeEmbedder().embed_text("x"), limit=2)
+    db.close()
+    assert data["results"] == [{"file_path": p, "score": round(s, 6)} for p, s in expected]
+
+
+def test_search_photos_warns_about_a_model_mismatch(tmp_path):
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    other = _FakeEmbedder()
+    other.model_id = "other-clip"
+    with patch.object(mcp_server, "_load_local_embedder", return_value=other):
+        data = _payload(_call(_server(db_path), "search_photos", {"query": "beach"}))
+    assert "index --rebuild" in data["warning"]
+
+
+@pytest.mark.parametrize(
+    ("raised", "error", "hint_part"),
+    [
+        (ImportError("onnxruntime"), "semantic search is not installed", "pyimgtag[search]"),
+        (FileNotFoundError("clip.onnx"), "search models missing", "pyimgtag search"),
+    ],
+)
+def test_search_photos_degrades_without_the_extra_or_the_models(tmp_path, raised, error, hint_part):
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    with patch.object(mcp_server, "_load_local_embedder", side_effect=raised):
+        data = _payload(_call(_server(db_path), "search_photos", {"query": "beach"}))
+    assert data["error"] == error
+    assert hint_part in data["hint"]
+
+
+def test_the_local_embedder_never_downloads(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYIMGTAG_SEARCH_MODEL_DIR", str(tmp_path / "empty"))
+    (tmp_path / "empty").mkdir()
+    with (
+        patch("pyimgtag.search.embedder._require"),  # the [search] extra may be absent in CI
+        patch("pyimgtag.search.embedder.load_embedder") as load,
+    ):
+        with pytest.raises(FileNotFoundError):
+            mcp_server._load_local_embedder()
+    load.assert_not_called()
+
+
+def test_the_local_embedder_uses_the_given_model_dir(tmp_path):
+    from pyimgtag.search.model_cache import TEXT_MODEL, TOKENIZER, VISION_MODEL
+
+    for model in (VISION_MODEL, TEXT_MODEL, TOKENIZER):
+        (tmp_path / model.name).write_bytes(b"x")
+    with (
+        patch("pyimgtag.search.embedder._require"),
+        patch("pyimgtag.search.embedder.load_embedder") as load,
+    ):
+        mcp_server._load_local_embedder(tmp_path)
+    load.assert_called_once_with(tmp_path, progress=False)
+
+
+def test_a_missing_extra_is_reported_before_missing_models(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYIMGTAG_SEARCH_MODEL_DIR", str(tmp_path))
+    with patch("pyimgtag.search.embedder._require", side_effect=ImportError("no onnxruntime")):
+        with pytest.raises(ImportError):
+            mcp_server._load_local_embedder()
+
+
+def test_a_model_that_fails_at_search_time_is_an_actionable_error(tmp_path):
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    broken = _FakeEmbedder()
+    broken.embed_text = MagicMock(side_effect=RuntimeError("[ONNXRuntimeError] INVALID_PROTOBUF"))
+    with patch.object(mcp_server, "_load_local_embedder", return_value=broken):
+        data = _payload(_call(_server(db_path), "search_photos", {"query": "beach"}))
+    assert data["error"] == "semantic search failed"
+    assert "INVALID_PROTOBUF" in data["hint"]
+    assert "--rebuild" in data["hint"]
+
+
+def test_search_photos_equals_the_cli_json(tmp_path, capsys):
+    """The tool's rows are the CLI's 'search --format json' rows, same default top."""
+    from pyimgtag.main import main
+
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    with patch("pyimgtag.search.embedder.load_embedder", return_value=_FakeEmbedder()):
+        assert main(["search", "sunny beach", "--format", "json", "--db", str(db_path)]) == 0
+    cli_rows = json.loads(capsys.readouterr().out)
+    with patch.object(mcp_server, "_load_local_embedder", return_value=_FakeEmbedder()):
+        data = _payload(_call(_server(db_path), "search_photos", {"query": "sunny beach"}))
+    assert data["results"] == cli_rows
+
+
+def test_search_photos_description_names_the_index(tmp_path):
+    async def _run():
+        async with Client(_server(_seed_db(tmp_path))) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            return tools["search_photos"].description
+
+    description = anyio.run(_run)
+    assert "Not available yet" not in description
+    assert "pyimgtag index" in description
 
 
 # --- write tools -----------------------------------------------------------
@@ -508,15 +717,21 @@ def test_cmd_mcp_runs_stdio_server(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def _fake_serve(db_path=None, *, enable_writes=False, export_root=None):
-        captured.update(db_path=db_path, enable_writes=enable_writes, export_root=export_root)
+    def _fake_serve(db_path=None, *, enable_writes=False, export_root=None, model_dir=None):
+        captured.update(
+            db_path=db_path,
+            enable_writes=enable_writes,
+            export_root=export_root,
+            model_dir=model_dir,
+        )
 
     monkeypatch.setattr(mcp_server, "serve_stdio", _fake_serve)
     monkeypatch.setenv(mcp_server.WRITES_ENV_VAR, "1")
-    args = build_parser().parse_args(["mcp", "--db", str(tmp_path / "p.db")])
-    assert mcp_cmd.cmd_mcp(args) == 0
+    argv = ["mcp", "--db", str(tmp_path / "p.db"), "--model-dir", str(tmp_path / "models")]
+    assert mcp_cmd.cmd_mcp(build_parser().parse_args(argv)) == 0
     assert captured["enable_writes"] is True
     assert captured["db_path"] == str(tmp_path / "p.db")
+    assert captured["model_dir"] == str(tmp_path / "models")
 
 
 def test_serve_stdio_uses_the_stdio_transport(tmp_path, monkeypatch):
@@ -556,3 +771,108 @@ def test_mcp_help_documents_client_config(capsys):
     out = capsys.readouterr().out
     assert "mcpServers" in out
     assert "PYIMGTAG_MCP_ENABLE_WRITES" in out
+
+
+# --- #461: event ids lead somewhere ---------------------------------------
+
+
+def _seed_two_events(tmp_path: Path) -> tuple[Path, int, int, list[str]]:
+    db_path = _seed_db(tmp_path)
+    db = ProgressDB(db_path=db_path)
+    paths = sorted(r["file_path"] for r in db.query_images())
+    db.reconcile_events(
+        [
+            {
+                "members": paths[:2],
+                "started_at": "2025-06-01T10:00:00",
+                "ended_at": "2025-06-02T10:00:00",
+                "place": "Porto",
+                "trip": None,
+                "fallback_name": "Porto, June 2025",
+            },
+            {
+                "members": paths[2:],
+                "started_at": "2025-08-01T10:00:00",
+                "ended_at": "2025-08-01T18:00:00",
+                "place": "Lisbon",
+                "trip": None,
+                "fallback_name": "Lisbon, August 2025",
+            },
+        ]
+    )
+    by_name = {e["name"]: e["id"] for e in db.list_events()}
+    db.close()
+    return db_path, by_name["Porto, June 2025"], by_name["Lisbon, August 2025"], paths
+
+
+def test_query_photos_filters_by_event(tmp_path):
+    db_path, porto, lisbon, paths = _seed_two_events(tmp_path)
+    server = _server(db_path)
+    data = _payload(_call(server, "query_photos", {"event_id": porto}))
+    assert sorted(p["path"] for p in data["photos"]) == paths[:2]
+    other = _payload(_call(server, "query_photos", {"event_id": lisbon}))
+    assert sorted(p["path"] for p in other["photos"]) == paths[2:]
+
+
+def test_query_photos_event_filter_pages_after_filtering(tmp_path):
+    """The Lisbon photos are the *last* paths: a limit applied before the
+    event filter would return nothing on the first page."""
+    db_path, _, lisbon, paths = _seed_two_events(tmp_path)
+    server = _server(db_path)
+    first = _payload(_call(server, "query_photos", {"event_id": lisbon, "limit": 1}))
+    second = _payload(_call(server, "query_photos", {"event_id": lisbon, "limit": 1, "offset": 1}))
+    assert [p["path"] for p in first["photos"] + second["photos"]] == paths[2:]
+
+
+def test_query_photos_event_filter_keeps_the_sort(tmp_path):
+    db_path, porto, _, paths = _seed_two_events(tmp_path)
+    data = _payload(
+        _call(_server(db_path), "query_photos", {"event_id": porto, "sort": "path_desc"})
+    )
+    assert [p["path"] for p in data["photos"]] == sorted(paths[:2], reverse=True)
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2**70])
+def test_out_of_range_event_ids_are_a_clear_error(tmp_path, bad):
+    server = _server(_seed_db(tmp_path))
+    for tool in ("get_event", "query_photos"):
+        data = _payload(_call(server, tool, {"event_id": bad}))
+        assert data["error"] == "no such event", tool
+
+
+def test_get_event_pages_a_large_event(tmp_path):
+    db_path, porto, _, paths = _seed_two_events(tmp_path)
+    server = _server(db_path)
+    page = _payload(_call(server, "get_event", {"event_id": porto, "limit": 1}))
+    assert page["member_count"] == 2
+    assert len(page["members"]) == 1
+    assert page["truncated"] is True
+    rest = _payload(_call(server, "get_event", {"event_id": porto, "limit": 1, "offset": 1}))
+    assert rest["truncated"] is False
+    assert sorted(page["members"] + rest["members"]) == paths[:2]
+
+
+def test_query_photos_with_an_unknown_event_is_a_clear_error(tmp_path):
+    data = _payload(_call(_server(_seed_db(tmp_path)), "query_photos", {"event_id": 999}))
+    assert data["error"] == "no such event"
+    assert "list_events" in data["hint"]
+
+
+def test_get_event_matches_events_show_json(tmp_path):
+    db_path, porto, _, paths = _seed_two_events(tmp_path)
+    data = _payload(_call(_server(db_path), "get_event", {"event_id": porto}))
+    db = ProgressDB(db_path=db_path)
+    expected = db.get_event(porto)
+    db.close()
+    assert data == expected
+    assert sorted(data["members"]) == paths[:2]
+    assert data["name"] == "Porto, June 2025"
+
+
+def test_get_event_with_an_unknown_id_is_a_clear_error(tmp_path):
+    data = _payload(_call(_server(_seed_db(tmp_path)), "get_event", {"event_id": 999}))
+    assert data == {
+        "error": "no such event",
+        "event_id": 999,
+        "hint": "Use list_events to see the event ids.",
+    }

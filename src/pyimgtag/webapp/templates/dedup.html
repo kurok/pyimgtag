@@ -111,7 +111,7 @@ function copyCard(group, m) {
   if (m.photos_library) badges.push('<span class="badge badge-photos">Photos original</span>');
   if (m.action) badges.push('<span class="badge badge-photos">' + esc(m.action) + '</span>');
   const checked = m.is_best ? ' checked' : '';
-  const disabled = group.resolved_at ? ' disabled' : '';
+  const disabled = isActed(group) ? ' disabled' : '';
   return '<div class="copy' + (m.is_best ? ' best' : '') + '">' +
     '<img loading="lazy" alt="' + esc(baseName(m.file_path)) + '" ' +
     'src="/review/thumbnail?size=240&path=' + encodeURIComponent(m.file_path) + '">' +
@@ -124,8 +124,15 @@ function copyCard(group, m) {
     '</div></div>';
 }
 
+function isActed(group) {
+  return !!group.resolved_at ||
+    (group.members || []).some(m => !!m.action);
+}
+
 function groupCard(group) {
-  const resolved = !!group.resolved_at;
+  // A group a run stopped on part-way has recorded moves but no resolved_at;
+  // it must still offer Undo.
+  const resolved = isActed(group);
   const actions = resolved
     ? '<button class="btn btn-secondary btn-sm" onclick="undoGroup(' + group.id + ')">Undo</button>'
     : '<button class="btn btn-primary btn-sm" onclick="applyGroup(' + group.id + ')">Apply plan</button>';
@@ -134,7 +141,7 @@ function groupCard(group) {
     '<span class="kind kind-' + esc(group.kind) + '">' + esc(group.kind) + '</span>' +
     '<span class="grp-meta">' + group.count + ' copies · ' +
     fmtBytes(group.reclaimable_bytes) + ' reclaimable' +
-    (resolved ? ' · resolved' : '') + '</span>' +
+    (group.resolved_at ? ' · resolved' : (resolved ? ' · partly applied' : '')) + '</span>' +
     '<span class="grp-actions">' + actions + '</span></div>' +
     '<div class="copies">' + group.members.map(m => copyCard(group, m)).join('') + '</div></div>';
 }
@@ -193,7 +200,7 @@ function applyGroup(id) {
 }
 
 function applyAll() {
-  const ids = GROUPS.filter(g => !g.resolved_at).map(g => g.id);
+  const ids = GROUPS.filter(g => !isActed(g)).map(g => g.id);
   if (!ids.length) return;
   askQuarantine('Move duplicates from ' + ids.length + ' group(s)?',
     'Every copy except the keeper of each group is moved into this folder. Nothing is deleted.',

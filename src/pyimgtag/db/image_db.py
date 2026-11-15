@@ -200,6 +200,7 @@ class ImageDB:
         bbox: tuple[float, float, float, float] | None = None,
         date_prefix: str | None = None,
         media_type: str | None = None,
+        event_id: int | None = None,
     ) -> tuple[list[str], list[object]]:
         """Translate filter arguments into ``(conditions, params)`` for query_images."""
         conditions: list[str] = []
@@ -217,6 +218,13 @@ class ImageDB:
             # above ``prefix + U+FFFF`` while still starting with ``prefix``.
             conditions.append("(pi.image_date >= ? AND pi.image_date < ?)")
             params.extend([date_prefix, date_prefix + "\uffff"])
+        if event_id is not None:
+            # Served by idx_event_members_event; filtering here (not after the
+            # query) keeps LIMIT meaning "N photos of this event".
+            conditions.append(
+                "pi.file_path IN (SELECT file_path FROM event_members WHERE event_id = ?)"
+            )
+            params.append(int(event_id))
         if media_type:
             # COALESCE so a row written before the column existed, and never
             # touched since, still reads as the image it is.
@@ -310,6 +318,7 @@ class ImageDB:
         bbox: tuple[float, float, float, float] | None = None,
         date_prefix: str | None = None,
         media_type: str | None = None,
+        event_id: int | None = None,
     ) -> list[dict]:
         """Query images with advanced filters.
 
@@ -340,6 +349,7 @@ class ImageDB:
             media_type: ``"image"`` or ``"video"``. Rows written before video
                 support carry ``'image'`` from the migration default, so this
                 never hides an older library.
+            event_id: Only members of this event (see ``events list``).
 
         Returns:
             List of image metadata dicts.
@@ -359,6 +369,7 @@ class ImageDB:
             bbox,
             date_prefix,
             media_type,
+            event_id,
         )
         order_clause = self._QUERY_SORTS.get(sort, self._QUERY_SORTS["path_asc"])
         query = self._build_images_query(conditions, order_clause, limit)

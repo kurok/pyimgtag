@@ -219,16 +219,20 @@ class EventsDB:
         return event_id
 
     def _update_event(self, event_id: int, cluster: dict) -> None:
-        # The name is deliberately not touched: a user rename, or a model name
-        # already paid for, outlives a re-detection that only shifted members.
+        # A user rename, or a model name already paid for, outlives a
+        # re-detection that only shifted members. A fallback name is just the
+        # place and date, so it follows them (e.g. one place name after #460).
         self._conn.execute(
-            """UPDATE events SET started_at = ?, ended_at = ?, place = ?, trip_id = ?
+            """UPDATE events SET started_at = ?, ended_at = ?, place = ?, trip_id = ?,
+                       name = CASE WHEN named_by IS NULL OR named_by = 'fallback'
+                                   THEN COALESCE(?, name) ELSE name END
                 WHERE id = ?""",
             (
                 cluster["started_at"],
                 cluster["ended_at"],
                 cluster.get("place"),
                 cluster.get("trip"),
+                cluster.get("fallback_name"),
                 event_id,
             ),
         )

@@ -1357,7 +1357,7 @@ class TestSkipExisting:
             rc = cmd_run(args, MagicMock())
 
         assert rc == 0
-        assert "Skipped (exists): 1" in capsys.readouterr().err
+        assert "Skipped (exists):  1" in capsys.readouterr().err
 
     def test_skip_existing_skips_before_keyword_read(self, tmp_path: Path) -> None:
         """A complete row is skipped before any Photos keyword read (--skip-if-tagged)."""
@@ -1804,7 +1804,7 @@ class TestCmdRunMisc:
         assert rc == 0
         # only f1 was tagged; f2 deduped out
         cls.return_value.tag_image.assert_called_once()
-        assert "Skipped (dedup):  1" in capsys.readouterr().err
+        assert "Skipped (dedup):   1" in capsys.readouterr().err
 
     def test_cloud_backend_constructed(self, tmp_path: Path) -> None:
         from pyimgtag.commands.run import cmd_run
@@ -2905,27 +2905,26 @@ def test_all_three_modes_record_the_same_session_events(
     )
     session = MagicMock()
     stats = _new_stats(len(files))
-    db = ProgressDB(db_path=tmp_path / "p.db")
-    try:
-        with patch("pyimgtag.commands.run.read_exif", return_value=ExifData()):
-            interrupted = _tag(
-                _RunContext(
-                    files=files,
-                    source_type="directory",
-                    args=args,
-                    client=client,
-                    geocoder=MagicMock(),
-                    progress_db=db,
-                    phash_map={},
-                    skipped_dedup={str(files[5])},
-                    results=[],
-                    stats=stats,
-                    session=session,
-                    use_threaded=use_threaded,
-                )
+    with (
+        ProgressDB(db_path=tmp_path / "p.db") as db,
+        patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+    ):
+        interrupted = _tag(
+            _RunContext(
+                files=files,
+                source_type="directory",
+                args=args,
+                client=client,
+                geocoder=MagicMock(),
+                progress_db=db,
+                phash_map={},
+                skipped_dedup={str(files[5])},
+                results=[],
+                stats=stats,
+                session=session,
+                use_threaded=use_threaded,
             )
-    finally:
-        db.close()
+        )
 
     assert interrupted is False
     recorded = sorted(
