@@ -10,7 +10,7 @@ import pytest
 from pyimgtag.main import main
 from pyimgtag.models import ImageResult
 from pyimgtag.progress_db import ProgressDB
-from pyimgtag.text_fit import elide_path
+from pyimgtag.text_fit import display_width, elide_path, pad
 
 
 def _assert_starts_on_a_boundary(path: str, shown: str) -> None:
@@ -66,8 +66,21 @@ class TestElidePath:
         path = "/" + name
         for width in range(2, len(path)):
             shown = elide_path(path, width)
-            assert len(shown) <= width
+            assert display_width(shown) <= width
             assert not unicodedata.combining(shown[1:2] or "a")
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/Users/someone/Pictures/Zu\u0308rich Zu\u0308rich Zu\u0308rich/IMG_1.jpg",
+            "/Users/someone/写真/東京 2024 旅行 アルバム/IMG_1.jpg",
+        ],
+    )
+    def test_column_is_measured_in_display_cells(self, path):
+        shown = elide_path(path, 30)
+        assert display_width(shown) <= 30
+        assert display_width(pad(shown, 30)) == 30
+        assert path.endswith(shown[1:])
 
     @pytest.mark.parametrize(("width", "expected"), [(1, "…"), (0, "")])
     def test_tiny_width(self, width, expected):
