@@ -37,7 +37,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
-          powershell -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir "C:\ux" 2>&1 |
+          pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir "C:\ux" 2>&1 |
             Tee-Object -FilePath "windows-ux-audit.out"
           Get-Content "C:\ux\windows-ux-audit.log" -ErrorAction SilentlyContinue
 

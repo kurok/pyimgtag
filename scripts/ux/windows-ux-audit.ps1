@@ -1,4 +1,4 @@
-# Windows UX audit — runs the documented pyimgtag workflows on a Windows runner.
+﻿# Windows UX audit — runs the documented pyimgtag workflows on a Windows runner.
 #
 # Usage (on a Windows machine with the repo checked out):
 #   powershell -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir C:\ux
