@@ -756,7 +756,11 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             _write_run_outputs(results, args, vocabulary)
             _print_summary(stats)
             if vocabulary is not None:
-                _print_vocabulary_summary(vocabulary)
+                report = getattr(args, "output_json", None)
+                _print_vocabulary_summary(
+                    vocabulary,
+                    report=_vocabulary_report_path(report) if report else None,
+                )
             if session is not None:
                 for k, v in stats.items():
                     session.set_counter(k, v)
@@ -1329,8 +1333,15 @@ def _print_summary(stats: dict) -> None:
     print(f"  Resumed (DB):     {stats['resumed_from_db']}", file=sys.stderr)
 
 
-def _print_vocabulary_summary(vocabulary: Vocabulary, top: int = 15) -> None:
-    """Print raw→canonical mapping counts so users can grow their synonym lists."""
+def _print_vocabulary_summary(
+    vocabulary: Vocabulary, top: int = 15, report: Path | None = None
+) -> None:
+    """Print raw→canonical mapping counts so users can grow their synonym lists.
+
+    Each list shows the *top* most frequent entries; when there are more, a
+    "… and N more" line says how many were left out and where the full list
+    is (the ``.vocabulary.json`` report when ``--output-json`` was given).
+    """
     st = vocabulary.stats
     print("\n--- Vocabulary ---", file=sys.stderr)
     print(f"  Exact matches:    {st.exact}", file=sys.stderr)
@@ -1339,9 +1350,25 @@ def _print_vocabulary_summary(vocabulary: Vocabulary, top: int = 15) -> None:
         print(f"  Dropped (strict): {st.total_dropped}", file=sys.stderr)
     else:
         print(f"  Kept off-vocab:   {st.total_kept}", file=sys.stderr)
-    for (raw, canon), n in st.mapped.most_common(top):
+    # Same order as the .vocabulary.json report (count, then name), so "the
+    # rest" is exactly the tail of the report's list.
+    mapped = sorted(st.mapped.items(), key=lambda kv: (-kv[1], kv[0][0], kv[0][1]))
+    for (raw, canon), n in mapped[:top]:
         print(f"    {raw} -> {canon}  x{n}", file=sys.stderr)
-    off = st.dropped if vocabulary.strict else st.kept
-    for raw, n in off.most_common(top):
+    _print_hidden(len(mapped) - top, "mapping", report)
+    off_counts = st.dropped if vocabulary.strict else st.kept
+    off = sorted(off_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    for raw, n in off[:top]:
         label = "dropped" if vocabulary.strict else "kept"
         print(f"    {raw}  ({label} x{n})", file=sys.stderr)
+    _print_hidden(len(off) - top, "tag", report)
+
+
+def _print_hidden(hidden: int, noun: str, report: Path | None) -> None:
+    """Say how many list entries the summary left out, and where they are."""
+    if hidden <= 0:
+        return
+    where = f"full list in {report}" if report else "full list: re-run with --output-json"
+    plural = "" if hidden == 1 else "s"
+    # "distinct": the headers above count every occurrence, this counts entries.
+    print(f"    … and {hidden} more distinct {noun}{plural} ({where})", file=sys.stderr)
