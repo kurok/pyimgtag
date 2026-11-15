@@ -1,0 +1,52 @@
+name: Realistic UX journeys
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  realistic-ux-journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install exiftool and ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libimage-exiftool-perl ffmpeg
+
+      - name: Install pyimgtag and the audit dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[heic,review,dedup,vocab,mcp]" piexif
+
+      - name: Build the corpus and run the journeys
+        run: |
+          python scripts/ux/make_realistic_corpus.py
+          python scripts/ux/mock_ollama_realistic.py 11435 &
+          sleep 3
+          export OLLAMA_URL=http://127.0.0.1:11435
+          bash scripts/ux/real_user_journeys.sh
+        env:
+          PYIMGTAG_NO_WEB: "1"
+          PYIMGTAG_NO_UPDATE_CHECK: "1"
+          PYIMGTAG_UX_ROOT: ${{ github.workspace }}/lab/library
+          PYIMGTAG_UX_OUT: ${{ github.workspace }}/lab/out
+
+      - name: Upload the transcript
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: realistic-ux-journeys-log
+          path: |
+            lab/out/journeys.log
+            lab/out/*.csv
+            lab/out/*.xml
+          if-no-files-found: warn
