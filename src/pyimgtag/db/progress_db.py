@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from pyimgtag.db.dedup_db import DedupDB
 from pyimgtag.db.events_db import EventsDB
 from pyimgtag.db.face_db import FaceDB
-from pyimgtag.db.image_db import _DEFAULT_PATH_BATCH_SIZE, FOLD_SQL, ImageDB
+from pyimgtag.db.image_db import _DEFAULT_PATH_BATCH_SIZE, PLACE_MATCH_SQL, ImageDB
 from pyimgtag.db.insights_db import InsightsDB
 from pyimgtag.db.judge_db import _DEFAULT_JUDGE_RESULTS_LIMIT, JudgeDB
 from pyimgtag.db.map_db import MAX_CELLS, MapDB
@@ -26,8 +26,8 @@ from pyimgtag.place_names import (
     COUNTRY_SEPARATORS,
     LOCALITY_SEPARATORS,
     REGION_SEPARATORS,
-    fold,
     native_name,
+    place_matches,
 )
 
 if TYPE_CHECKING:
@@ -440,8 +440,8 @@ class ProgressDB:
                 raise DatabaseNotFoundError(self._path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
-        # Accent/case folding for the place filters (SQLite's LOWER is ASCII-only).
-        self._conn.create_function(FOLD_SQL, 1, fold, deterministic=True)
+        # The --city/--country match: accent/case folding plus name aliases.
+        self._conn.create_function(PLACE_MATCH_SQL, 3, place_matches, deterministic=True)
         try:
             self._conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
             # Checked before anything writes to the file, WAL mode included.

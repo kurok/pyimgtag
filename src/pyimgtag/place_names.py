@@ -6,6 +6,7 @@ start) can use it without pulling in ``requests``.
 
 from __future__ import annotations
 
+import functools
 import unicodedata
 from collections.abc import Iterable
 
@@ -15,7 +16,8 @@ __all__ = [
     "REGION_SEPARATORS",
     "fold",
     "native_name",
-    "place_like_patterns",
+    "place_matches",
+    "place_terms",
 ]
 
 # Multilingual places carry every official name in their OSM ``name`` tag,
@@ -176,8 +178,7 @@ def fold(text: str | None) -> str | None:
 
     Decomposes to NFKD, drops the combining marks and casefolds, so a name
     stored in either Unicode form and typed with or without its accents
-    compares equal. Registered as an SQL function by the progress DB, since
-    SQLite's own ``LOWER`` folds ASCII only.
+    compares equal (SQLite's own ``LOWER`` folds ASCII only).
     """
     if text is None:
         return None
@@ -200,37 +201,57 @@ _COUNTRY_CODES = {code: native for code, native, _ in _COUNTRIES}
 _CITY_INDEX = _alias_index(_CITIES)
 
 
-def _like_escape(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+@functools.lru_cache(maxsize=256)
+def place_terms(typed: str, kind: str) -> tuple[frozenset[str], tuple[str, ...]]:
+    """Folded terms a place filter matches for what the user *typed*.
 
-
-def place_like_patterns(typed: str, kind: str) -> list[str]:
-    """Folded SQL ``LIKE`` patterns (escape ``\\``) a place filter should match.
-
-    ``"Switzerland"`` for a country gives ``["%switzerland%", "%schweiz%"]``,
-    so the stored native name is found. A two-letter country code, or a short
-    alias such as ``"UK"``, is matched whole rather than as a substring
-    (``"US"`` must not match "Australia" or "Belarus"); it finds the native
-    name and a row that stores the code itself. Anything not in the tables is
-    matched as typed.
+    ``"Switzerland"`` for a country gives substrings ``("switzerland",
+    "schweiz")``, so the stored native name is found. A two-letter country
+    code, known or not, and a short alias such as ``"UK"`` are matched whole
+    rather than as substrings (``"US"`` must not match "Australia", ``"NA"``
+    must not match "Canada"); a known one also finds its native name, and a
+    row that stores the code itself still matches. Anything else is matched
+    as typed.
 
     Args:
         typed: The filter value as the user gave it.
         kind: ``"country"`` or ``"city"``.
 
     Returns:
-        De-duplicated patterns, matched against the folded stored name; a row
-        matches when any of them does.
+        ``(exact, substrings)``: a stored name matches when, folded, it equals
+        one of *exact* or contains one of *substrings*.
     """
     key = fold(typed.strip()) or ""
     index = _COUNTRY_INDEX if kind == "country" else _CITY_INDEX
     natives = list(index.get(key, ()))
-    if kind == "country" and key in _COUNTRY_CODES:
+    is_code = kind == "country" and len(key) == 2 and key.isascii() and key.isalpha()
+    if is_code and key in _COUNTRY_CODES:
         natives = [_COUNTRY_CODES[key]]
-    short = bool(natives) and len(key) <= 3
-    patterns = [_like_escape(key) if short else f"%{_like_escape(key)}%"]
+    whole = is_code or (bool(natives) and len(key) <= 3)
+    substrings = [] if whole else [key]
     for native in natives:
-        pattern = f"%{_like_escape(fold(native) or '')}%"
-        if pattern not in patterns:
-            patterns.append(pattern)
-    return patterns
+        folded = fold(native) or ""
+        if folded not in substrings:
+            substrings.append(folded)
+    return (frozenset({key}) if whole else frozenset()), tuple(substrings)
+
+
+def place_matches(stored: str | None, typed: str, kind: str) -> bool:
+    """True when the *stored* place name answers a filter for *typed*.
+
+    Registered as an SQL function by the progress DB, so each row's name is
+    folded once however many spellings the filter accepts.
+
+    Args:
+        stored: The place name in the DB (may be None).
+        typed: The filter value as the user gave it.
+        kind: ``"country"`` or ``"city"``.
+
+    Returns:
+        Whether the row matches; a row with no name never does.
+    """
+    if not stored:
+        return False
+    exact, substrings = place_terms(typed, kind)
+    folded = fold(stored) or ""
+    return folded in exact or any(term in folded for term in substrings)

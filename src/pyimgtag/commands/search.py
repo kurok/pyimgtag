@@ -193,6 +193,9 @@ def cmd_search(args: argparse.Namespace) -> int:
 
     if not hits:
         print("No images matched.", file=sys.stderr)
+        from pyimgtag.commands.query import suggest_places
+
+        suggest_places(args)
         return 0
 
     if args.format == "paths":

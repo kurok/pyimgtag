@@ -15,11 +15,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pyimgtag.models import ImageResult
-from pyimgtag.place_names import place_like_patterns
 
-#: SQL name of :func:`pyimgtag.place_names.fold`, registered on every
-#: connection by ProgressDB so the place filters can fold the stored column.
-FOLD_SQL = "pyimgtag_fold"
+#: SQL name of :func:`pyimgtag.place_names.place_matches`, registered on every
+#: connection by ProgressDB for the --city/--country filters.
+PLACE_MATCH_SQL = "pyimgtag_place_match"
 
 
 if TYPE_CHECKING:
@@ -273,14 +272,9 @@ class ImageDB:
             if typed is None:
                 continue
             # Accent- and case-insensitive, and an English name or a country
-            # code also finds the stored native one (see place_like_patterns).
-            patterns = place_like_patterns(typed, kind)
-            conditions.append(
-                "("
-                + " OR ".join(f"{FOLD_SQL}({column}) LIKE ? ESCAPE '\\'" for _ in patterns)
-                + ")"
-            )
-            params.extend(patterns)
+            # code also finds the stored native one (see place_terms).
+            conditions.append(f"{PLACE_MATCH_SQL}({column}, ?, ?)")
+            params.extend([typed, kind])
         if status is not None:
             conditions.append("pi.status = ?")
             params.append(status)

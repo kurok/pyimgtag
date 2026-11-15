@@ -8,7 +8,7 @@ import pytest
 
 from pyimgtag.main import main
 from pyimgtag.models import ImageResult
-from pyimgtag.place_names import fold, place_like_patterns
+from pyimgtag.place_names import fold, place_matches, place_terms
 from pyimgtag.progress_db import ProgressDB
 
 _PLACES = [
@@ -83,12 +83,29 @@ class TestCountryFilter:
             db._conn.commit()
         assert _names(str(db_path), country="UA") == ["kyiv.jpg"]
 
+    def test_an_unknown_code_does_not_match_as_a_substring(self, tmp_path):
+        # Namibia's code is not in the alias table, and "na" is inside "Canada".
+        db_path = tmp_path / "ca.db"
+        img = tmp_path / "toronto.jpg"
+        img.write_bytes(b"x")
+        with ProgressDB(db_path=db_path) as db:
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img), file_name=img.name, tags=["x"], nearest_country="Canada"
+                ),
+            )
+        assert _names(str(db_path), country="NA") == []
+        assert _names(str(db_path), country="anad") == ["toronto.jpg"]
+
     def test_like_wildcards_in_input_are_literal(self, tmp_path):
         assert _names(_library(tmp_path), country="%") == []
 
 
 class TestCityFilter:
-    @pytest.mark.parametrize(("typed", "expected"), [("Munich", "munich.jpg"), ("Vienna", "vienna.jpg")])
+    @pytest.mark.parametrize(
+        ("typed", "expected"), [("Munich", "munich.jpg"), ("Vienna", "vienna.jpg")]
+    )
     def test_english_exonym_matches(self, tmp_path, typed, expected):
         assert _names(_library(tmp_path), city=typed) == [expected]
 
@@ -99,9 +116,25 @@ class TestCityFilter:
         assert _names(_library(tmp_path), city="МІНСК") == ["minsk.jpg"]
 
 
-def test_patterns_for_a_code_and_a_name():
-    assert place_like_patterns("CH", "country") == ["ch", "%schweiz%"]
-    assert place_like_patterns("Switzerland", "country") == ["%switzerland%", "%schweiz%"]
+class TestPlaceTerms:
+    def test_a_known_code_is_whole_and_finds_the_native_name(self):
+        assert place_terms("CH", "country") == (frozenset({"ch"}), ("schweiz",))
+
+    def test_an_english_name_is_a_substring_plus_the_native_name(self):
+        assert place_terms("Switzerland", "country") == (
+            frozenset(),
+            ("switzerland", "schweiz"),
+        )
+
+    def test_an_unknown_code_is_still_whole(self):
+        assert place_terms("NA", "country") == (frozenset({"na"}), ())
+
+    def test_two_letters_for_a_city_are_a_substring(self):
+        assert place_terms("Ko", "city") == (frozenset(), ("ko",))
+
+    def test_no_stored_name_never_matches(self):
+        assert place_matches(None, "Schweiz", "country") is False
+        assert place_matches("", "", "country") is False
 
 
 class TestNoMatchHint:
@@ -142,3 +175,58 @@ class TestNoMatchHint:
         err = capsys.readouterr().err
         assert "No images matched" in err
         assert "No country matched" not in err
+
+
+def test_search_miss_lists_the_countries(tmp_path, capsys):
+    np = pytest.importorskip("numpy")
+    from pyimgtag.search.indexer import build_index
+
+    class _Stub:
+        model_id = "stub-v1"
+        dim = 2
+
+        def embed_image(self, path):
+            return np.array([1.0, 0.0], dtype=np.float32)
+
+        def embed_text(self, text):
+            return np.array([1.0, 0.0], dtype=np.float32)
+
+    db_path = _library(tmp_path)
+    with ProgressDB(db_path=db_path) as db:
+        build_index([tmp_path / name for name, _, _ in _PLACES], db, _Stub())
+
+    code = main(
+        [
+            "search",
+            "--db",
+            db_path,
+            "--similar-to",
+            str(tmp_path / "zurich.jpg"),
+            "--country",
+            "Narnia",
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert code == 0, err
+    assert "No images matched." in err
+    assert 'No country matched "Narnia"' in err
+
+
+def test_webapp_query_api_uses_the_same_match(tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi import FastAPI
+    from starlette.testclient import TestClient
+
+    from pyimgtag.webapp.routes_query import build_query_router
+
+    with ProgressDB(db_path=_library(tmp_path)) as db:
+        app = FastAPI()
+        app.include_router(build_query_router(db))
+        with TestClient(app) as client:
+            by_name = client.get("/api/images?country=Switzerland").json()
+            by_code = client.get("/api/images?country=US").json()
+            by_city = client.get("/api/images?city=Munich").json()
+    assert [Path(r["file_path"]).name for r in by_name] == ["zurich.jpg"]
+    assert [Path(r["file_path"]).name for r in by_code] == ["ny.jpg"]
+    assert [Path(r["file_path"]).name for r in by_city] == ["munich.jpg"]
