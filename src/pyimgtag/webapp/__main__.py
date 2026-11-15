@@ -26,7 +26,10 @@ from pyimgtag.db_location import resolve_db_path
 
 
 def main() -> None:
+    from pyimgtag.main import force_utf8_console
     from pyimgtag.webapp.serve import serve_unified
+
+    force_utf8_console()
 
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8000"))

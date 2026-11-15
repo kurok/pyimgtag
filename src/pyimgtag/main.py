@@ -1789,6 +1789,33 @@ def _check_for_update() -> None:
         )
 
 
+def force_utf8_console() -> None:
+    """Make stdout/stderr write UTF-8, replacing what still cannot be encoded.
+
+    On Windows, when stdout/stderr is piped or redirected (CI, ``> file``,
+    PowerShell capture), Python 3.12-3.14 encodes with the ANSI code page
+    (cp1252, ...), so printing "→", "·" or a Cyrillic file name raised
+    UnicodeEncodeError and killed the command. (An interactive console is
+    already UTF-8, and Python 3.15 defaults to UTF-8 mode.) The check is on the
+    stream's encoding rather than the platform: a UTF-8 stream is left alone,
+    and a stream that cannot be reconfigured (a test capture) is skipped. A
+    non-UTF-8 POSIX locale therefore also gets UTF-8 output.
+    """
+    import codecs
+
+    for stream in (sys.stdout, sys.stderr):
+        encoding = getattr(stream, "encoding", None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not encoding or reconfigure is None:
+            continue
+        try:
+            if codecs.lookup(encoding).name == "utf-8":
+                continue
+            reconfigure(encoding="utf-8", errors="replace")
+        except (LookupError, ValueError, OSError):
+            continue
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, dispatch to the selected subcommand, and return its exit code.
 
@@ -1799,6 +1826,7 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code; 1 when no subcommand or an unknown one is given,
         otherwise the handler's exit code.
     """
+    force_utf8_console()
     parser = build_parser()
     args = parser.parse_args(argv)
     # The raw argv is what `watch --install-service` bakes into the unit file.
