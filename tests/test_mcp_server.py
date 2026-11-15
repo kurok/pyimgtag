@@ -734,16 +734,18 @@ def test_cmd_mcp_runs_stdio_server(tmp_path, monkeypatch):
     assert captured["model_dir"] == str(tmp_path / "models")
 
 
-def test_serve_stdio_uses_the_stdio_transport(tmp_path, monkeypatch):
-    calls: list[str] = []
+def test_serve_stdio_runs_the_answer_before_eof_loop(tmp_path, monkeypatch):
+    """serve_stdio serves the built server through the #468 stdio loop."""
+    built = object()
+    served: list[object] = []
 
-    class _FakeServer:
-        def run(self, transport: str = "stdio") -> None:
-            calls.append(transport)
+    async def _fake_loop(server):
+        served.append(server)
 
-    monkeypatch.setattr(mcp_server, "build_server", lambda *a, **k: _FakeServer())
+    monkeypatch.setattr(mcp_server, "build_server", lambda *a, **k: built)
+    monkeypatch.setattr(mcp_server, "_serve_stdio_until_answered", _fake_loop)
     mcp_server.serve_stdio(tmp_path / "p.db")
-    assert calls == ["stdio"]
+    assert served == [built]
 
 
 # --- CLI parser ------------------------------------------------------------

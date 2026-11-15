@@ -98,3 +98,104 @@ def test_an_event_id_from_list_events_leads_to_its_photos(tmp_path: Path) -> Non
     assert sorted(shown["members"]) == paths[:2]
     queried = _call(db_path, tmp_path, "query_photos", {"event_id": event["id"]})
     assert sorted(p["path"] for p in queried["photos"]) == paths[:2]
+
+
+def _burst(db_path: Path, home: Path, messages: list[dict]) -> list[dict]:
+    """Write every message at once, close stdin, read every answer."""
+    import subprocess
+
+    payload = "".join(json.dumps(m) + "\n" for m in messages)
+    proc = subprocess.run(  # nosec B603 — fixed interpreter and module
+        [sys.executable, "-m", "pyimgtag", "mcp", "--db", str(db_path)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=child_env(home),
+        timeout=60,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+
+
+_INIT = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2024-11-05",
+        "capabilities": {},
+        "clientInfo": {"name": "burst", "version": "1"},
+    },
+}
+_INITIALIZED = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+
+
+def _tool_call(request_id: int, name: str, arguments: dict | None = None) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments or {}},
+    }
+
+
+def test_a_burst_then_eof_gets_every_answer(tmp_path: Path) -> None:
+    """#468: requests written in one burst before stdin closes are all answered."""
+    db_path = tmp_path / "p.db"
+    ProgressDB(db_path).close()
+    answers = _burst(
+        db_path,
+        tmp_path,
+        [
+            _INIT,
+            _INITIALIZED,
+            _tool_call(3, "list_tags"),
+            _tool_call(4, "list_events"),
+            _tool_call(5, "search_photos", {"query": "beach"}),
+            {"jsonrpc": "2.0", "id": 6, "method": "tools/list"},
+        ],
+    )
+    assert sorted(a["id"] for a in answers) == [1, 3, 4, 5, 6]
+    by_id = {a["id"]: a for a in answers}
+    assert json.loads(by_id[3]["result"]["content"][0]["text"])["total"] == 0
+    assert json.loads(by_id[5]["result"]["content"][0]["text"])["error"] == "no semantic index"
+
+
+def test_a_burst_with_only_notifications_exits_promptly(tmp_path: Path) -> None:
+    """Nothing pending at EOF: the server must not wait for the drain timeout."""
+    import time
+
+    db_path = tmp_path / "p.db"
+    ProgressDB(db_path).close()
+    started = time.monotonic()
+    answers = _burst(db_path, tmp_path, [_INIT, _INITIALIZED])
+    assert [a["id"] for a in answers] == [1]
+    assert time.monotonic() - started < 30
+
+
+def test_a_cancelled_request_does_not_hold_the_exit(tmp_path: Path) -> None:
+    """A request the client cancels is never answered; EOF must not wait for it."""
+    import time
+
+    db_path = tmp_path / "p.db"
+    ProgressDB(db_path).close()
+    started = time.monotonic()
+    answers = _burst(
+        db_path,
+        tmp_path,
+        [
+            _INIT,
+            _INITIALIZED,
+            _tool_call(3, "list_tags"),
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/cancelled",
+                "params": {"requestId": 3, "reason": "no longer needed"},
+            },
+            _tool_call(4, "list_events"),
+        ],
+    )
+    assert 1 in {a["id"] for a in answers} and 4 in {a["id"] for a in answers}
+    assert time.monotonic() - started < 30

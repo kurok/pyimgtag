@@ -642,7 +642,100 @@ def serve_stdio(
     Raises:
         ImportError: If the ``[mcp]`` extra is not installed.
     """
+    import anyio
+
     server = build_server(
         db_path, enable_writes=enable_writes, export_root=export_root, model_dir=model_dir
     )
-    server.run(transport="stdio")
+    anyio.run(_serve_stdio_until_answered, server)
+
+
+#: After stdin closes, how long the server keeps going to answer the requests
+#: it already read before it exits anyway.
+EOF_DRAIN_TIMEOUT_S = 60.0
+
+
+async def _serve_stdio_until_answered(server: MCPServer) -> None:
+    """Serve over stdio, answering every request that was read before EOF.
+
+    The SDK's stdio transport ends the session as soon as stdin closes, which
+    cancels requests still being handled: a client that writes a burst and
+    closes the pipe got only the first answer (#468). This sits between the
+    transport and the server: it counts the request ids it passes in and the
+    responses it passes out, and on EOF keeps the server's input open until
+    every one is answered (or :data:`EOF_DRAIN_TIMEOUT_S` passes). A request
+    the client cancels is never answered, so a cancel removes it too.
+    """
+    from collections import Counter
+
+    import anyio
+    from mcp.server.stdio import stdio_server
+    from mcp.shared.dispatcher import coerce_request_id
+    from mcp_types import JSONRPCError, JSONRPCNotification, JSONRPCRequest, JSONRPCResponse
+
+    # The SDK has no public accessor for the low-level server (mcp 2.0-2.3);
+    # if that ever changes, fall back to its own stdio runner.
+    lowlevel = getattr(server, "_lowlevel_server", None)
+    if lowlevel is None:  # pragma: no cover - only for an SDK without it
+        await server.run_stdio_async()
+        return
+
+    pending: Counter[object] = Counter()
+    # Set when pending empties; replaced before each wait (anyio events are
+    # one-shot), so an early empty moment cannot satisfy the EOF wait.
+    drained = {"event": anyio.Event()}
+
+    def _settle(request_id: object) -> None:
+        key = coerce_request_id(request_id)  # type: ignore[arg-type]
+        if pending[key] > 1:
+            pending[key] -= 1
+        else:
+            pending.pop(key, None)
+        if not pending:
+            drained["event"].set()
+
+    async with stdio_server() as (wire_in, wire_out):
+        # Buffer 0, as the SDK uses: backpressure instead of an unbounded queue.
+        # Plain streams drop the SDK's per-message sender context, which stdio
+        # does not use.
+        to_server, server_in = anyio.create_memory_object_stream[Any](0)
+        server_out, from_server = anyio.create_memory_object_stream[Any](0)
+
+        async def pump_in() -> None:
+            async with to_server:
+                async for item in wire_in:
+                    message = getattr(item, "message", None)
+                    if isinstance(message, JSONRPCRequest):
+                        pending[coerce_request_id(message.id)] += 1
+                    elif (
+                        isinstance(message, JSONRPCNotification)
+                        and message.method == "notifications/cancelled"
+                        and isinstance(message.params, dict)
+                        and "requestId" in message.params
+                    ):
+                        _settle(message.params["requestId"])
+                    await to_server.send(item)
+                # EOF: hold the server's input open until it has answered.
+                with anyio.move_on_after(EOF_DRAIN_TIMEOUT_S):
+                    while pending:
+                        drained["event"] = anyio.Event()
+                        await drained["event"].wait()
+
+        async def pump_out() -> None:
+            # Closing wire_out when the server is done ends the transport's
+            # writer, as the SDK's own run does.
+            async with from_server, wire_out:
+                async for item in from_server:
+                    message = getattr(item, "message", None)
+                    if (
+                        isinstance(message, JSONRPCResponse | JSONRPCError)
+                        and message.id is not None
+                    ):
+                        _settle(message.id)
+                    await wire_out.send(item)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(pump_in)
+            tg.start_soon(pump_out)
+            async with server_out:
+                await lowlevel.run(server_in, server_out, lowlevel.create_initialization_options())
