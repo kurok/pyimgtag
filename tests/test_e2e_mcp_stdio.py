@@ -18,6 +18,7 @@ import anyio  # noqa: E402
 from mcp import ClientSession  # noqa: E402
 from mcp.client.stdio import StdioServerParameters, stdio_client  # noqa: E402
 
+from pyimgtag.models import ImageResult  # noqa: E402
 from pyimgtag.progress_db import ProgressDB  # noqa: E402
 from tests.e2e_support import child_env  # noqa: E402
 
@@ -70,3 +71,30 @@ def test_search_photos_over_stdio_without_an_index(tmp_path: Path) -> None:
     assert data["error"] == "no semantic index"
     assert "pyimgtag index --input-dir" in data["hint"]
     assert "not implemented" not in json.dumps(data)
+
+
+def test_an_event_id_from_list_events_leads_to_its_photos(tmp_path: Path) -> None:
+    """#461: list_events -> get_event / query_photos(event_id) over stdio."""
+    db_path = tmp_path / "p.db"
+    paths = [str(tmp_path / n) for n in ("a.jpg", "b.jpg", "c.jpg")]
+    with ProgressDB(db_path) as db:
+        for p in paths:
+            Path(p).write_bytes(b"x")
+            db.mark_done(Path(p), ImageResult(file_path=p, file_name=Path(p).name, tags=["sea"]))
+        db.reconcile_events(
+            [
+                {
+                    "members": paths[:2],
+                    "started_at": "2025-06-01T10:00:00",
+                    "ended_at": "2025-06-02T10:00:00",
+                    "place": "Porto",
+                    "trip": None,
+                    "fallback_name": "Porto, June 2025",
+                }
+            ]
+        )
+    (event,) = _call(db_path, tmp_path, "list_events")["events"]
+    shown = _call(db_path, tmp_path, "get_event", {"event_id": event["id"]})
+    assert sorted(shown["members"]) == paths[:2]
+    queried = _call(db_path, tmp_path, "query_photos", {"event_id": event["id"]})
+    assert sorted(p["path"] for p in queried["photos"]) == paths[:2]

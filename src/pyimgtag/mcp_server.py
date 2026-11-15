@@ -113,6 +113,27 @@ def _photo_detail(row: dict) -> dict:
     return detail
 
 
+#: SQLite integers are signed 64-bit; anything outside cannot be an event id.
+_SQLITE_INT_MAX = 2**63 - 1
+
+
+def _valid_event_id(event_id: object) -> bool:
+    return isinstance(event_id, int) and 0 < event_id <= _SQLITE_INT_MAX
+
+
+def _event_exists(db: ProgressDB, event_id: object) -> bool:
+    return _valid_event_id(event_id) and db.get_event(int(event_id)) is not None  # type: ignore[call-overload]
+
+
+def _no_event(event_id: object) -> dict:
+    """Uniform payload for an event id the database does not know."""
+    return {
+        "error": "no such event",
+        "event_id": event_id,
+        "hint": "Use list_events to see the event ids.",
+    }
+
+
 def _not_found(path: str) -> dict:
     """Uniform 404-style payload for a path the database does not know."""
     return {
@@ -188,7 +209,8 @@ def _register_read_tools(
     @server.tool(
         description=(
             "Search the photo library by metadata filters. Mirrors 'pyimgtag query'. "
-            "Returns compact records: path, tags, place, date, judge score."
+            "Returns compact records: path, tags, place, date, judge score. "
+            "event_id (from list_events) keeps only that event's photos."
         )
     )
     def query_photos(
@@ -203,12 +225,15 @@ def _register_read_tools(
         min_score: int | None = None,
         max_score: int | None = None,
         judged: bool | None = None,
+        event_id: int | None = None,
         sort: str = "path_asc",
         limit: int = DEFAULT_LIMIT,
         offset: int = 0,
     ) -> dict:
         capped = _clamp(limit, 1, MAX_LIMIT)
         start = max(0, int(offset))
+        if event_id is not None and not _event_exists(db, event_id):
+            return _no_event(event_id)
         rows = db.query_images(
             tag=tag,
             has_text=has_text,
@@ -223,6 +248,7 @@ def _register_read_tools(
             judged=judged,
             sort=sort,
             tags_any=tags_any,
+            event_id=event_id,  # filtered in SQL, so the page is always full
         )
         page = rows[start:]
         return {
@@ -230,6 +256,34 @@ def _register_read_tools(
             "limit": capped,
             "offset": start,
             "photos": [_photo_summary(r) for r in page],
+        }
+
+    @server.tool(
+        description=(
+            "One event from list_events with its member photo paths: name, date range, "
+            "place, trip_id and members. Same as 'pyimgtag events show <id> --format json' "
+            f"for events up to {MAX_LIMIT} photos; larger ones are paged with limit/offset "
+            "(member_count is the full size)."
+        )
+    )
+    def get_event(event_id: int, limit: int = MAX_LIMIT, offset: int = 0) -> dict:
+        if not _valid_event_id(event_id):
+            return _no_event(event_id)
+        event = db.get_event(int(event_id))
+        if event is None:
+            return _no_event(event_id)
+        members = event["members"]
+        capped = _clamp(limit, 1, MAX_LIMIT)
+        start = max(0, int(offset))
+        page = members[start : start + capped]
+        if len(page) == len(members):
+            return event  # small events: exactly 'events show --format json'
+        return {
+            **event,
+            "members": page,
+            "member_count": len(members),
+            "offset": start,
+            "truncated": start + len(page) < len(members),
         }
 
     @server.tool(description="Full metadata for one photo, addressed by its database path.")
@@ -300,7 +354,8 @@ def _register_read_tools(
         description=(
             "Events detected by 'pyimgtag events detect', newest first: id, name, "
             "date range (started_at/ended_at), place, trip_id and photo_count. "
-            "Same rows as 'pyimgtag events list --format json'. Optional limit "
+            "Same rows as 'pyimgtag events list --format json'. Pass an id to get_event, "
+            "or to query_photos(event_id=...) for its photos. Optional limit "
             f"(1-{MAX_LIMIT}); omit it, or pass 0, for every event. 'total' is the "
             "number of events before the limit."
         )

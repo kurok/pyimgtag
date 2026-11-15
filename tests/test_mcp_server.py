@@ -31,6 +31,7 @@ READ_TOOLS = {
     "list_tags",
     "list_people",
     "list_events",
+    "get_event",
     "judge_ranking",
     "library_stats",
     "search_photos",
@@ -770,3 +771,108 @@ def test_mcp_help_documents_client_config(capsys):
     out = capsys.readouterr().out
     assert "mcpServers" in out
     assert "PYIMGTAG_MCP_ENABLE_WRITES" in out
+
+
+# --- #461: event ids lead somewhere ---------------------------------------
+
+
+def _seed_two_events(tmp_path: Path) -> tuple[Path, int, int, list[str]]:
+    db_path = _seed_db(tmp_path)
+    db = ProgressDB(db_path=db_path)
+    paths = sorted(r["file_path"] for r in db.query_images())
+    db.reconcile_events(
+        [
+            {
+                "members": paths[:2],
+                "started_at": "2025-06-01T10:00:00",
+                "ended_at": "2025-06-02T10:00:00",
+                "place": "Porto",
+                "trip": None,
+                "fallback_name": "Porto, June 2025",
+            },
+            {
+                "members": paths[2:],
+                "started_at": "2025-08-01T10:00:00",
+                "ended_at": "2025-08-01T18:00:00",
+                "place": "Lisbon",
+                "trip": None,
+                "fallback_name": "Lisbon, August 2025",
+            },
+        ]
+    )
+    by_name = {e["name"]: e["id"] for e in db.list_events()}
+    db.close()
+    return db_path, by_name["Porto, June 2025"], by_name["Lisbon, August 2025"], paths
+
+
+def test_query_photos_filters_by_event(tmp_path):
+    db_path, porto, lisbon, paths = _seed_two_events(tmp_path)
+    server = _server(db_path)
+    data = _payload(_call(server, "query_photos", {"event_id": porto}))
+    assert sorted(p["path"] for p in data["photos"]) == paths[:2]
+    other = _payload(_call(server, "query_photos", {"event_id": lisbon}))
+    assert sorted(p["path"] for p in other["photos"]) == paths[2:]
+
+
+def test_query_photos_event_filter_pages_after_filtering(tmp_path):
+    """The Lisbon photos are the *last* paths: a limit applied before the
+    event filter would return nothing on the first page."""
+    db_path, _, lisbon, paths = _seed_two_events(tmp_path)
+    server = _server(db_path)
+    first = _payload(_call(server, "query_photos", {"event_id": lisbon, "limit": 1}))
+    second = _payload(_call(server, "query_photos", {"event_id": lisbon, "limit": 1, "offset": 1}))
+    assert [p["path"] for p in first["photos"] + second["photos"]] == paths[2:]
+
+
+def test_query_photos_event_filter_keeps_the_sort(tmp_path):
+    db_path, porto, _, paths = _seed_two_events(tmp_path)
+    data = _payload(
+        _call(_server(db_path), "query_photos", {"event_id": porto, "sort": "path_desc"})
+    )
+    assert [p["path"] for p in data["photos"]] == sorted(paths[:2], reverse=True)
+
+
+@pytest.mark.parametrize("bad", [0, -1, 2**70])
+def test_out_of_range_event_ids_are_a_clear_error(tmp_path, bad):
+    server = _server(_seed_db(tmp_path))
+    for tool in ("get_event", "query_photos"):
+        data = _payload(_call(server, tool, {"event_id": bad}))
+        assert data["error"] == "no such event", tool
+
+
+def test_get_event_pages_a_large_event(tmp_path):
+    db_path, porto, _, paths = _seed_two_events(tmp_path)
+    server = _server(db_path)
+    page = _payload(_call(server, "get_event", {"event_id": porto, "limit": 1}))
+    assert page["member_count"] == 2
+    assert len(page["members"]) == 1
+    assert page["truncated"] is True
+    rest = _payload(_call(server, "get_event", {"event_id": porto, "limit": 1, "offset": 1}))
+    assert rest["truncated"] is False
+    assert sorted(page["members"] + rest["members"]) == paths[:2]
+
+
+def test_query_photos_with_an_unknown_event_is_a_clear_error(tmp_path):
+    data = _payload(_call(_server(_seed_db(tmp_path)), "query_photos", {"event_id": 999}))
+    assert data["error"] == "no such event"
+    assert "list_events" in data["hint"]
+
+
+def test_get_event_matches_events_show_json(tmp_path):
+    db_path, porto, _, paths = _seed_two_events(tmp_path)
+    data = _payload(_call(_server(db_path), "get_event", {"event_id": porto}))
+    db = ProgressDB(db_path=db_path)
+    expected = db.get_event(porto)
+    db.close()
+    assert data == expected
+    assert sorted(data["members"]) == paths[:2]
+    assert data["name"] == "Porto, June 2025"
+
+
+def test_get_event_with_an_unknown_id_is_a_clear_error(tmp_path):
+    data = _payload(_call(_server(_seed_db(tmp_path)), "get_event", {"event_id": 999}))
+    assert data == {
+        "error": "no such event",
+        "event_id": 999,
+        "hint": "Use list_events to see the event ids.",
+    }
