@@ -41,6 +41,7 @@ from pyimgtag.prompt_template import (
     load_prompt_template,
 )
 from pyimgtag.scanner import scan_directory, scan_photos_library
+from pyimgtag.text_fit import shorten as _shorten
 from pyimgtag.vocabulary import Vocabulary, VocabularyError, load_vocabulary
 
 logger = logging.getLogger(__name__)
@@ -1287,21 +1288,6 @@ def _print_brief(
 def _error_summary(message: str) -> str:
     """The first line of an error: the readable part (details follow it)."""
     return message.partition("\n")[0]
-
-
-def _shorten(text: str, width: int) -> str:
-    """Cut *text* to *width* characters on a word boundary, marked with "…"."""
-    if len(text) <= width:
-        return text
-    if width <= 1:
-        return "…"[:width]
-    cut = text[: width - 1]
-    if text[width - 1] != " ":
-        # The cut falls inside a word: back up to the previous space.
-        space = cut.rfind(" ")
-        if space >= width // 2:
-            cut = cut[:space]
-    return cut.rstrip(" ,;:—-") + "…"
 
 
 def _print_verbose(

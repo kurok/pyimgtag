@@ -7,6 +7,7 @@ import os
 import sys
 
 from pyimgtag.progress_db import ProgressDB
+from pyimgtag.text_fit import elide_path, pad, shorten
 
 
 def _rollup_tags(args: argparse.Namespace) -> list[str] | None:
@@ -94,15 +95,12 @@ def cmd_query(args: argparse.Namespace) -> int:
         print(header)
         print("-" * len(header))
         for r in results:
-            path_str = (
-                r["file_path"][-col_path:] if len(r["file_path"]) > col_path else r["file_path"]
-            )
-            tags_str = ", ".join(r["tags_list"])
-            tags_str = tags_str[:col_tags] if len(tags_str) > col_tags else tags_str
+            path_str = elide_path(r["file_path"], col_path)
+            tags_str = shorten(", ".join(r["tags_list"]), col_tags)
             cat_str = (r["scene_category"] or "")[:col_cat]
             clean_str = (r["cleanup_class"] or "")[:col_clean]
             print(
-                f"{path_str:<{col_path}}  {tags_str:<{col_tags}}  "
+                f"{pad(path_str, col_path)}  {pad(tags_str, col_tags)}  "
                 f"{cat_str:<{col_cat}}  {clean_str:<{col_clean}}"
             )
         print(f"\n{len(results)} image(s) found.", file=sys.stderr)
