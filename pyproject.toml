@@ -227,4 +227,7 @@ constraint-dependencies = [
     # Transitive via mcp[crypto] (the `mcp` extra). Thirteen advisories against
     # PyJWT <= 2.14.0, including GHSA-ffc3-869f-jxw9; the last fixed in 2.15.0.
     "pyjwt>=2.15.0",
+    # Transitive via mcp (the `mcp` extra). GHSA-mf5v-w3w3-f6cg, quadratic-time
+    # traceparent parsing (DoS) in opentelemetry-api <= 1.45.1; fixed in 1.45.2.
+    "opentelemetry-api>=1.45.2",
 ]

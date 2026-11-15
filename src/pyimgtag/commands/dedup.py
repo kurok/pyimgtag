@@ -231,6 +231,8 @@ def _say(*args: object, **kwargs: Any) -> None:
     try:
         print(text, **kwargs)
     except (UnicodeError, OSError):
+        # A console that cannot show the line must not stop a resolve or undo
+        # half-way; the DB records what was done.
         pass
 
 

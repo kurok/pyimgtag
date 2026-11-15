@@ -527,11 +527,8 @@ def _resolve(db_path: Path, quarantine: Path) -> int:
 
 
 def _unresolved(db_path: Path) -> list[dict]:
-    db = ProgressDB(db_path=db_path)
-    try:
+    with ProgressDB(db_path=db_path) as db:
         return db.list_dedup_groups()
-    finally:
-        db.close()
 
 
 def test_an_interrupted_resolve_stays_listed_and_undoable(tmp_path, monkeypatch, capsys):

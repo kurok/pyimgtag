@@ -2905,27 +2905,26 @@ def test_all_three_modes_record_the_same_session_events(
     )
     session = MagicMock()
     stats = _new_stats(len(files))
-    db = ProgressDB(db_path=tmp_path / "p.db")
-    try:
-        with patch("pyimgtag.commands.run.read_exif", return_value=ExifData()):
-            interrupted = _tag(
-                _RunContext(
-                    files=files,
-                    source_type="directory",
-                    args=args,
-                    client=client,
-                    geocoder=MagicMock(),
-                    progress_db=db,
-                    phash_map={},
-                    skipped_dedup={str(files[5])},
-                    results=[],
-                    stats=stats,
-                    session=session,
-                    use_threaded=use_threaded,
-                )
+    with (
+        ProgressDB(db_path=tmp_path / "p.db") as db,
+        patch("pyimgtag.commands.run.read_exif", return_value=ExifData()),
+    ):
+        interrupted = _tag(
+            _RunContext(
+                files=files,
+                source_type="directory",
+                args=args,
+                client=client,
+                geocoder=MagicMock(),
+                progress_db=db,
+                phash_map={},
+                skipped_dedup={str(files[5])},
+                results=[],
+                stats=stats,
+                session=session,
+                use_threaded=use_threaded,
             )
-    finally:
-        db.close()
+        )
 
     assert interrupted is False
     recorded = sorted(

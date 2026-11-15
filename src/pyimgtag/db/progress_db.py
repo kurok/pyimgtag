@@ -9,6 +9,7 @@ import re
 import sqlite3
 import tempfile
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -29,13 +30,13 @@ from pyimgtag.place_names import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Iterator, Sequence
 
     import numpy as np
 
     from pyimgtag.models import JudgeResult
 
-_F = TypeVar("_F", bound="Callable[..., Any]")
+_F = TypeVar("_F", bound=Callable[..., Any])
 _C = TypeVar("_C", bound=type)
 
 # Milliseconds a statement waits for another connection's write lock (the CLI

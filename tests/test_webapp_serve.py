@@ -167,7 +167,7 @@ def test_python_m_webapp_keeps_its_env_contract(monkeypatch):
 
 
 def test_the_dead_standalone_apps_are_gone():
-    import pyimgtag.review_server as review_server
+    review_server = importlib.import_module("pyimgtag.review_server")
 
     assert importlib.util.find_spec("pyimgtag.faces_review_server") is None
     assert not hasattr(review_server, "create_app")
