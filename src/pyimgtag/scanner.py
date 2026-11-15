@@ -2,13 +2,80 @@
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Iterable
 from pathlib import Path
 
-DEFAULT_EXTENSIONS = {"jpg", "jpeg", "heic", "png"}
+#: The image types a scan picks up unless ``--extensions`` says otherwise. One
+#: list for ``run``, ``judge`` and ``index`` so a library is read the same way
+#: by all three.
+DEFAULT_EXTENSIONS_ARG = "jpg,jpeg,heic,png,tif,tiff,webp"
+DEFAULT_EXTENSIONS = set(DEFAULT_EXTENSIONS_ARG.split(","))
 
 #: Video extensions, added to a scan only when ``--include-video`` is given.
 #: Off by default so an existing run's shape does not change under anyone.
 DEFAULT_VIDEO_EXTENSIONS = {"mp4", "mov", "m4v"}
+
+#: Photo, RAW and clip types beyond the defaults. A file of one of these kinds
+#: that a scan leaves out is reported (see ``unsupported``), so a library is not
+#: half-tagged in silence. Anything else (``.xmp``, ``.aae``, ``.json``) is not
+#: media and is never mentioned.
+_OTHER_MEDIA_EXTENSIONS = {
+    "heif",
+    "gif",
+    "bmp",
+    "avif",
+    "jxl",
+    "avi",
+    "mkv",
+    "3gp",
+    "mts",
+    "m2ts",
+    "webm",
+}
+
+
+@functools.cache
+def _media_extensions() -> frozenset[str]:
+    """Every photo, RAW and clip extension worth reporting, built once."""
+    from pyimgtag.raw_converter import RAW_EXTENSIONS
+
+    raw = {ext.lstrip(".") for ext in RAW_EXTENSIONS}
+    return frozenset(DEFAULT_EXTENSIONS | DEFAULT_VIDEO_EXTENSIONS | _OTHER_MEDIA_EXTENSIONS | raw)
+
+
+def _select(entries: Iterable[Path], exts: set[str], unsupported: list[Path] | None) -> list[Path]:
+    """Sorted files of *entries* whose extension is in *exts*.
+
+    When *unsupported* is a list, the media files left out because of their
+    extension are appended to it, sorted.
+    """
+    files: list[Path] = []
+    left_out: list[Path] = []
+    for entry in entries:
+        if not entry.is_file():
+            continue
+        ext = entry.suffix.lstrip(".").lower()
+        if ext in exts:
+            files.append(entry)
+        elif unsupported is not None and not entry.name.startswith("."):
+            if ext in _media_extensions():
+                left_out.append(entry)
+    if unsupported is not None and left_out:
+        # The motion half of a Live Photo (IMG_1.MOV next to IMG_1.HEIC) is
+        # never tagged on its own, even with --include-video: not worth a word.
+        stills = {p.stem.lower() for p in files}
+        unsupported.extend(
+            sorted(
+                p
+                for p in left_out
+                if not (
+                    p.suffix.lstrip(".").lower() in DEFAULT_VIDEO_EXTENSIONS
+                    and p.stem.lower() in stills
+                )
+            )
+        )
+    return sorted(files)
 
 
 def partition_media(paths: list[Path], video_extensions: set[str] | None = None) -> tuple:
@@ -42,6 +109,7 @@ def scan_directory(
     path: str | Path,
     extensions: set[str] | None = None,
     recursive: bool = True,
+    unsupported: list[Path] | None = None,
 ) -> list[Path]:
     """Scan a directory for image files, sorted by name.
 
@@ -49,6 +117,8 @@ def scan_directory(
         path: Directory to scan.
         extensions: File extensions to include (without dots).
         recursive: When True (default), scan subdirectories recursively.
+        unsupported: When a list is given, the photo/RAW/video files left out
+            because their extension is not in *extensions* are appended to it.
 
     Returns:
         Sorted list of matching image file paths.
@@ -61,15 +131,18 @@ def scan_directory(
     if not root.is_dir():
         raise FileNotFoundError(f"Directory not found: {root}")
     pattern = "*" if not recursive else "**/*"
-    return sorted(
-        e for e in root.glob(pattern) if e.is_file() and e.suffix.lstrip(".").lower() in exts
-    )
+    return _select(root.glob(pattern), exts, unsupported)
 
 
-def scan_photos_library(library_path: str | Path, extensions: set[str] | None = None) -> list[Path]:
+def scan_photos_library(
+    library_path: str | Path,
+    extensions: set[str] | None = None,
+    unsupported: list[Path] | None = None,
+) -> list[Path]:
     """Best-effort scan of originals inside an Apple Photos library package.
 
     Tries ``originals/`` first (modern format), then ``Masters/`` (older format).
+    *unsupported* works as in :func:`scan_directory`.
 
     Raises:
         FileNotFoundError: Library or originals directory not found.
@@ -89,9 +162,7 @@ def scan_photos_library(library_path: str | Path, extensions: set[str] | None = 
             "Tried 'originals/' and 'Masters/'."
         )
 
-    files = sorted(
-        e for e in originals.rglob("*") if e.is_file() and e.suffix.lstrip(".").lower() in exts
-    )
+    files = _select(originals.rglob("*"), exts, unsupported)
 
     if not files:
         # rglob silently skips directories it cannot read (macOS TCC blocks listdir

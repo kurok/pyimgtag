@@ -40,7 +40,11 @@ from pyimgtag.prompt_template import (
     PromptTemplateError,
     load_prompt_template,
 )
-from pyimgtag.scanner import scan_directory, scan_photos_library
+from pyimgtag.scanner import (
+    DEFAULT_VIDEO_EXTENSIONS,
+    scan_directory,
+    scan_photos_library,
+)
 from pyimgtag.text_fit import shorten as _shorten
 from pyimgtag.vocabulary import Vocabulary, VocabularyError, load_vocabulary
 
@@ -281,14 +285,22 @@ def _validate_run_args(args: argparse.Namespace, parser: argparse.ArgumentParser
     return None
 
 
-def _scan_files(args: argparse.Namespace, extensions: set[str]) -> tuple[str, list[Path]] | int:
-    """Scan input source and return (source_type, files), or an int exit code on error."""
+def _scan_files(
+    args: argparse.Namespace, extensions: set[str], unsupported: list[Path] | None = None
+) -> tuple[str, list[Path]] | int:
+    """Scan input source and return (source_type, files), or an int exit code on error.
+
+    When *unsupported* is a list, the media files left out because of their
+    extension are appended to it.
+    """
     try:
         if args.input_dir:
             return "directory", scan_directory(
-                args.input_dir, extensions, recursive=not args.no_recursive
+                args.input_dir, extensions, recursive=not args.no_recursive, unsupported=unsupported
             )
-        return "photos_library", scan_photos_library(args.photos_library, extensions)
+        return "photos_library", scan_photos_library(
+            args.photos_library, extensions, unsupported=unsupported
+        )
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -660,10 +672,12 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
                 print(f"Error: {msg}", file=sys.stderr)
                 return 1
 
-    scan = _scan_files(args, extensions)
+    unsupported: list[Path] = []
+    scan = _scan_files(args, extensions, unsupported)
     if isinstance(scan, int):
         return scan
     source_type, files = scan
+    _report_unsupported(unsupported, args, video_extensions)
 
     if video_extensions:
         from pyimgtag.scanner import partition_media
@@ -720,6 +734,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
 
         results: list[ImageResult] = []
         stats = _new_stats(len(files))
+        stats["skipped_extension"] = len(unsupported)
         from pyimgtag.webapp.bootstrap import start_dashboard_for
 
         session, dashboard = start_dashboard_for(args, command="run")
@@ -1242,6 +1257,35 @@ def _finalize_result(
         _print_brief(result, stats["processed"], args.limit or stats["scanned"], written)
 
 
+def _report_unsupported(
+    unsupported: list[Path], args: argparse.Namespace, video_extensions: set[str]
+) -> None:
+    """Say how many media files the scan left out because of their extension.
+
+    The first one is named, with the flag that would bring its type in: the
+    user's own ``--extensions`` list plus that type, or for a clip
+    ``--include-video`` / ``--video-extensions``.
+    """
+    if not unsupported:
+        return
+    first = unsupported[0]
+    ext = first.suffix.lstrip(".").lower()
+    if ext in DEFAULT_VIDEO_EXTENSIONS and not getattr(args, "include_video", False):
+        hint = "pass --include-video to tag videos"
+    elif ext in DEFAULT_VIDEO_EXTENSIONS and not video_extensions:
+        hint = "videos need ffmpeg and ffprobe on PATH"
+    elif ext in DEFAULT_VIDEO_EXTENSIONS:
+        hint = f"add it with --video-extensions {','.join(sorted(video_extensions))},{ext}"
+    else:
+        own = ",".join(e.strip().lstrip(".") for e in args.extensions.split(",") if e.strip())
+        hint = f"add it with --extensions {own},{ext}"
+    print(
+        f"Info: skipped {len(unsupported)} file(s) whose extension is not scanned, "
+        f"first: {first} — {hint}",
+        file=sys.stderr,
+    )
+
+
 def _new_stats(scanned: int) -> dict[str, int]:
     return {
         "scanned": scanned,
@@ -1367,6 +1411,10 @@ def _summary_rows(stats: dict, args: argparse.Namespace | None) -> list[tuple[st
         ("Geocode failures:", stats["geocode_failures"]),
         ("Resumed (DB):", stats["resumed_from_db"]),
     ]
+    # Only when the scan counted them: watch scans without collecting the list,
+    # and a row reading 0 there would claim nothing was left out.
+    if "skipped_extension" in stats:
+        rows.insert(9, ("Skipped (ext):", stats["skipped_extension"]))
     # Only for the writes that were asked for, so the default summary is unchanged.
     if args is not None:
         sidecar_only = bool(getattr(args, "sidecar_only", False))

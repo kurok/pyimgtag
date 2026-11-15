@@ -442,7 +442,7 @@ identically for `pyimgtag judge`.
 | `--limit N` | Max images to process |
 | `--date YYYY-MM-DD` | Single date filter |
 | `--date-from` / `--date-to` | Date range filter |
-| `--extensions jpg,png` | File types (default: jpg,jpeg,heic,png) |
+| `--extensions jpg,png` | File types (default: jpg,jpeg,heic,png,tif,tiff,webp). Media files of other types are counted as `Skipped (ext)` and the first one is named |
 | `--skip-no-gps` | Skip images without GPS data |
 | `--vocabulary FILE` | Controlled tag vocabulary (`.json`, or `.yaml` with `[vocab]`): embedded in the prompt and used to canonicalize tags via synonyms; `strict: true` drops off-vocabulary tags. Env `PYIMGTAG_VOCABULARY`. |
 | `--prompt-template FILE` | Custom tagging prompt (start from `pyimgtag prompt show`); the JSON-schema block is validated or injected. Env `PYIMGTAG_PROMPT_TEMPLATE`. |
@@ -1365,7 +1365,7 @@ Judged 6 photo(s): 0 at or above 7.
 | `--input-dir PATH` | — | Exported image folder |
 | `--photos-library PATH` | — | Apple Photos library *(macOS only)* |
 | `--limit N` | unlimited | Max images to score |
-| `--extensions EXT,...` | `jpg,jpeg,heic,png,tiff,webp` | File types |
+| `--extensions EXT,...` | `jpg,jpeg,heic,png,tif,tiff,webp` | File types |
 | `--min-score SCORE` | — | Only show images scoring ≥ SCORE |
 | `--sort-by score\|name` | `score` | Final sort order |
 | `--output-json FILE` | — | Write ranked results to JSON |

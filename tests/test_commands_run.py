@@ -70,8 +70,10 @@ class TestNewestFirstSort:
             mock_client.tag_image.side_effect = mock_tag_image
             mock_client_cls.return_value = mock_client
 
-            def patched_scan(path, extensions, recursive=True):
-                result = scan_directory(path, extensions, recursive=recursive)
+            def patched_scan(path, extensions, recursive=True, unsupported=None):
+                result = scan_directory(
+                    path, extensions, recursive=recursive, unsupported=unsupported
+                )
                 gone.unlink()  # deleted between scan and sort
                 return result
 
@@ -137,7 +139,7 @@ class TestNewestFirstSort:
                 "pyimgtag.scanner", fromlist=["scan_directory"]
             ).scan_directory
 
-            def patched_scan(path, extensions, recursive=True):
+            def patched_scan(path, extensions, recursive=True, unsupported=None):
                 result = original_scan(path, extensions, recursive=recursive)
                 deleted.unlink()  # simulate race condition
                 return result
