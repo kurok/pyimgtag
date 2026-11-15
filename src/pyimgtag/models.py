@@ -6,6 +6,8 @@ import contextlib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pyimgtag.place_names import distinct_place_parts
+
 if TYPE_CHECKING:
     import numpy as np
 
@@ -122,8 +124,6 @@ class ImageResult:
             return None
 
         parts = [self.scene_summary.rstrip(".") + "."]
-
-        from pyimgtag.place_names import distinct_place_parts
 
         loc_parts = distinct_place_parts(
             self.nearest_city, self.nearest_region, self.nearest_country

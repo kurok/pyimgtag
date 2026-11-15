@@ -20,6 +20,12 @@ class TestDistinctPlaceParts:
             "France",
         ]
 
+    def test_ignores_unicode_form(self):
+        assert distinct_place_parts("Zu\u0308rich", "Zürich", "Schweiz") == [
+            "Zu\u0308rich",
+            "Schweiz",
+        ]
+
     def test_ignores_case_and_spaces(self):
         assert distinct_place_parts("New York", " new york ", "United States") == [
             "New York",
@@ -62,10 +68,18 @@ def _no_node_repeats_its_parent(element: ET.Element) -> bool:
 
 def test_digikam_export_has_no_node_inside_itself():
     rows = [
-        {"tags": [], "nearest_country": "Schweiz", "nearest_region": "Zürich",
-         "nearest_city": "Zürich"},
-        {"tags": [], "nearest_country": "United States", "nearest_region": "New York",
-         "nearest_city": "New York"},
+        {
+            "tags": [],
+            "nearest_country": "Schweiz",
+            "nearest_region": "Zürich",
+            "nearest_city": "Zürich",
+        },
+        {
+            "tags": [],
+            "nearest_country": "United States",
+            "nearest_region": "New York",
+            "nearest_city": "New York",
+        },
     ]
     tree = build_tag_tree(rows)
 
@@ -106,5 +120,47 @@ def test_run_location_line_does_not_repeat(capsys):
 def test_model_prompt_location_does_not_repeat():
     from pyimgtag.ollama_client import _build_prompt_with_context
 
-    prompt = _build_prompt_with_context({"city": "Zürich", "region": "Zürich", "country": "Schweiz"})
+    prompt = _build_prompt_with_context(
+        {"city": "Zürich", "region": "Zürich", "country": "Schweiz"}
+    )
     assert "- Location: Zürich, Schweiz" in prompt
+
+
+def test_prompt_template_location_does_not_repeat():
+    from pyimgtag.prompt_template import _context_block
+
+    block = _context_block({"city": "Zürich", "region": "Zürich", "country": "Schweiz"})
+    assert "- Location: Zürich, Schweiz" in block
+
+
+def test_event_naming_counts_a_city_named_like_its_region_once(tmp_path):
+    """Wien (city == region) gets one vote per photo, not two."""
+    from pyimgtag.commands.events import _event_facts
+    from pyimgtag.main import main
+    from pyimgtag.progress_db import ProgressDB
+
+    db_path = tmp_path / "events.db"
+    photos = [("w", "Wien", "Wien")] * 2 + [("g", "Graz", "Steiermark")] * 3
+    with ProgressDB(db_path=db_path) as db:
+        for i, (stem, city, region) in enumerate(photos):
+            img = tmp_path / f"{stem}{i}.jpg"
+            img.write_bytes(b"x")
+            db.mark_done(
+                img,
+                ImageResult(
+                    file_path=str(img),
+                    file_name=img.name,
+                    tags=["x"],
+                    image_date=f"2024:06:14 10:0{i}:00",
+                    nearest_city=city,
+                    nearest_region=region,
+                    nearest_country="Österreich",
+                ),
+            )
+    assert main(["events", "detect", "--db", str(db_path)]) == 0
+
+    with ProgressDB(db_path=db_path) as db:
+        (event,) = db.list_events()
+        facts = _event_facts(db, db.get_event(event["id"]))
+    # Before: Wien counted 4 (city + region) and ranked ahead of Graz and Steiermark.
+    assert "Places: Österreich, Graz, Steiermark, Wien" in facts

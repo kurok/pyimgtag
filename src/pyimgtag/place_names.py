@@ -44,9 +44,10 @@ def distinct_place_parts(*parts: str | None) -> list[str]:
     Zürich, New York in New York state, Singapore), and Nominatim's place and
     city are often the same too. Listing both reads as a folder inside itself
     (``Places|Schweiz|Zürich|Zürich``, "Paris, Paris, Île-de-France"), so a
-    name equal to the one before it (ignoring case and surrounding spaces) is
-    dropped. Empty parts are skipped first, so a missing region does not keep
-    an equal country and city apart.
+    name equal to the one before it is dropped. Names are compared with
+    :func:`fold`, so Unicode form, case and accents do not keep two spellings
+    of one name apart. Empty parts are skipped first, so a missing region
+    does not keep an equal country and city apart.
 
     Args:
         *parts: Place names from the widest or the narrowest end, in order.
@@ -57,7 +58,7 @@ def distinct_place_parts(*parts: str | None) -> list[str]:
     kept: list[str] = []
     for part in parts:
         name = str(part).strip() if part is not None else ""
-        if name and (not kept or kept[-1].casefold() != name.casefold()):
+        if name and (not kept or fold(kept[-1]) != fold(name)):
             kept.append(name)
     return kept
 

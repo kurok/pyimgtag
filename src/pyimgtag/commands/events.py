@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from pyimgtag.place_names import distinct_place_parts
 from pyimgtag.progress_db import ProgressDB
 
 #: Naming sends metadata only -- never image bytes -- so it is cheap, works
@@ -214,9 +215,12 @@ def _event_facts(db: ProgressDB, event: dict) -> str:
             tags[tag] = tags.get(tag, 0) + 1
         if row.get("event_hint"):
             hints[row["event_hint"]] = hints.get(row["event_hint"], 0) + 1
-        for key in ("nearest_city", "nearest_region", "nearest_country"):
-            if row.get(key):
-                places[row[key]] = places.get(row[key], 0) + 1
+        # Once per photo per distinct name: a city named like its region is
+        # one place, not two votes for the album name.
+        for name in distinct_place_parts(
+            row.get("nearest_city"), row.get("nearest_region"), row.get("nearest_country")
+        ):
+            places[name] = places.get(name, 0) + 1
 
     def _top(counter: dict[str, int], n: int) -> list[str]:
         return [k for k, _ in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))[:n]]
