@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from pyimgtag.place_names import distinct_place_parts
+
 #: Top-level branches. Singular-to-plural matches what Lightroom and digiKam
 #: users already have (``People|Alice``, not ``Person|Alice``).
 PEOPLE = "People"
@@ -66,7 +68,9 @@ def keyword_paths(
         if path:
             paths.add(path)
 
-    place = join_path(PLACES, country, region, city)
+    # A city named like its region or country is one node, not a folder
+    # inside itself (Places|Schweiz|Zürich, not Places|Schweiz|Zürich|Zürich).
+    place = join_path(PLACES, *distinct_place_parts(country, region, city))
     if place and place != PLACES:
         paths.add(place)
 

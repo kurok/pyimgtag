@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pyimgtag.ollama_client import _PROMPT_FIELDS
+from pyimgtag.place_names import distinct_place_parts
 from pyimgtag.vocabulary import Vocabulary
 
 __all__ = [
@@ -117,9 +118,9 @@ def _context_block(context: dict | None) -> str:
     ctx_lines = []
     if context.get("date"):
         ctx_lines.append(f"- Date: {context['date']}")
-    loc_parts = [
-        p for p in [context.get("city"), context.get("region"), context.get("country")] if p
-    ]
+    loc_parts = distinct_place_parts(
+        context.get("city"), context.get("region"), context.get("country")
+    )
     if loc_parts:
         ctx_lines.append(f"- Location: {', '.join(loc_parts)}")
     if context.get("lat") is not None and context.get("lon") is not None:

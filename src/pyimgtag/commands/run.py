@@ -32,6 +32,7 @@ from pyimgtag.geocoder import ReverseGeocoder
 from pyimgtag.models import ExifData, ImageResult
 from pyimgtag.ollama_client import DEFAULT_OLLAMA_MODEL, OllamaClient
 from pyimgtag.output_writer import result_to_jsonl, write_csv, write_json
+from pyimgtag.place_names import distinct_place_parts
 from pyimgtag.preflight import check_ollama, check_ollama_model
 from pyimgtag.progress_db import ProgressDB
 from pyimgtag.prompt_template import (
@@ -1383,16 +1384,12 @@ def _print_verbose(
         print(f"  GPS:      {result.gps_lat}, {result.gps_lon}", file=sys.stderr)
     else:
         print("  GPS:      (none)", file=sys.stderr)
-    loc_parts = [
-        p
-        for p in [
-            result.nearest_place,
-            result.nearest_city,
-            result.nearest_region,
-            result.nearest_country,
-        ]
-        if p
-    ]
+    loc_parts = distinct_place_parts(
+        result.nearest_place,
+        result.nearest_city,
+        result.nearest_region,
+        result.nearest_country,
+    )
     print(f"  Location: {', '.join(loc_parts) if loc_parts else '(none)'}", file=sys.stderr)
     print(f"  Status:   {result.processing_status}", file=sys.stderr)
     if result.error_message:

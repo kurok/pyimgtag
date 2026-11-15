@@ -26,6 +26,7 @@ from pyimgtag.ollama_defaults import (  # noqa: F401 — re-exported
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_URL,
 )
+from pyimgtag.place_names import distinct_place_parts
 from pyimgtag.raw_converter import (
     convert_raw_with_rawpy,
     extract_raw_thumbnail,
@@ -99,9 +100,9 @@ def _build_prompt_with_context(context: dict) -> str:
     ctx_lines = []
     if context.get("date"):
         ctx_lines.append(f"- Date: {context['date']}")
-    loc_parts = [
-        p for p in [context.get("city"), context.get("region"), context.get("country")] if p
-    ]
+    loc_parts = distinct_place_parts(
+        context.get("city"), context.get("region"), context.get("country")
+    )
     if loc_parts:
         ctx_lines.append(f"- Location: {', '.join(loc_parts)}")
     if context.get("lat") is not None and context.get("lon") is not None:
