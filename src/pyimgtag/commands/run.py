@@ -1361,33 +1361,47 @@ def _writes_requested(args: argparse.Namespace) -> bool:
     )
 
 
+#: Minimum width of the label column in the run summary: the longest label
+#: ("Skipped (no file):") plus one space. Wider when a longer label appears.
+SUMMARY_LABEL_WIDTH = 19
+
+
+def _summary_rows(stats: dict, args: argparse.Namespace | None) -> list[tuple[str, int]]:
+    rows = [
+        ("Scanned:", stats["scanned"]),
+        ("Processed:", stats["processed"]),
+        ("Skipped (date):", stats["skipped_date"]),
+        ("Skipped (no GPS):", stats["skipped_no_gps"]),
+        ("Skipped (no file):", stats["skipped_no_local"]),
+        ("Skipped (cached):", stats["skipped_cached"]),
+        ("Skipped (exists):", stats["skipped_existing"]),
+        ("Skipped (dedup):", stats["skipped_dedup"]),
+        ("Skipped (tagged):", stats["skipped_tagged"]),
+        ("Model failures:", stats["model_failures"]),
+        ("Geocode failures:", stats["geocode_failures"]),
+        ("Resumed (DB):", stats["resumed_from_db"]),
+    ]
+    # Only for the writes that were asked for, so the default summary is unchanged.
+    if args is not None:
+        sidecar_only = bool(getattr(args, "sidecar_only", False))
+        write_exif = bool(getattr(args, "write_exif", False))
+        if write_exif and not sidecar_only:
+            rows.append(("Metadata written:", stats.get("metadata_written", 0)))
+        if write_exif or sidecar_only:
+            rows.append(("Sidecars written:", stats.get("sidecars_written", 0)))
+            rows.append(("Write failures:", stats.get("metadata_write_failures", 0)))
+        if getattr(args, "write_back", False):
+            rows.append(("Written back:", stats.get("written_back", 0)))
+            rows.append(("Photos failures:", stats.get("write_back_failures", 0)))
+    return rows
+
+
 def _print_summary(stats: dict, args: argparse.Namespace | None = None) -> None:
     print("\n--- Summary ---", file=sys.stderr)
-    print(f"  Scanned:          {stats['scanned']}", file=sys.stderr)
-    print(f"  Processed:        {stats['processed']}", file=sys.stderr)
-    print(f"  Skipped (date):   {stats['skipped_date']}", file=sys.stderr)
-    print(f"  Skipped (no GPS): {stats['skipped_no_gps']}", file=sys.stderr)
-    print(f"  Skipped (no file):{stats['skipped_no_local']}", file=sys.stderr)
-    print(f"  Skipped (cached): {stats['skipped_cached']}", file=sys.stderr)
-    print(f"  Skipped (exists): {stats['skipped_existing']}", file=sys.stderr)
-    print(f"  Skipped (dedup):  {stats['skipped_dedup']}", file=sys.stderr)
-    print(f"  Skipped (tagged): {stats['skipped_tagged']}", file=sys.stderr)
-    print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
-    print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
-    print(f"  Resumed (DB):     {stats['resumed_from_db']}", file=sys.stderr)
-    # Only for the writes that were asked for, so the default summary is unchanged.
-    if args is None:
-        return
-    sidecar_only = bool(getattr(args, "sidecar_only", False))
-    write_exif = bool(getattr(args, "write_exif", False))
-    if write_exif and not sidecar_only:
-        print(f"  Metadata written: {stats.get('metadata_written', 0)}", file=sys.stderr)
-    if write_exif or sidecar_only:
-        print(f"  Sidecars written: {stats.get('sidecars_written', 0)}", file=sys.stderr)
-        print(f"  Write failures:   {stats.get('metadata_write_failures', 0)}", file=sys.stderr)
-    if getattr(args, "write_back", False):
-        print(f"  Written back:     {stats.get('written_back', 0)}", file=sys.stderr)
-        print(f"  Photos failures:  {stats.get('write_back_failures', 0)}", file=sys.stderr)
+    rows = _summary_rows(stats, args)
+    width = max(SUMMARY_LABEL_WIDTH, *(len(label) + 1 for label, _ in rows))
+    for label, value in rows:
+        print(f"  {label:<{width}}{value}", file=sys.stderr)
 
 
 def _print_vocabulary_summary(

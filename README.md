@@ -523,9 +523,9 @@ pyimgtag query --no-text
 # Filter by a geographic box — the same slice the /map page shows
 pyimgtag query --bbox 39.30,-9.30,39.42,-9.10
 
-# A box crossing the antimeridian: pass lon1 > lon2. Use the --bbox=...
-# form whenever the first value is negative, or argparse reads it as a flag.
-pyimgtag query --bbox=-20,170,-10,-170
+# A box crossing the antimeridian: pass lon1 > lon2. A negative first value
+# works with a space or with "=".
+pyimgtag query --bbox -20,170,-10,-170
 
 # Filter by capture year or month (mutually exclusive)
 pyimgtag query --year 2024
@@ -1378,13 +1378,13 @@ through cycles where every call failed.
   Status:   ok
 
 --- Summary ---
-  Scanned:          200
-  Processed:        50
-  Skipped (date):   0
-  Skipped (no GPS): 0
-  Skipped (no file):0
-  Model failures:   2
-  Geocode failures: 0
+  Scanned:           200
+  Processed:         50
+  Skipped (date):    0
+  Skipped (no GPS):  0
+  Skipped (no file): 0
+  Model failures:    2
+  Geocode failures:  0
 ```
 
 ### Output schema

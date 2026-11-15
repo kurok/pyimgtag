@@ -1136,8 +1136,9 @@ def _add_query_subcommand(subparsers: Any) -> None:
         type=_arg_type(parse_bbox),
         help=(
             "Only photos whose EXIF coordinates fall inside this box (inclusive). "
-            "Pass lon1 > lon2 for a box crossing the antimeridian. Requires "
-            "coordinates in the DB — see 'run --resume-from-db'."
+            "Pass lon1 > lon2 for a box crossing the antimeridian. A negative first "
+            "value works as --bbox -20,170,-10,-170 or --bbox=-20,170,-10,-170. "
+            "Requires coordinates in the DB — see 'run --resume-from-db'."
         ),
     )
     query_date_grp = query_p.add_mutually_exclusive_group()
@@ -1824,6 +1825,40 @@ def force_utf8_console() -> None:
             continue
 
 
+#: Options whose value may start with "-" (a negative coordinate). On Python
+#: 3.12/3.13 argparse reads "--bbox -20,170,-10,-170" as two options (3.14
+#: accepts it); joining them as "--bbox=-20,..." works on every version.
+_NEGATIVE_VALUE_OPTIONS = ("--bbox",)
+#: Shortest abbreviation argparse would accept for these options.
+_MIN_ABBREV = 4
+
+
+def _join_negative_option_values(argv: list[str]) -> list[str]:
+    """Rewrite ``--bbox -20,...`` to ``--bbox=-20,...`` before argparse sees it."""
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token == "--":  # nosec B105 — the argv separator, not a password
+            out.extend(argv[i:])  # everything after "--" is positional
+            break
+        nxt = argv[i + 1] if i + 1 < len(argv) else None
+        if (
+            len(token) >= _MIN_ABBREV
+            and any(opt.startswith(token) for opt in _NEGATIVE_VALUE_OPTIONS)
+            and nxt is not None
+            and len(nxt) > 1
+            and nxt[0] == "-"
+            and (nxt[1].isdigit() or nxt[1] == ".")
+        ):
+            out.append(f"{token}={nxt}")
+            i += 2
+            continue
+        out.append(token)
+        i += 1
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     """Parse argv, dispatch to the selected subcommand, and return its exit code.
 
@@ -1836,7 +1871,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     force_utf8_console()
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(_join_negative_option_values(sys.argv[1:] if argv is None else argv))
     # The raw argv is what `watch --install-service` bakes into the unit file.
     args._argv = list(argv) if argv is not None else sys.argv[1:]
     # --db, else $PYIMGTAG_DB, else the default (None) for every subcommand

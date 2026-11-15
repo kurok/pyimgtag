@@ -160,7 +160,10 @@ def _list(args: argparse.Namespace, db: ProgressDB) -> int:
     print(f"{'ID':>5}  {'NAME':<{name_w}}  {'DATES':<23}  {'TRIP':>4}  {'PHOTOS':>6}")
     print("-" * (5 + 2 + name_w + 2 + 23 + 2 + 4 + 2 + 6))
     for event in events:
-        name = (event["name"] or "")[:name_w]
+        name = event["name"] or ""
+        if len(name) > name_w:
+            # Mark the cut; the full name is in 'events show <id>'.
+            name = name[: name_w - 1] + "…"
         dates = f"{(event['started_at'] or '')[:10]} .. {(event['ended_at'] or '')[:10]}"
         trip = "" if event["trip_id"] is None else str(event["trip_id"])
         print(

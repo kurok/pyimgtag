@@ -71,7 +71,7 @@ def test_run_exits_3_when_every_model_call_failed(tmp_path: Path) -> None:
     with _fake_ollama(chat_ok=False) as url:
         result = _run(tmp_path, url)
     assert result.returncode == 3, result.stderr
-    assert "Model failures:   2" in result.stderr
+    assert "Model failures:    2" in result.stderr
 
 
 def test_run_exits_0_when_the_model_answers(tmp_path: Path) -> None:
