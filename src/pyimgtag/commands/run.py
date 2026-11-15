@@ -26,7 +26,7 @@ from pyimgtag.concurrent_pipeline import (
     set_global_rate_limit,
 )
 from pyimgtag.exif_reader import read_exif
-from pyimgtag.exit_codes import exit_code_for
+from pyimgtag.exit_codes import run_exit_code
 from pyimgtag.filters import passes_date_filter
 from pyimgtag.geocoder import ReverseGeocoder
 from pyimgtag.models import ExifData, ImageResult
@@ -772,7 +772,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
             run_registry.set_current(None)
     if interrupted:
         return 1
-    return exit_code_for(stats["model_calls"], stats["model_failures"])
+    return run_exit_code(stats)
 
 
 def _is_video(file_path: Path, args: argparse.Namespace) -> bool:
