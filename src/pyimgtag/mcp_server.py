@@ -55,10 +55,7 @@ _SEARCH_HINT = (
     "Semantic search is not implemented yet (roadmap issue #323). "
     "Use query_photos with tag/tags_any, city, country or scene_category filters instead."
 )
-_EVENTS_NOTE = (
-    "Event grouping is not implemented yet — 'pyimgtag events' is a roadmap item. "
-    "Use query_photos with a date-bearing filter, or list_tags, to approximate events."
-)
+_NO_EVENTS_HINT = "No events yet: run 'pyimgtag events detect' to group photos into events."
 
 
 def writes_enabled_from_env(env: dict[str, str] | None = None) -> bool:
@@ -159,7 +156,7 @@ def build_server(
         version=__version__,
         instructions=(
             "Read-only access to a pyimgtag photo library (tags, places, people, "
-            "judge scores, thumbnails). Paths returned by these tools are the only "
+            "events, judge scores, thumbnails). Paths returned by these tools are the only "
             "valid input for get_photo and get_thumbnail."
         ),
     )
@@ -284,9 +281,23 @@ def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Imag
         ]
         return {"count": len(people), "people": people}
 
-    @server.tool(description="Event groupings (roadmap feature — currently always empty).")
-    def list_events() -> dict:
-        return {"events": [], "note": _EVENTS_NOTE}
+    @server.tool(
+        description=(
+            "Events detected by 'pyimgtag events detect', newest first: id, name, "
+            "date range (started_at/ended_at), place, trip_id and photo_count. "
+            "Same rows as 'pyimgtag events list --format json'. Optional limit "
+            f"(1-{MAX_LIMIT}); omit it, or pass 0, for every event. 'total' is the "
+            "number of events before the limit."
+        )
+    )
+    def list_events(limit: int | None = None) -> dict:
+        everything = db.list_events()
+        # As in the CLI, a limit of 0 (or less) means no limit.
+        events = everything[: _clamp(limit, 1, MAX_LIMIT)] if limit and limit > 0 else everything
+        payload: dict = {"total": len(everything), "count": len(events), "events": events}
+        if not events:
+            payload["hint"] = _NO_EVENTS_HINT
+        return payload
 
     @server.tool(
         description=(
