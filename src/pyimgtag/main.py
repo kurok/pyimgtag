@@ -1128,8 +1128,20 @@ def _add_query_subcommand(subparsers: Any) -> None:
         "--cleanup", metavar="CLASS", help="Filter by cleanup_class (e.g. delete, review)"
     )
     query_p.add_argument("--scene-category", help="Filter by scene_category (exact match)")
-    query_p.add_argument("--city", help="Filter by nearest_city (case-insensitive substring)")
-    query_p.add_argument("--country", help="Filter by nearest_country (case-insensitive substring)")
+    query_p.add_argument(
+        "--city",
+        help=(
+            "Filter by nearest_city: substring, ignoring case and accents; "
+            "common English names (Munich, Vienna) find the native one"
+        ),
+    )
+    query_p.add_argument(
+        "--country",
+        help=(
+            "Filter by nearest_country: substring, ignoring case and accents; "
+            "an English name or two-letter code (Switzerland, CH) finds the native one"
+        ),
+    )
     query_p.add_argument("--status", choices=["ok", "error"], help="Filter by processing status")
     query_p.add_argument(
         "--bbox",

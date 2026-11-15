@@ -25,6 +25,37 @@ def _rollup_tags(args: argparse.Namespace) -> list[str] | None:
     return vocabulary.descendants(args.tag)
 
 
+#: How many place names a "no match" hint lists before summarizing the rest.
+_PLACES_SHOWN = 15
+
+
+def _suggest_places(args: argparse.Namespace) -> None:
+    """After a miss on --country/--city, list the names the library has.
+
+    Places are stored under one native name ("Schweiz"), so a guess in another
+    language can miss; this shows what would match instead of leaving the user
+    to guess again.
+    """
+    for kind in ("country", "city"):
+        typed = getattr(args, kind, None)
+        if typed is None:
+            continue
+        with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
+            if db.query_images(**{kind: typed}, limit=1):
+                continue  # this place has photos: another filter emptied the result
+            names = [name for name, _ in db.place_names(kind)]
+        if not names:
+            print(f"The library has no {kind} names yet.", file=sys.stderr)
+            continue
+        shown = ", ".join(sorted(names[:_PLACES_SHOWN], key=str.casefold))
+        more = len(names) - _PLACES_SHOWN
+        tail = f" (and {more} more)" if more > 0 else ""
+        noun = "countries" if kind == "country" else "cities"
+        print(
+            f'No {kind} matched "{typed}". The library has {noun}: {shown}{tail}', file=sys.stderr
+        )
+
+
 def cmd_query(args: argparse.Namespace) -> int:
     """Execute the query subcommand."""
     import json as _json
@@ -74,6 +105,7 @@ def cmd_query(args: argparse.Namespace) -> int:
 
     if not results:
         print("No images matched the given filters.", file=sys.stderr)
+        _suggest_places(args)
         return 0
 
     fmt = args.format

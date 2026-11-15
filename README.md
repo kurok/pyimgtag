@@ -547,9 +547,14 @@ pyimgtag cleanup-drift --prune
 # Search by tag
 pyimgtag query --tag sunset
 
-# Search by city / country
+# Search by city / country. Places are stored under their native name
+# ("Italia", "München"); the filter ignores case and accents and also takes
+# the English name or a two-letter country code. A miss lists the names the
+# library has.
 pyimgtag query --city "San Francisco"
-pyimgtag query --country Italy
+pyimgtag query --city Munich          # finds München
+pyimgtag query --country Italy        # finds Italia
+pyimgtag query --country CH           # finds Schweiz
 
 # Filter by scene / cleanup / status
 pyimgtag query --scene-category outdoor_travel --status ok
