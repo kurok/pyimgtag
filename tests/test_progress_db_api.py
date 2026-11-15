@@ -109,6 +109,7 @@ EXPECTED_PUBLIC_API = [
     "path",
     "paths_for_person_label",
     "person_exists",
+    "place_names",
     "query_images",
     "query_judge_results",
     "reconcile_events",

@@ -16,6 +16,11 @@ from typing import TYPE_CHECKING
 
 from pyimgtag.models import ImageResult
 
+#: SQL name of :func:`pyimgtag.place_names.place_matches`, registered on every
+#: connection by ProgressDB for the --city/--country filters.
+PLACE_MATCH_SQL = "pyimgtag_place_match"
+
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -260,12 +265,16 @@ class ImageDB:
         if scene_category is not None:
             conditions.append("pi.scene_category = ?")
             params.append(scene_category)
-        if city is not None:
-            conditions.append("LOWER(pi.nearest_city) LIKE LOWER(?)")
-            params.append(f"%{city}%")
-        if country is not None:
-            conditions.append("LOWER(pi.nearest_country) LIKE LOWER(?)")
-            params.append(f"%{country}%")
+        for column, typed, kind in (
+            ("pi.nearest_city", city, "city"),
+            ("pi.nearest_country", country, "country"),
+        ):
+            if typed is None:
+                continue
+            # Accent- and case-insensitive, and an English name or a country
+            # code also finds the stored native one (see place_terms).
+            conditions.append(f"{PLACE_MATCH_SQL}({column}, ?, ?)")
+            params.extend([typed, kind])
         if status is not None:
             conditions.append("pi.status = ?")
             params.append(status)
@@ -534,6 +543,23 @@ class ImageDB:
             "WHERE tags IS NOT NULL "
             "GROUP BY LOWER(value) "
             "ORDER BY cnt DESC, LOWER(value)"
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def place_names(self, kind: str) -> list[tuple[str, int]]:
+        """Distinct stored place names of one kind, most photos first.
+
+        Args:
+            kind: ``"country"`` or ``"city"``.
+
+        Returns:
+            List of (name, image_count) tuples.
+        """
+        column = {"country": "nearest_country", "city": "nearest_city"}[kind]
+        rows = self._conn.execute(
+            f"SELECT {column}, COUNT(*) AS cnt FROM processed_images "  # nosec B608
+            f"WHERE {column} IS NOT NULL AND {column} != '' "
+            f"GROUP BY {column} ORDER BY cnt DESC, {column}"
         ).fetchall()
         return [(r[0], r[1]) for r in rows]
 
