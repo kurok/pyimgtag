@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -403,12 +404,155 @@ def test_library_stats(tmp_path):
     assert data["places"]["countries"][0]["value"] == "Portugal"
 
 
-def test_search_photos_degrades_with_actionable_error(tmp_path):
+def test_search_photos_without_an_index_says_how_to_build_one(tmp_path):
     server = _server(_seed_db(tmp_path))
     data = _payload(_call(server, "search_photos", {"query": "alice at the beach"}))
     assert data["error"] == "no semantic index"
     assert data["query"] == "alice at the beach"
-    assert "query_photos" in data["hint"]
+    assert "pyimgtag index --input-dir" in data["hint"]
+    assert "not implemented" not in json.dumps(data)
+
+
+class _FakeEmbedder:
+    model_id = "fake-clip"
+
+    def embed_text(self, text: str):
+        import numpy as np
+
+        return np.array([1.0, 0.0, 0.0], dtype=np.float32)
+
+
+def _seed_index(db_path: Path) -> None:
+    import numpy as np
+
+    db = ProgressDB(db_path=db_path)
+    for name, vec in (
+        ("beach.jpg", [0.9, 0.1, 0.0]),
+        ("city.jpg", [0.1, 0.9, 0.0]),
+        ("dog.jpg", [0.6, 0.0, 0.8]),
+    ):
+        v = np.array(vec, dtype=np.float32)
+        db.upsert_embedding(Path("/lib") / name, "fake-clip", v / np.linalg.norm(v))
+    db.close()
+
+
+def test_search_photos_ranks_the_index_like_the_cli(tmp_path):
+    """#431: the tool searches the CLIP index, best match first."""
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    with patch.object(mcp_server, "_load_local_embedder", return_value=_FakeEmbedder()):
+        server = _server(db_path)
+        data = _payload(_call(server, "search_photos", {"query": "sunny beach", "limit": 2}))
+    assert data["query"] == "sunny beach"
+    lib = Path("/lib")
+    assert [r["file_path"] for r in data["results"]] == [
+        str(lib / "beach.jpg"),
+        str(lib / "dog.jpg"),
+    ]
+    assert data["count"] == 2
+    assert data["results"][0]["score"] > data["results"][1]["score"]
+    assert "warning" not in data
+
+    # Same ranking the CLI's --format json path computes.
+    db = ProgressDB(db_path=db_path)
+    expected = db.search_similar(_FakeEmbedder().embed_text("x"), limit=2)
+    db.close()
+    assert data["results"] == [{"file_path": p, "score": round(s, 6)} for p, s in expected]
+
+
+def test_search_photos_warns_about_a_model_mismatch(tmp_path):
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    other = _FakeEmbedder()
+    other.model_id = "other-clip"
+    with patch.object(mcp_server, "_load_local_embedder", return_value=other):
+        data = _payload(_call(_server(db_path), "search_photos", {"query": "beach"}))
+    assert "index --rebuild" in data["warning"]
+
+
+@pytest.mark.parametrize(
+    ("raised", "error", "hint_part"),
+    [
+        (ImportError("onnxruntime"), "semantic search is not installed", "pyimgtag[search]"),
+        (FileNotFoundError("clip.onnx"), "search models missing", "pyimgtag search"),
+    ],
+)
+def test_search_photos_degrades_without_the_extra_or_the_models(tmp_path, raised, error, hint_part):
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    with patch.object(mcp_server, "_load_local_embedder", side_effect=raised):
+        data = _payload(_call(_server(db_path), "search_photos", {"query": "beach"}))
+    assert data["error"] == error
+    assert hint_part in data["hint"]
+
+
+def test_the_local_embedder_never_downloads(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYIMGTAG_SEARCH_MODEL_DIR", str(tmp_path / "empty"))
+    (tmp_path / "empty").mkdir()
+    with (
+        patch("pyimgtag.search.embedder._require"),  # the [search] extra may be absent in CI
+        patch("pyimgtag.search.embedder.load_embedder") as load,
+    ):
+        with pytest.raises(FileNotFoundError):
+            mcp_server._load_local_embedder()
+    load.assert_not_called()
+
+
+def test_the_local_embedder_uses_the_given_model_dir(tmp_path):
+    from pyimgtag.search.model_cache import TEXT_MODEL, TOKENIZER, VISION_MODEL
+
+    for model in (VISION_MODEL, TEXT_MODEL, TOKENIZER):
+        (tmp_path / model.name).write_bytes(b"x")
+    with (
+        patch("pyimgtag.search.embedder._require"),
+        patch("pyimgtag.search.embedder.load_embedder") as load,
+    ):
+        mcp_server._load_local_embedder(tmp_path)
+    load.assert_called_once_with(tmp_path, progress=False)
+
+
+def test_a_missing_extra_is_reported_before_missing_models(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYIMGTAG_SEARCH_MODEL_DIR", str(tmp_path))
+    with patch("pyimgtag.search.embedder._require", side_effect=ImportError("no onnxruntime")):
+        with pytest.raises(ImportError):
+            mcp_server._load_local_embedder()
+
+
+def test_a_model_that_fails_at_search_time_is_an_actionable_error(tmp_path):
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    broken = _FakeEmbedder()
+    broken.embed_text = MagicMock(side_effect=RuntimeError("[ONNXRuntimeError] INVALID_PROTOBUF"))
+    with patch.object(mcp_server, "_load_local_embedder", return_value=broken):
+        data = _payload(_call(_server(db_path), "search_photos", {"query": "beach"}))
+    assert data["error"] == "semantic search failed"
+    assert "INVALID_PROTOBUF" in data["hint"]
+    assert "--rebuild" in data["hint"]
+
+
+def test_search_photos_equals_the_cli_json(tmp_path, capsys):
+    """The tool's rows are the CLI's 'search --format json' rows, same default top."""
+    from pyimgtag.main import main
+
+    db_path = _seed_db(tmp_path)
+    _seed_index(db_path)
+    with patch("pyimgtag.search.embedder.load_embedder", return_value=_FakeEmbedder()):
+        assert main(["search", "sunny beach", "--format", "json", "--db", str(db_path)]) == 0
+    cli_rows = json.loads(capsys.readouterr().out)
+    with patch.object(mcp_server, "_load_local_embedder", return_value=_FakeEmbedder()):
+        data = _payload(_call(_server(db_path), "search_photos", {"query": "sunny beach"}))
+    assert data["results"] == cli_rows
+
+
+def test_search_photos_description_names_the_index(tmp_path):
+    async def _run():
+        async with Client(_server(_seed_db(tmp_path))) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            return tools["search_photos"].description
+
+    description = anyio.run(_run)
+    assert "Not available yet" not in description
+    assert "pyimgtag index" in description
 
 
 # --- write tools -----------------------------------------------------------
@@ -572,15 +716,21 @@ def test_cmd_mcp_runs_stdio_server(tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def _fake_serve(db_path=None, *, enable_writes=False, export_root=None):
-        captured.update(db_path=db_path, enable_writes=enable_writes, export_root=export_root)
+    def _fake_serve(db_path=None, *, enable_writes=False, export_root=None, model_dir=None):
+        captured.update(
+            db_path=db_path,
+            enable_writes=enable_writes,
+            export_root=export_root,
+            model_dir=model_dir,
+        )
 
     monkeypatch.setattr(mcp_server, "serve_stdio", _fake_serve)
     monkeypatch.setenv(mcp_server.WRITES_ENV_VAR, "1")
-    args = build_parser().parse_args(["mcp", "--db", str(tmp_path / "p.db")])
-    assert mcp_cmd.cmd_mcp(args) == 0
+    argv = ["mcp", "--db", str(tmp_path / "p.db"), "--model-dir", str(tmp_path / "models")]
+    assert mcp_cmd.cmd_mcp(build_parser().parse_args(argv)) == 0
     assert captured["enable_writes"] is True
     assert captured["db_path"] == str(tmp_path / "p.db")
+    assert captured["model_dir"] == str(tmp_path / "models")
 
 
 def test_serve_stdio_uses_the_stdio_transport(tmp_path, monkeypatch):

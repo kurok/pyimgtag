@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,15 +46,24 @@ SERVER_NAME = "pyimgtag"
 
 DEFAULT_LIMIT = 50
 MAX_LIMIT = 500
+#: Same default as ``pyimgtag search --top``.
+DEFAULT_SEARCH_LIMIT = 20
 DEFAULT_THUMB_SIZE = 256
 MAX_THUMB_SIZE = 512
 MAX_TOP_N = 50
 
 CLEANUP_CLASSES = ("keep", "review", "delete")
 
-_SEARCH_HINT = (
-    "Semantic search is not implemented yet (roadmap issue #323). "
-    "Use query_photos with tag/tags_any, city, country or scene_category filters instead."
+_NO_INDEX_HINT = (
+    "No photos are in the semantic index yet. Build it with: "
+    "pyimgtag index --input-dir <DIR>  (or use query_photos with tag, city, country "
+    "or scene_category filters meanwhile)."
+)
+_NO_MODELS_HINT = (
+    "The CLIP model files are not downloaded. The MCP server does not download them "
+    "itself (about 153 MB); run 'pyimgtag search \"anything\"' once in a terminal to "
+    "fetch them. If 'pyimgtag index' used --model-dir, start the server with the same "
+    "--model-dir (or set PYIMGTAG_SEARCH_MODEL_DIR in the MCP client's env)."
 )
 _NO_EVENTS_HINT = "No events yet: run 'pyimgtag events detect' to group photos into events."
 
@@ -130,6 +140,7 @@ def build_server(
     *,
     enable_writes: bool = False,
     export_root: str | None = None,
+    model_dir: str | Path | None = None,
 ) -> MCPServer:
     """Build the MCP server exposing the pyimgtag database.
 
@@ -140,6 +151,8 @@ def build_server(
             registered.
         export_root: Directory that ``export_photos`` may copy into. When
             ``None``, ``export_photos`` refuses every request.
+        model_dir: Folder with the CLIP model files for ``search_photos``;
+            ``None`` uses the search model cache.
 
     Returns:
         A configured MCP server ready for a transport.
@@ -161,13 +174,15 @@ def build_server(
         ),
     )
 
-    _register_read_tools(server, db, image_cls)
+    _register_read_tools(server, db, image_cls, Path(model_dir) if model_dir else None)
     if enable_writes:
         _register_write_tools(server, db, root)
     return server
 
 
-def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Image]) -> None:
+def _register_read_tools(
+    server: MCPServer, db: ProgressDB, image_cls: type[Image], model_dir: Path | None = None
+) -> None:
     """Register the always-available read tools on *server*."""
 
     @server.tool(
@@ -345,18 +360,106 @@ def _register_read_tools(server: MCPServer, db: ProgressDB, image_cls: type[Imag
     def library_stats(top_n: int = 10) -> dict:
         return db.get_insights(top_n=_clamp(top_n, 1, MAX_TOP_N))
 
+    embedder_cache: dict[str, Any] = {}
+    embedder_lock = threading.Lock()
+
+    def _embedder() -> Any:
+        """Load the CLIP text embedder once, from local files only.
+
+        The ONNX text session and tokenizer load lazily on the first
+        ``embed_text``; that warm-up happens here, under the lock, so two
+        first calls cannot each build a session. A failure is not cached:
+        models downloaded later work without restarting the server.
+        """
+        with embedder_lock:
+            if "embedder" not in embedder_cache:
+                embedder = _load_local_embedder(model_dir)
+                embedder.embed_text("photo")
+                embedder_cache["embedder"] = embedder
+            return embedder_cache["embedder"]
+
     @server.tool(
         description=(
-            "Semantic (natural-language) photo search. Not available yet — returns an "
-            "actionable error explaining which metadata filters to use instead."
+            "Semantic (natural-language) photo search over the local CLIP index built "
+            "by 'pyimgtag index': best matches first, as {file_path, score}, the same "
+            "ranking as 'pyimgtag search <query> --format json'. Returns an error with "
+            "the fix when no index has been built or the [search] extra is missing."
         )
     )
-    def search_photos(query: str, limit: int = DEFAULT_LIMIT) -> dict:
-        return {
-            "error": "no semantic index",
+    def search_photos(query: str, limit: int = DEFAULT_SEARCH_LIMIT) -> dict:
+        query = query.strip()
+        if not query:
+            return {"error": "empty query", "hint": "Describe the photos you are looking for."}
+        stats = db.embedding_stats()
+        if not stats["count"]:
+            return {"error": "no semantic index", "query": query, "hint": _NO_INDEX_HINT}
+        try:
+            embedder = _embedder()
+        except ImportError:
+            return {
+                "error": "semantic search is not installed",
+                "query": query,
+                "hint": "Install it with: pip install 'pyimgtag[search]'",
+            }
+        except FileNotFoundError:
+            return {"error": "search models missing", "query": query, "hint": _NO_MODELS_HINT}
+        except Exception as exc:  # noqa: BLE001 — a broken model must not kill the tool
+            return _search_failed(query, exc)
+        try:
+            hits = db.search_similar(embedder.embed_text(query), limit=_clamp(limit, 1, MAX_LIMIT))
+        except Exception as exc:  # noqa: BLE001 — e.g. an index built with another model
+            return _search_failed(query, exc)
+        payload: dict = {
             "query": query,
-            "hint": _SEARCH_HINT,
+            "count": len(hits),
+            "results": [{"file_path": p, "score": round(s, 6)} for p, s in hits],
         }
+        if stats["model"] and stats["model"] != embedder.model_id:
+            payload["warning"] = (
+                f"The index was built with {stats['model']!r} but this install uses "
+                f"{embedder.model_id!r}; re-run 'pyimgtag index --rebuild'."
+            )
+        return payload
+
+
+def _search_failed(query: str, exc: Exception) -> dict:
+    """An actionable payload for a model or index that fails at search time."""
+    return {
+        "error": "semantic search failed",
+        "query": query,
+        "hint": (
+            f"{type(exc).__name__}: {exc}. A model file may be corrupt (delete the model "
+            "folder and run 'pyimgtag search \"anything\"' to fetch it again), or the "
+            "index was built with another model ('pyimgtag index --rebuild')."
+        ),
+    }
+
+
+def _load_local_embedder(model_dir: Path | None = None) -> Any:
+    """Build the CLIP embedder from already-downloaded model files.
+
+    The stdio server must not start a 153 MB download (nor print its progress
+    on stdout, which carries the protocol), so missing files raise
+    ``FileNotFoundError`` instead of being fetched.
+
+    Raises:
+        ImportError: The ``[search]`` extra is not installed.
+        FileNotFoundError: A model file is not in the model cache.
+    """
+    from pyimgtag.search.embedder import _require, load_embedder
+    from pyimgtag.search.model_cache import TEXT_MODEL, TOKENIZER, VISION_MODEL, cache_dir
+
+    # The missing extra first: its fix comes before fetching models.
+    _require("onnxruntime")
+    _require("tokenizers")
+    # load_embedder() wants all three files and would download a missing one.
+    directory = model_dir or cache_dir()
+    missing = [
+        m.name for m in (VISION_MODEL, TEXT_MODEL, TOKENIZER) if not (directory / m.name).exists()
+    ]
+    if missing:
+        raise FileNotFoundError(", ".join(missing))
+    return load_embedder(directory, progress=False)
 
 
 def _register_write_tools(server: MCPServer, db: ProgressDB, export_root: Path | None) -> None:
@@ -471,6 +574,7 @@ def serve_stdio(
     *,
     enable_writes: bool = False,
     export_root: str | None = None,
+    model_dir: str | Path | None = None,
 ) -> None:
     """Run the MCP server over stdio until the client disconnects.
 
@@ -478,9 +582,12 @@ def serve_stdio(
         db_path: Progress database to serve.
         enable_writes: Register the gated write tools.
         export_root: Directory ``export_photos`` may copy into.
+        model_dir: Folder with the CLIP model files for ``search_photos``.
 
     Raises:
         ImportError: If the ``[mcp]`` extra is not installed.
     """
-    server = build_server(db_path, enable_writes=enable_writes, export_root=export_root)
+    server = build_server(
+        db_path, enable_writes=enable_writes, export_root=export_root, model_dir=model_dir
+    )
     server.run(transport="stdio")
