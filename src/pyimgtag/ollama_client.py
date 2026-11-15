@@ -25,7 +25,6 @@ from pyimgtag.models import JudgeScores, TagResult, normalize_tags
 from pyimgtag.ollama_defaults import (  # noqa: F401 — re-exported
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_URL,
-    ollama_url_from_env,
 )
 from pyimgtag.raw_converter import (
     convert_raw_with_rawpy,

@@ -47,10 +47,11 @@ def test_stats_without_write_keys_still_work():
 
 
 def test_the_codes_are_distinct_and_documented():
-    import pyimgtag.exit_codes as ec
+    import importlib
 
     assert EXIT_ALL_WRITES_FAILED == 4 != EXIT_ALL_MODEL_CALLS_FAILED
-    assert "| 4 |" in (ec.__doc__ or "")
+    doc = importlib.import_module("pyimgtag.exit_codes").__doc__ or ""
+    assert "| 4 |" in doc
 
 
 # --- through cmd_run, independent of whether exiftool is installed -------------

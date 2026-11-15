@@ -332,6 +332,8 @@ def safe_move(src: str | Path, dst: str | Path, *, create_parents: bool = True) 
             os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
             target.unlink(missing_ok=True)
         except OSError:
+            # Best effort: the original is intact, and the error below is the
+            # one the caller needs to see.
             pass
         raise
 
@@ -353,6 +355,8 @@ def _fsync_file(path: Path) -> None:
             with open(path, "rb+") as fh:
                 os.fsync(fh.fileno())
     except OSError:
+        # Some filesystems refuse fsync; the copy is still complete, just not
+        # guaranteed on disk before a power loss.
         pass
 
 

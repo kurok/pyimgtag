@@ -67,7 +67,9 @@ def _run(name: str, target: Any, errors: list[BaseException]) -> threading.Threa
     def body() -> None:
         try:
             target()
-        except BaseException as exc:  # noqa: BLE001 — surfaced by the test
+        # The targets only call ProgressDB methods, which raise Exception
+        # subclasses; anything else (a pytest outcome) would end the thread loudly.
+        except Exception as exc:  # noqa: BLE001 — surfaced by the test
             errors.append(exc)
 
     thread = threading.Thread(target=body, name=name, daemon=True)

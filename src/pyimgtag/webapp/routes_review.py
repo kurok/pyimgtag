@@ -279,8 +279,6 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         reaches ``Image.open``; the read uses the DB-stored path. Returns 404
         when the row is missing or the image cannot be decoded.
         """
-        import asyncio
-
         # Use the request value purely as a DB lookup key; the actual
         # filesystem read uses the path the DB stored when pyimgtag
         # processed the image. This keeps user input out of Image.open().
@@ -312,8 +310,6 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         the path pyimgtag itself stored. A path that is not in the DB is a 404,
         so this cannot read an arbitrary file.
         """
-        import asyncio
-
         safe_path = db.get_known_file_path(path)
         if safe_path is None:
             return Response(status_code=404)
@@ -352,8 +348,6 @@ def build_review_router(db: ProgressDB, api_base: str = "") -> Any:
         scanned the file), so the request-controlled value never reaches
         ``open()`` / ``Path.is_file()``.
         """
-        import asyncio
-
         # ``safe_path`` is the DB-stored path (tagging or judging table); not
         # derived from the HTTP request.
         safe_path = db.get_known_file_path(path)

@@ -127,6 +127,7 @@ def _start_dashboard(
             if requests.get(f"{base}/health", timeout=1).status_code == 200:
                 return proc, base
         except requests.RequestException:
+            # Not listening yet: keep polling until the deadline.
             pass
         if time.monotonic() > deadline:
             proc.kill()
