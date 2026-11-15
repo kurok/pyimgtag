@@ -139,7 +139,9 @@ def check_exiftool() -> tuple[bool, str]:
     except FileNotFoundError:
         return (
             False,
-            "exiftool is not installed. See https://exiftool.org for install instructions.",
+            "exiftool is not installed: --write-exif and RAW files (unless rawpy is "
+            "installed) will not work; EXIF reading falls back to Pillow. See "
+            "https://exiftool.org for install instructions.",
         )
     except (OSError, subprocess.SubprocessError) as e:
         return (False, f"exiftool check failed: {e}")
@@ -232,6 +234,23 @@ def check_directory(dir_path: str) -> tuple[bool, str]:
     return (True, f"Directory accessible ({count} files)")
 
 
+#: Check names, as they appear in :func:`run_preflight`'s results.
+OLLAMA = "Ollama"
+OLLAMA_MODEL = "Ollama model"
+EXIFTOOL = "exiftool"
+FFMPEG = "ffmpeg (video)"
+PHOTOS_LIBRARY = "Photos library"
+DIRECTORY = "Directory"
+
+#: Checks for optional capabilities: a failure is a warning, not an error.
+#: Tagging works without them; exiftool is needed for --write-exif (and RAW
+#: files without rawpy), ffmpeg only for --include-video.
+OPTIONAL_CHECKS = frozenset({EXIFTOOL, FFMPEG})
+
+#: Message prefix of a check that did not run because an earlier one failed.
+SKIPPED_PREFIX = "skipped: "
+
+
 def run_preflight(
     ollama_url: str,
     model: str,
@@ -252,29 +271,29 @@ def run_preflight(
     results: list[tuple[str, bool, str]] = []
 
     passed, msg = check_ollama(ollama_url)
-    results.append(("Ollama", passed, msg))
+    results.append((OLLAMA, passed, msg))
 
     if passed:
         passed, msg = check_ollama_model(model, ollama_url)
     else:
         # Same fix as the line above; repeating it would add nothing.
-        msg = "skipped: Ollama is not reachable"
-    results.append(("Ollama model", passed, msg))
+        msg = f"{SKIPPED_PREFIX}model not checked because Ollama is not reachable"
+    results.append((OLLAMA_MODEL, passed, msg))
 
     passed, msg = check_exiftool()
-    results.append(("exiftool", passed, msg))
+    results.append((EXIFTOOL, passed, msg))
 
     # Reported whether or not --include-video was asked for: knowing video is
     # available is part of knowing what a run will cover.
     passed, msg = check_ffmpeg()
-    results.append(("ffmpeg (video)", passed, msg))
+    results.append((FFMPEG, passed, msg))
 
     if source_path is not None:
         if source_type == "photos_library":
             passed, msg = check_photos_library(source_path)
-            results.append(("Photos library", passed, msg))
+            results.append((PHOTOS_LIBRARY, passed, msg))
         else:
             passed, msg = check_directory(source_path)
-            results.append(("Directory", passed, msg))
+            results.append((DIRECTORY, passed, msg))
 
     return results

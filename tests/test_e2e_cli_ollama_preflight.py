@@ -139,3 +139,27 @@ def test_judge_stops_with_the_same_lines_as_run(tmp_path: Path) -> None:
         )
     assert missing.returncode == 1
     assert "Error: model 'gemma4' is not pulled. Run 'ollama pull gemma4'." in missing.stderr
+
+
+def test_preflight_treats_missing_tools_as_warnings(tmp_path: Path) -> None:
+    """#432: no ffmpeg/exiftool on PATH is a warning; a skipped check is [SKIP]."""
+    empty_path = tmp_path / "empty-bin"
+    empty_path.mkdir()
+    env = {"PATH": str(empty_path)}
+    photos = _photos(tmp_path)
+
+    with _fake_ollama("gemma4:latest") as url:
+        ready = run_cli(
+            "preflight", "--ollama-url", url, "--model", "gemma4",
+            "--input-dir", str(photos), home=tmp_path, env=env,
+        )  # fmt: skip
+    assert ready.returncode == 0, ready.stdout + ready.stderr
+    assert "[WARN] ffmpeg" in ready.stdout
+    assert "[FAIL]" not in ready.stdout
+
+    down = run_cli(
+        "preflight", "--ollama-url", f"http://127.0.0.1:{free_port()}", home=tmp_path, env=env
+    )
+    assert down.returncode == 1
+    assert "[SKIP] model not checked because Ollama is not reachable" in down.stdout
+    assert down.stdout.count("[FAIL]") == 1
