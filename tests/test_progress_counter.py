@@ -63,6 +63,32 @@ def _run(tmp_path: Path, *extra: str) -> tuple[int, int, object]:
     return rc, reads, args
 
 
+def _run_again(tmp_path: Path, *extra: str) -> tuple[int, int, object]:
+    """Like _run, but over the existing library and DB (cache on)."""
+    from pyimgtag.commands.run import cmd_run
+
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--input-dir",
+            str(tmp_path / "lib"),
+            "--no-web",
+            "--db",
+            str(tmp_path / "p.db"),
+            *extra,
+        ]
+    )
+    with (
+        patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+        patch("pyimgtag.commands.run.check_ollama_model", return_value=(True, "")),
+        patch("pyimgtag.commands.run.OllamaClient") as client_cls,
+        patch("pyimgtag.commands.run.read_exif", side_effect=_exif_for),
+        patch("pyimgtag.commands.run.ReverseGeocoder"),
+    ):
+        client_cls.return_value.tag_image.return_value = TagResult(tags=["x"], summary="")
+        return cmd_run(args, MagicMock()), 0, args
+
+
 @pytest.fixture()
 def counters(capsys):
     def _counters() -> tuple[list[tuple[int, int]], str]:
@@ -100,6 +126,66 @@ def test_limit_caps_the_total(tmp_path, counters):
 
     found, _ = counters()
     assert found == [(1, 1)]
+
+
+def test_limit_stops_the_up_front_pass_early(tmp_path, counters):
+    # img03 is the first July photo: the pass reads img00..img03, keeps one,
+    # then stops; img03 is read once more when it is tagged.
+    _, reads, _ = _run(tmp_path, "--date-from", "2024-07-01", "--limit", "1")
+
+    assert reads == 4 + 1
+
+
+def test_interrupt_during_the_pass_exits_like_any_interrupt(tmp_path, capsys):
+    from pyimgtag.commands.run import cmd_run
+
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--input-dir",
+            str(_library(tmp_path)),
+            "--no-web",
+            "--no-cache",
+            "--date-from",
+            "2024-07-01",
+        ]
+    )
+    with (
+        patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),
+        patch("pyimgtag.commands.run.check_ollama_model", return_value=(True, "")),
+        patch("pyimgtag.commands.run.read_exif", side_effect=KeyboardInterrupt),
+    ):
+        assert cmd_run(args, MagicMock()) == 1
+    assert "Interrupted." in capsys.readouterr().err
+
+
+def test_resume_threaded_counts_each_skip_once(tmp_path, counters):
+    _library(tmp_path)
+    _run_again(tmp_path)  # tag and cache all ten
+    counters()
+    rc, _, _ = _run_again(
+        tmp_path, "--date-from", "2024-07-01", "--resume-from-db", "--resume-threaded"
+    )
+
+    found, err = counters()
+    assert rc == 0
+    assert "Skipped (date):    8" in err
+    assert "Resumed (DB):      2" in err
+
+
+def test_dedup_does_not_hash_files_the_pass_dropped(tmp_path):
+    from pyimgtag.commands import run as run_mod
+
+    seen: list[int] = []
+
+    def _fake_dedup(files, threshold):
+        seen.append(len(files))
+        return {}, set()
+
+    with patch.object(run_mod, "_compute_dedup_map", side_effect=_fake_dedup):
+        _run(tmp_path, "--date-from", "2024-07-01", "--dedup")
+
+    assert seen == [2]
 
 
 def test_without_filters_the_total_is_the_scan(tmp_path, counters):
