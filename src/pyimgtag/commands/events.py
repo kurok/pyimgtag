@@ -10,6 +10,7 @@ from typing import Any
 
 from pyimgtag.place_names import distinct_place_parts
 from pyimgtag.progress_db import ProgressDB
+from pyimgtag.text_fit import shorten
 
 #: Naming sends metadata only -- never image bytes -- so it is cheap, works
 #: against a local text model, and cannot leak a photo to a cloud backend.
@@ -160,11 +161,29 @@ def _list(args: argparse.Namespace, db: ProgressDB) -> int:
         print(_json.dumps(events, indent=2))
         return 0
 
+    # Generated names repeat (every day of a trip reads "Lisbon — June 2024").
+    # Such rows show the folder name 'events apply --export-dir' gives them,
+    # which is how the folders on disk tell them apart too. Computed over every
+    # event in apply's order, so it matches whatever --limit shows here.
+    all_events = events if args.limit is None else db.list_events()
+    name_counts: dict[str, int] = {}
+    for event in all_events:
+        name_counts[event["name"] or ""] = name_counts.get(event["name"] or "", 0) + 1
+    used: set[str] = set()
+    folders = {event["id"]: _unique_dirname(event, used) for event in all_events}
+    repeated = False
+
     name_w = 34
     print(f"{'ID':>5}  {'NAME':<{name_w}}  {'DATES':<23}  {'TRIP':>4}  {'PHOTOS':>6}")
     print("-" * (5 + 2 + name_w + 2 + 23 + 2 + 4 + 2 + 6))
     for event in events:
         name = event["name"] or ""
+        if name_counts.get(name, 0) > 1:
+            # The folder's suffix (" (2024-09-01)" or " (17)") is what tells the
+            # rows apart, so it is kept whole and the name is shortened instead.
+            suffix = folders[event["id"]][len(_safe_dirname(name)) :]
+            name = shorten(name, name_w - len(suffix)) + suffix
+            repeated = True
         if len(name) > name_w:
             # Mark the cut; the full name is in 'events show <id>'.
             name = name[: name_w - 1] + "…"
@@ -174,6 +193,12 @@ def _list(args: argparse.Namespace, db: ProgressDB) -> int:
             f"{event['id']:>5}  {name:<{name_w}}  {dates:<23}  {trip:>4}  {event['photo_count']:>6}"
         )
     print(f"\n{len(events)} event(s).", file=sys.stderr)
+    if repeated:
+        print(
+            "Events that share a name are listed by the folder name "
+            "'events apply --export-dir' gives each of them.",
+            file=sys.stderr,
+        )
     return 0
 
 
