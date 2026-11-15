@@ -136,7 +136,11 @@ def _undo_group(db: ProgressDB, group: dict) -> dict:
             continue  # the original is in place; never overwrite it
         if not source.exists() and not source.parent.is_dir():
             # Unplugged or unmounted quarantine: keep the record for later.
-            errors.append(f"{source.name}: the quarantine is not reachable")
+            errors.append(
+                f"{source.name}: the quarantine is not reachable. Connect the drive and undo "
+                "again; if that folder was deleted on purpose, run 'pyimgtag dedup undo "
+                f"--group {group['id']} --forget-missing'"
+            )
             continue
         if not source.exists():
             # Gone from both places: report it, but do not keep the group

@@ -1091,7 +1091,13 @@ pyimgtag dedup undo                                # move quarantined copies bac
 2. **Move is the recommended action.** `--move-to DIR` relocates each losing
    copy to `DIR` + its original path (`/a/b/c.jpg` → `DIR/a/b/c.jpg`), records
    where it went, and marks the group resolved. `pyimgtag dedup undo` puts
-   every file back and un-resolves the group.
+   every file back and un-resolves the group. If the quarantine is not
+   reachable (an unplugged drive) undo keeps the record and asks you to
+   reconnect. Only if you are sure you deleted that folder (not just unmounted
+   it or mounted it under another name),
+   `pyimgtag dedup undo --group ID --forget-missing` forgets those copies so the
+   group can be planned again; it never forgets while the library folder itself
+   is unreachable too.
 3. **Trash is opt-in twice.** `--delete` needs `--yes` and uses `send2trash`
    (the OS trash) — pyimgtag never calls `os.remove` on your photos. Undo can
    clear the DB record but cannot un-trash files; restore those from the trash.

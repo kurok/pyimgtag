@@ -376,10 +376,16 @@ def _handle_resolve(args: argparse.Namespace) -> int:  # noqa: C901 — one plan
 
 def _handle_undo(args: argparse.Namespace) -> int:
     """Move quarantined copies back and un-resolve their groups."""
+    forget_missing = bool(getattr(args, "forget_missing", False))
+    if forget_missing and args.group is None:
+        # Forgetting is irreversible: only for one group the user names.
+        print("error: --forget-missing needs --group ID (nothing was changed)", file=sys.stderr)
+        return 2
     restored = 0
     errors = 0
     cleared = 0
     trashed = 0
+    forgotten = 0
     with ProgressDB(db_path=args.db) as db:
         groups = db.list_dedup_groups(include_resolved=True)
         # A group counts once anything was done to it, even if the resolve run
@@ -398,6 +404,7 @@ def _handle_undo(args: argparse.Namespace) -> int:
 
         for group in groups:
             group_failed = False
+            group_forgotten = 0
             for member in group["members"]:
                 if member.get("action") == ACTION_TRASH:
                     trashed += 1
@@ -414,13 +421,33 @@ def _handle_undo(args: argparse.Namespace) -> int:
                         _say(f"kept the original; leftover copy in quarantine: {source}")
                     continue
                 if not source.exists() and not source.parent.is_dir():
-                    # The quarantine is not there (an unplugged or unmounted
-                    # drive): keep the record so a later undo can finish.
-                    _say(
-                        f"quarantine not reachable: {source} (connect the drive and "
-                        "run undo again)",
-                        file=sys.stderr,
-                    )
+                    library_here = target.parent.is_dir()
+                    if forget_missing and library_here:
+                        # The library is reachable and the user is sure the
+                        # quarantine was deleted: forget this copy.
+                        _say(f"forgot: {target} (its quarantine copy {source} is gone)")
+                        group_forgotten += 1
+                        continue
+                    if not library_here:
+                        # Library and quarantine both missing: almost certainly
+                        # one unplugged drive. Never forget on that guess.
+                        _say(
+                            f"neither the library ({target.parent}) nor the quarantine "
+                            f"({source.parent}) is reachable; connect the drive and run "
+                            "undo again",
+                            file=sys.stderr,
+                        )
+                    else:
+                        # The quarantine is not there (an unplugged or unmounted
+                        # drive): keep the record so a later undo can finish.
+                        _say(
+                            f"quarantine not reachable: {source}. Connect the drive and "
+                            "run undo again. Only if you are sure that folder was "
+                            "deleted (not just unmounted or mounted under another "
+                            "name), run 'pyimgtag dedup undo --group "
+                            f"{group['id']} --forget-missing'",
+                            file=sys.stderr,
+                        )
                     errors += 1
                     group_failed = True
                     continue
@@ -453,10 +480,19 @@ def _handle_undo(args: argparse.Namespace) -> int:
                 restored += 1
             if group_failed:
                 # Leave the DB record alone so the undo can be retried.
+                if group_forgotten:
+                    _say(
+                        f"group {group['id']}: nothing forgotten yet; fix the errors above "
+                        "and run undo again",
+                        file=sys.stderr,
+                    )
                 continue
+            forgotten += group_forgotten
             cleared += db.undo_dedup_group(group["id"])
 
     print(f"Restored {restored} file(s); cleared {cleared} member record(s).")
+    if forgotten:
+        print(f"Forgot {forgotten} copy/copies whose quarantine folder is gone.")
     if trashed:
         print(
             f"{trashed} copy/copies were sent to the trash and must be restored "

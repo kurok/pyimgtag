@@ -929,3 +929,124 @@ def test_fsync_flushes_a_read_only_copy(tmp_path, monkeypatch):
     monkeypatch.setattr(dedup_groups.os, "fsync", lambda fd: (calls.append(fd), real(fd)))
     dedup_groups._fsync_file(f)
     assert calls
+
+
+# --- #458: undo --forget-missing -----------------------------------------------
+
+
+def _undo_args(db_path: Path, *extra: str):
+    args = _args("undo", *extra)
+    args.db = str(db_path)
+    return args
+
+
+def test_forget_missing_unlocks_a_group_whose_quarantine_was_deleted(tmp_path, capsys):
+    import shutil as _shutil
+
+    db_path, paths = _four_copies(tmp_path)
+    quarantine = tmp_path / "q"
+    assert _resolve(db_path, quarantine) == 0
+    _shutil.rmtree(quarantine)  # deleted on purpose
+    group_id = ProgressDB(db_path=db_path).list_dedup_groups(include_resolved=True)[0]["id"]
+
+    # Plain undo keeps the records (could be an unplugged drive) and says how to proceed.
+    assert cmd_dedup(_undo_args(db_path)) == 1
+    err = capsys.readouterr().err
+    assert "quarantine not reachable" in err
+    assert f"dedup undo --group {group_id} --forget-missing" in err
+
+    assert cmd_dedup(_undo_args(db_path, "--group", str(group_id), "--forget-missing")) == 0
+    out = capsys.readouterr().out
+    assert "Forgot 3 copy/copies" in out
+
+    db = ProgressDB(db_path=db_path)
+    group = db.get_dedup_group(group_id)
+    assert group["resolved_at"] is None
+    assert all(m["action"] is None for m in group["members"])
+    # A rescan plans the keeper and anything left again (the group is not locked).
+    db.replace_unresolved_dedup_groups([("duplicate", paths)], 5)
+    assert db.list_dedup_groups()
+    db.close()
+
+
+def test_forget_missing_still_restores_what_it_can(tmp_path, capsys):
+    """Only the copy whose quarantine folder is gone is forgotten; the rest come back."""
+    db_path, paths = _four_copies(tmp_path)
+    assert _resolve(db_path, tmp_path / "q") == 0
+    db = ProgressDB(db_path=db_path)
+    group = db.list_dedup_groups(include_resolved=True)[0]
+    moved = [m for m in group["members"] if m.get("action") == ACTION_MOVE]
+    # One copy was moved to a drive that has since been wiped.
+    lost = moved[0]
+    Path(lost["moved_to"]).unlink()
+    db.record_dedup_action(
+        group["id"], lost["file_path"], ACTION_MOVE, str(tmp_path / "wiped" / "x.jpg")
+    )
+    db.close()
+
+    assert cmd_dedup(_undo_args(db_path, "--group", str(group["id"]), "--forget-missing")) == 0
+    assert "Forgot 1 copy/copies" in capsys.readouterr().out
+    assert all(Path(m["file_path"]).exists() for m in moved[1:])
+    assert not Path(lost["file_path"]).exists()
+
+
+def test_forget_missing_requires_a_group(tmp_path, capsys):
+    db_path, _ = _four_copies(tmp_path)
+    assert cmd_dedup(_undo_args(db_path, "--forget-missing")) == 2
+    assert "--forget-missing needs --group" in capsys.readouterr().err
+
+
+def test_forget_missing_leaves_a_reachable_quarantine_alone(tmp_path, capsys):
+    """With the quarantine present the flag changes nothing: copies are restored."""
+    db_path, paths = _four_copies(tmp_path)
+    assert _resolve(db_path, tmp_path / "q") == 0
+    group_id = ProgressDB(db_path=db_path).list_dedup_groups(include_resolved=True)[0]["id"]
+    assert cmd_dedup(_undo_args(db_path, "--group", str(group_id), "--forget-missing")) == 0
+    assert "Forgot" not in capsys.readouterr().out
+    assert all(Path(p).exists() for p in paths)
+
+
+def test_forget_missing_never_forgets_when_the_library_is_unplugged_too(tmp_path, capsys):
+    """Library and quarantine on one unplugged drive: keep everything."""
+    db_path, paths = _four_copies(tmp_path)
+    assert _resolve(db_path, tmp_path / "q") == 0
+    group_id = ProgressDB(db_path=db_path).list_dedup_groups(include_resolved=True)[0]["id"]
+    (tmp_path / "q").rename(tmp_path / "q-away")
+    (tmp_path / "lib").rename(tmp_path / "lib-away")
+
+    assert cmd_dedup(_undo_args(db_path, "--group", str(group_id), "--forget-missing")) == 1
+    captured = capsys.readouterr()
+    assert "neither the library" in captured.err
+    assert "Forgot" not in captured.out
+    db = ProgressDB(db_path=db_path)
+    assert any(m["action"] for m in db.get_dedup_group(group_id)["members"])
+    db.close()
+
+
+def test_nothing_is_reported_forgotten_while_the_group_is_kept(tmp_path, capsys):
+    """One copy's quarantine is gone, another's library folder is: the group is
+    kept, so "Forgot" must not be claimed."""
+    db_path, paths = _four_copies(tmp_path)
+    assert _resolve(db_path, tmp_path / "q") == 0
+    db = ProgressDB(db_path=db_path)
+    group = db.list_dedup_groups(include_resolved=True)[0]
+    moved = [m for m in group["members"] if m.get("action") == ACTION_MOVE]
+    gone = moved[0]
+    Path(gone["moved_to"]).unlink()
+    db.record_dedup_action(
+        group["id"], gone["file_path"], ACTION_MOVE, str(tmp_path / "wiped" / "x.jpg")
+    )
+    # A second copy's original folder points to an unplugged library location.
+    away = moved[1]
+    db.record_dedup_action(group["id"], away["file_path"], ACTION_MOVE, away["moved_to"])
+    db._conn.execute(
+        "UPDATE dedup_members SET file_path = ? WHERE group_id = ? AND file_path = ?",
+        (str(tmp_path / "unplugged" / "y.jpg"), group["id"], away["file_path"]),
+    )
+    db._conn.commit()
+    db.close()
+
+    assert cmd_dedup(_undo_args(db_path, "--group", str(group["id"]), "--forget-missing")) == 1
+    captured = capsys.readouterr()
+    assert "Forgot" not in captured.out
+    assert "nothing forgotten yet" in captured.err
