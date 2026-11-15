@@ -360,6 +360,7 @@ def test_every_path_canonicalizes_and_writes_back_with_the_vocabulary(tmp_path, 
 
     def spy(result, rich_desc, args_, vocabulary=None):
         written[Path(result.file_path).name] = (list(result.tags), vocabulary)
+        return "exif"  # a successful write, as _write_metadata reports it
 
     with (
         patch("pyimgtag.commands.run.check_ollama", return_value=(True, "")),

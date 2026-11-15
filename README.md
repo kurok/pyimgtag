@@ -1348,17 +1348,24 @@ code, so cron jobs, `watch` wrappers and CI can tell a dead run from a quiet one
 
 | Code | Meaning |
 |---|---|
-| 0 | at least one item succeeded, or nothing needed processing |
+| 0 | at least one item succeeded (and, for `run`, at least one requested write succeeded), or nothing needed processing |
 | 1 | interrupted, or a setup error detected by the command (for example Ollama not reachable, or the model not pulled) |
 | 2 | argparse usage error (an unknown flag, a missing required argument) |
 | 3 | at least one item was attempted and **every** attempt failed at the model |
+| 4 | `run` only: tagging worked, but **every** metadata write that was asked for (`--write-exif`, `--sidecar-only`, `--write-back`) failed — e.g. exiftool missing or a read-only folder |
 
 A partial failure (some images tagged, some not) is still `0`; for `run` the
-summary's `Model failures` line counts them. When `judge` cannot score an image
+summary's `Model failures` line counts them. Likewise a run where some writes
+succeeded is `0`, with the rest counted under `Write failures` / `Photos
+failures`; `--dry-run` writes nothing and never returns `4`. The write targets
+count together: with `--write-exif --write-back`, one successful write of either
+kind keeps the run at `0`. When `judge` cannot score an image
 it says why, e.g. `judge failed (request failed: HTTP 500), skipping`. A video
 clip that cannot be decoded (no ffmpeg) counts as a failed attempt too, so a run
 over only undecodable clips also exits `3`. `pyimgtag watch` keeps looping
-through cycles where every call failed.
+through cycles where every call or every write failed (its cycle line shows
+`write failures`); codes `3` and `4` are for a one-shot `run` from cron or a
+script.
 
 ### Sample verbose output
 

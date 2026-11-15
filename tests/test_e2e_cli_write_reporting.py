@@ -44,11 +44,13 @@ def _run(tmp_path: Path, *flags: str):
 
 def test_write_exif_counts_every_file(tmp_path: Path) -> None:
     result = _run(tmp_path, "--write-exif")
-    assert result.returncode == 0, result.stderr
     if shutil.which("exiftool"):
+        assert result.returncode == 0, result.stderr
         assert "  Metadata written:  2" in result.stderr
         assert result.stderr.count("| exif") == 2
     else:
+        # Tagged everything, wrote nothing: exit 4 (#459), never a silent 0.
+        assert result.returncode == 4, result.stderr
         assert "  Metadata written:  0" in result.stderr
         assert "  Write failures:    2" in result.stderr
 
@@ -65,3 +67,19 @@ def test_without_write_flags_the_summary_is_unchanged(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "Metadata written" not in result.stderr
     assert "| exif" not in result.stderr
+
+
+def test_a_run_whose_writes_all_fail_exits_4(tmp_path: Path) -> None:
+    """--sidecar-only needs exiftool: without it every write fails and run exits 4."""
+    result = _run(tmp_path, "--sidecar-only")
+    if shutil.which("exiftool"):
+        assert result.returncode == 0, result.stderr
+        assert "  Sidecars written:  2" in result.stderr
+    else:
+        assert result.returncode == 4, result.stderr
+        assert "  Sidecars written:  0" in result.stderr
+
+
+def test_dry_run_never_exits_4(tmp_path: Path) -> None:
+    result = _run(tmp_path, "--write-exif", "--dry-run")
+    assert result.returncode == 0, result.stderr
