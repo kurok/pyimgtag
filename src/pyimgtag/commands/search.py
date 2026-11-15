@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from pyimgtag.commands.query import elide_path
 from pyimgtag.progress_db import ProgressDB
 
 
@@ -204,7 +205,7 @@ def cmd_search(args: argparse.Namespace) -> int:
         print(f"{'SCORE':<7}  {'PATH':<{width}}")
         print("-" * (7 + 2 + width))
         for path, score in hits:
-            shown = path[-width:] if len(path) > width else path
+            shown = elide_path(path, width)
             print(f"{score:<7.4f}  {shown:<{width}}")
         print(f"\n{len(hits)} image(s) found.", file=sys.stderr)
     return 0

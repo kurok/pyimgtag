@@ -24,6 +24,33 @@ def _rollup_tags(args: argparse.Namespace) -> list[str] | None:
     return vocabulary.descendants(args.tag)
 
 
+def elide_path(path: str, width: int) -> str:
+    """Fit *path* into *width* characters by dropping its start, marked with "…".
+
+    The end of a path (the folder and file name) is the part that tells rows
+    apart, so it is the part kept. The cut moves forward to the next path
+    separator when there is one, so the shown text begins with a whole folder
+    name (``…/Phone Import 2024/IMG_1.jpg``) and never starts mid-word. Only a
+    file name longer than the column itself is cut inside the name.
+
+    Args:
+        path: The full path.
+        width: The column width, in characters.
+
+    Returns:
+        *path* unchanged when it fits, else ``"…"`` plus the kept tail.
+    """
+    if len(path) <= width:
+        return path
+    if width <= 1:
+        return "…"[:width]
+    tail = path[-(width - 1) :]
+    seps = [i for i in (tail.find("/"), tail.find("\\")) if i >= 0]
+    if seps:
+        tail = tail[min(seps) :]
+    return "…" + tail
+
+
 def cmd_query(args: argparse.Namespace) -> int:
     """Execute the query subcommand."""
     import json as _json
@@ -94,11 +121,10 @@ def cmd_query(args: argparse.Namespace) -> int:
         print(header)
         print("-" * len(header))
         for r in results:
-            path_str = (
-                r["file_path"][-col_path:] if len(r["file_path"]) > col_path else r["file_path"]
-            )
+            path_str = elide_path(r["file_path"], col_path)
             tags_str = ", ".join(r["tags_list"])
-            tags_str = tags_str[:col_tags] if len(tags_str) > col_tags else tags_str
+            if len(tags_str) > col_tags:
+                tags_str = tags_str[: col_tags - 1].rstrip(" ,") + "…"
             cat_str = (r["scene_category"] or "")[:col_cat]
             clean_str = (r["cleanup_class"] or "")[:col_clean]
             print(
