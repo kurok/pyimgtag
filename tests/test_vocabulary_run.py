@@ -417,3 +417,74 @@ def test_watch_canonicalizes_with_the_vocabulary(tmp_path):
     assert rc == 0
     with ProgressDB(db_path=db) as pdb:
         assert pdb.get_image(str(photos / "p0.jpg"))["tags"] == ["beach"]
+
+
+# --- #439: the summary says what it leaves out --------------------------------
+
+
+def _vocab_with(kept: int = 0, dropped: int = 0, mapped: int = 0, strict: bool = False):
+    from pyimgtag.vocabulary import Vocabulary
+
+    vocab = Vocabulary(tags=["beach"], strict=strict)
+    for i in range(kept):
+        vocab.stats.kept[f"kept{i:02d}"] = 30 - i
+    for i in range(dropped):
+        vocab.stats.dropped[f"drop{i:02d}"] = 30 - i
+    for i in range(mapped):
+        vocab.stats.mapped[(f"raw{i:02d}", "beach")] = 30 - i
+    return vocab
+
+
+def test_more_than_15_kept_tags_ends_with_an_and_n_more_marker(capsys, tmp_path):
+    from pyimgtag.commands.run import _print_vocabulary_summary
+
+    report = tmp_path / "out.vocabulary.json"
+    _print_vocabulary_summary(_vocab_with(kept=24), report=report)
+    err = capsys.readouterr().err
+    listed = [line for line in err.splitlines() if "(kept x" in line]
+    assert len(listed) == 15
+    assert f"    … and 9 more distinct tags (full list in {report})" in err
+
+
+def test_without_output_json_the_marker_says_how_to_get_the_list(capsys):
+    from pyimgtag.commands.run import _print_vocabulary_summary
+
+    _print_vocabulary_summary(_vocab_with(dropped=16, mapped=20, strict=True))
+    err = capsys.readouterr().err
+    assert "    … and 1 more distinct tag (full list: re-run with --output-json)" in err
+    assert "    … and 5 more distinct mappings (full list: re-run with --output-json)" in err
+
+
+def test_no_marker_when_everything_fits(capsys):
+    from pyimgtag.commands.run import _print_vocabulary_summary
+
+    _print_vocabulary_summary(_vocab_with(kept=15, mapped=15))
+    assert "more" not in capsys.readouterr().err
+
+
+def test_repeated_tags_the_header_counts_uses_the_marker_counts_entries(capsys):
+    """40 uses of 18 distinct tags: 15 listed, "3 more distinct tags"."""
+    from pyimgtag.commands.run import _print_vocabulary_summary
+    from pyimgtag.vocabulary import Vocabulary
+
+    vocab = Vocabulary(tags=["beach"])
+    for i in range(18):
+        vocab.stats.kept[f"tag{i:02d}"] = 3 if i < 4 else 2
+    _print_vocabulary_summary(vocab, report=Path("out.vocabulary.json"))
+    err = capsys.readouterr().err
+    assert f"Kept off-vocab:   {sum(vocab.stats.kept.values())}" in err
+    assert "    … and 3 more distinct tags (full list in out.vocabulary.json)" in err
+
+
+def test_the_listed_entries_are_the_head_of_the_report(capsys):
+    """Ties are ordered by name, as in the .vocabulary.json report."""
+    from pyimgtag.commands.run import _print_vocabulary_summary
+    from pyimgtag.vocabulary import Vocabulary
+
+    vocab = Vocabulary(tags=["beach"])
+    for name in ["zeta", "alpha", "mango", "delta"]:
+        vocab.stats.kept[name] = 1
+    _print_vocabulary_summary(vocab, top=2)
+    listed = [line.split()[0] for line in capsys.readouterr().err.splitlines() if "(kept x" in line]
+    report = [e["raw"] for e in vocab.stats.to_dict()["kept_off_vocabulary"]]
+    assert listed == report[:2] == ["alpha", "delta"]

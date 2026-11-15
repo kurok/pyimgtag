@@ -8,6 +8,7 @@ binds to a free loopback port; no test reaches the network or Ollama.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import socket
@@ -15,7 +16,7 @@ import subprocess  # nosec B404 — the tests run the package's own entry points
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -183,13 +184,16 @@ def fake_ollama(
     chat_status: int = 200,
     judge_reply: str = '{"score": 7, "reason": "fine"}',
     tag_reply: str = "{}",
+    tag_replies: Sequence[str] | None = None,
 ) -> Iterator[str]:
     """Serve a minimal Ollama on loopback; yield its base URL.
 
     ``GET /api/tags`` lists *models*. ``POST /api/chat`` answers with
     *chat_status*; on 200 the reply is *judge_reply* for a judge prompt (one
-    that asks for a ``"score"``) and *tag_reply* otherwise.
+    that asks for a ``"score"``) and *tag_reply* otherwise. *tag_replies*,
+    when given, are served in turn (cycling) instead of *tag_reply*.
     """
+    tag_turn = itertools.count()
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, status: int, payload: object) -> None:
@@ -209,7 +213,12 @@ def fake_ollama(
                 self._send(chat_status, {"error": "model crashed"})
                 return
             prompt = request["messages"][-1]["content"]
-            reply = judge_reply if '"score"' in prompt else tag_reply
+            if '"score"' in prompt:
+                reply = judge_reply
+            elif tag_replies:
+                reply = tag_replies[next(tag_turn) % len(tag_replies)]
+            else:
+                reply = tag_reply
             self._send(200, {"message": {"content": reply}})
 
         def log_message(self, *_args: object) -> None:
