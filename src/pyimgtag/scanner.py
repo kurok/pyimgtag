@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -34,15 +35,13 @@ _OTHER_MEDIA_EXTENSIONS = {
 }
 
 
-def _is_media_extension(ext: str) -> bool:
+@functools.cache
+def _media_extensions() -> frozenset[str]:
+    """Every photo, RAW and clip extension worth reporting, built once."""
     from pyimgtag.raw_converter import RAW_EXTENSIONS
 
-    return (
-        ext in DEFAULT_EXTENSIONS
-        or ext in DEFAULT_VIDEO_EXTENSIONS
-        or ext in _OTHER_MEDIA_EXTENSIONS
-        or f".{ext}" in RAW_EXTENSIONS
-    )
+    raw = {ext.lstrip(".") for ext in RAW_EXTENSIONS}
+    return frozenset(DEFAULT_EXTENSIONS | DEFAULT_VIDEO_EXTENSIONS | _OTHER_MEDIA_EXTENSIONS | raw)
 
 
 def _select(entries: Iterable[Path], exts: set[str], unsupported: list[Path] | None) -> list[Path]:
@@ -60,10 +59,22 @@ def _select(entries: Iterable[Path], exts: set[str], unsupported: list[Path] | N
         if ext in exts:
             files.append(entry)
         elif unsupported is not None and not entry.name.startswith("."):
-            if _is_media_extension(ext):
+            if ext in _media_extensions():
                 left_out.append(entry)
-    if unsupported is not None:
-        unsupported.extend(sorted(left_out))
+    if unsupported is not None and left_out:
+        # The motion half of a Live Photo (IMG_1.MOV next to IMG_1.HEIC) is
+        # never tagged on its own, even with --include-video: not worth a word.
+        stills = {p.stem.lower() for p in files}
+        unsupported.extend(
+            sorted(
+                p
+                for p in left_out
+                if not (
+                    p.suffix.lstrip(".").lower() in DEFAULT_VIDEO_EXTENSIONS
+                    and p.stem.lower() in stills
+                )
+            )
+        )
     return sorted(files)
 
 

@@ -68,6 +68,14 @@ class TestScannerReportsLeftOutMedia:
 
         assert [p.name for p in unsupported] == ["top.cr2"]
 
+    def test_live_photo_motion_clip_is_not_reported(self, tmp_path):
+        _touch(tmp_path, "IMG_1.HEIC", "IMG_1.MOV", "IMG_2.MOV")
+        unsupported: list[Path] = []
+
+        scan_directory(tmp_path, unsupported=unsupported)
+
+        assert [p.name for p in unsupported] == ["IMG_2.MOV"]
+
     def test_photos_library_reports_too(self, tmp_path):
         _touch(tmp_path / "originals" / "0", "a.heic", "b.gif")
         unsupported: list[Path] = []
@@ -115,6 +123,34 @@ class TestRunSummary:
         assert "raw shot.NEF" in err
         assert "--extensions" in err
 
+    def test_hint_builds_on_the_users_own_list(self, tmp_path, capsys):
+        _touch(tmp_path / "lib", "photo.jpg", "shot.cr2", "pic.png")
+
+        assert self._run(tmp_path, "--extensions", "jpg") == 0
+
+        err = capsys.readouterr().err
+        assert "--extensions jpg,png" in err  # pic.png sorts first
+        assert "Info: skipped 2 file(s)" in err
+
+    def test_video_extensions_hint_when_video_is_on(self, tmp_path, capsys):
+        _touch(tmp_path / "lib", "photo.jpg", "clip.mp4")
+
+        with patch("pyimgtag.video.ffmpeg_available", return_value=True):
+            rc = self._run(tmp_path, "--include-video", "--video-extensions", "mov")
+
+        assert rc == 0
+        assert "--video-extensions mov,mp4" in capsys.readouterr().err
+
+    def test_no_ffmpeg_hint_does_not_repeat_include_video(self, tmp_path, capsys):
+        _touch(tmp_path / "lib", "photo.jpg", "clip.mp4")
+
+        with patch("pyimgtag.video.ffmpeg_available", return_value=False):
+            assert self._run(tmp_path, "--include-video") == 0
+
+        line = next(ln for ln in capsys.readouterr().err.splitlines() if "clip.mp4" in ln)
+        assert "ffmpeg" in line
+        assert "--include-video" not in line
+
     def test_a_video_points_at_include_video(self, tmp_path, capsys):
         _touch(tmp_path / "lib", "photo.jpg", "clip.mp4")
 
@@ -147,3 +183,18 @@ class TestRunSummary:
         run = parser.parse_args(["run", "--input-dir", "."])
         judge = parser.parse_args(["judge", "--input-dir", "."])
         assert run.extensions == judge.extensions == DEFAULT_EXTENSIONS_ARG
+
+
+def test_summary_has_no_ext_row_when_the_scan_did_not_count():
+    """watch scans without collecting the list: no row that would read 0."""
+    from pyimgtag.commands.run import _new_stats, _summary_rows
+
+    labels = [label for label, _ in _summary_rows(_new_stats(3), None)]
+    assert "Skipped (ext):" not in labels
+
+    stats = _new_stats(3)
+    stats["skipped_extension"] = 2
+    rows = _summary_rows(stats, None)
+    labels = [label for label, _ in rows]
+    assert labels.index("Skipped (ext):") == labels.index("Skipped (tagged):") + 1
+    assert dict(rows)["Skipped (ext):"] == 2

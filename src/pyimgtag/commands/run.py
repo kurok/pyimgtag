@@ -41,7 +41,6 @@ from pyimgtag.prompt_template import (
     load_prompt_template,
 )
 from pyimgtag.scanner import (
-    DEFAULT_EXTENSIONS_ARG,
     DEFAULT_VIDEO_EXTENSIONS,
     scan_directory,
     scan_photos_library,
@@ -678,7 +677,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     if isinstance(scan, int):
         return scan
     source_type, files = scan
-    _report_unsupported(unsupported, video_extensions)
+    _report_unsupported(unsupported, args, video_extensions)
 
     if video_extensions:
         from pyimgtag.scanner import partition_media
@@ -1258,20 +1257,28 @@ def _finalize_result(
         _print_brief(result, stats["processed"], args.limit or stats["scanned"], written)
 
 
-def _report_unsupported(unsupported: list[Path], video_extensions: set[str]) -> None:
+def _report_unsupported(
+    unsupported: list[Path], args: argparse.Namespace, video_extensions: set[str]
+) -> None:
     """Say how many media files the scan left out because of their extension.
 
-    The first one is named so the user can decide whether to add its type with
-    ``--extensions`` (or ``--include-video`` for a clip).
+    The first one is named, with the flag that would bring its type in: the
+    user's own ``--extensions`` list plus that type, or for a clip
+    ``--include-video`` / ``--video-extensions``.
     """
     if not unsupported:
         return
     first = unsupported[0]
     ext = first.suffix.lstrip(".").lower()
-    if ext in DEFAULT_VIDEO_EXTENSIONS and not video_extensions:
+    if ext in DEFAULT_VIDEO_EXTENSIONS and not getattr(args, "include_video", False):
         hint = "pass --include-video to tag videos"
+    elif ext in DEFAULT_VIDEO_EXTENSIONS and not video_extensions:
+        hint = "videos need ffmpeg and ffprobe on PATH"
+    elif ext in DEFAULT_VIDEO_EXTENSIONS:
+        hint = f"add it with --video-extensions {','.join(sorted(video_extensions))},{ext}"
     else:
-        hint = f"add it with --extensions (e.g. --extensions {DEFAULT_EXTENSIONS_ARG},{ext})"
+        own = ",".join(e.strip().lstrip(".") for e in args.extensions.split(",") if e.strip())
+        hint = f"add it with --extensions {own},{ext}"
     print(
         f"Info: skipped {len(unsupported)} file(s) whose extension is not scanned, "
         f"first: {first} — {hint}",
@@ -1290,7 +1297,6 @@ def _new_stats(scanned: int) -> dict[str, int]:
         "skipped_existing": 0,
         "skipped_dedup": 0,
         "skipped_tagged": 0,
-        "skipped_extension": 0,
         "model_calls": 0,
         "model_failures": 0,
         "geocode_failures": 0,
@@ -1401,11 +1407,14 @@ def _summary_rows(stats: dict, args: argparse.Namespace | None) -> list[tuple[st
         ("Skipped (exists):", stats["skipped_existing"]),
         ("Skipped (dedup):", stats["skipped_dedup"]),
         ("Skipped (tagged):", stats["skipped_tagged"]),
-        ("Skipped (ext):", stats.get("skipped_extension", 0)),
         ("Model failures:", stats["model_failures"]),
         ("Geocode failures:", stats["geocode_failures"]),
         ("Resumed (DB):", stats["resumed_from_db"]),
     ]
+    # Only when the scan counted them: watch scans without collecting the list,
+    # and a row reading 0 there would claim nothing was left out.
+    if "skipped_extension" in stats:
+        rows.insert(9, ("Skipped (ext):", stats["skipped_extension"]))
     # Only for the writes that were asked for, so the default summary is unchanged.
     if args is not None:
         sidecar_only = bool(getattr(args, "sidecar_only", False))
