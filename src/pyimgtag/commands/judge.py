@@ -277,6 +277,16 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
         session.set_counter("jobs", jobs)
         session.mark_running()
 
+    if args.min_score is not None:
+        # Every photo is judged; --min-score only hides the lower ones. So the
+        # counter is the position among the judged photos, and its numbers
+        # skip over what is hidden: say so once rather than leave gaps unexplained.
+        print(
+            f"Showing photos scoring {args.min_score:g} or more; [n/{total}] is the "
+            f"position among all {total} judged.",
+            file=sys.stderr,
+        )
+
     attempts = {"called": 0, "failed": 0}
     tally = {"already_judged": 0, "below_min_score": 0}
 

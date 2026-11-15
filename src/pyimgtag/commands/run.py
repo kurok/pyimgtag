@@ -736,6 +736,12 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         results: list[ImageResult] = []
         stats = _new_stats(len(files))
         stats["skipped_extension"] = len(unsupported)
+        try:
+            files = _select_by_capture_metadata(files, args, stats, skipped_dedup)
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            _print_summary(stats, args)
+            return 130
         from pyimgtag.webapp.bootstrap import start_dashboard_for
 
         session, dashboard = start_dashboard_for(args, command="run")
@@ -1273,9 +1279,77 @@ def _finalize_result(
     if args.jsonl_stdout:
         print(result_to_jsonl(result))
     elif args.verbose or args.dry_run:
-        _print_verbose(result, stats["processed"], args.limit or stats["scanned"], written)
+        _print_verbose(result, stats["processed"], _progress_total(stats, args), written)
     else:
-        _print_brief(result, stats["processed"], args.limit or stats["scanned"], written)
+        _print_brief(result, stats["processed"], _progress_total(stats, args), written)
+
+
+#: Every counter for a scanned file that will not be printed. skipped_no_date
+#: is left out: it is a subset of skipped_date, not a separate group.
+_SKIP_COUNTERS = (
+    "skipped_date",
+    "skipped_no_gps",
+    "skipped_no_local",
+    "skipped_cached",
+    "skipped_existing",
+    "skipped_dedup",
+    "skipped_tagged",
+)
+
+
+def _progress_total(stats: dict, args: argparse.Namespace) -> int:
+    """The ``[n/total]`` denominator: files still going to be processed.
+
+    That is everything scanned minus everything already skipped. The date and
+    GPS filters are applied before tagging starts (see
+    :func:`_select_by_capture_metadata`), so with those the total is exact
+    from the first line and the last line reads ``[n/n]``. Skips that can
+    only be decided per file (cached, existing, tagged) shrink it as they are
+    found. ``--limit`` caps it.
+    """
+    in_play = stats["scanned"] - sum(stats.get(key, 0) for key in _SKIP_COUNTERS)
+    return min(args.limit, in_play) if args.limit else in_play
+
+
+def _date_filter_active(args: argparse.Namespace) -> bool:
+    return any(getattr(args, name, None) for name in ("date", "date_from", "date_to"))
+
+
+def _select_by_capture_metadata(
+    files: list[Path], args: argparse.Namespace, stats: dict, skipped_dedup: set[str]
+) -> list[Path]:
+    """Apply ``--date``/``--date-from``/``--date-to``/``--skip-no-gps`` up front.
+
+    These decide on EXIF alone, so applying them before tagging tells the
+    progress counter how many files will be tagged, rather than counting
+    against every scanned file. The skips are counted here; the per-file
+    check later sees only files that pass. Files already marked as
+    duplicates are left for the tagging loop to count.
+
+    Returns:
+        The files that pass, in their original order. *files* itself when no
+        such filter is active.
+    """
+    skip_no_gps = bool(getattr(args, "skip_no_gps", False))
+    if not (_date_filter_active(args) or skip_no_gps):
+        return files
+    print(f"Reading capture dates for {len(files)} file(s) to apply the filters…", file=sys.stderr)
+    kept: list[Path] = []
+    for file_path in files:
+        if str(file_path) in skipped_dedup:
+            kept.append(file_path)
+            continue
+        exif = _read_capture_metadata(file_path, args)
+        if not passes_date_filter(exif, file_path, args.date, args.date_from, args.date_to):
+            stats["skipped_date"] += 1
+            if exif.date_original is None:
+                stats["skipped_no_date"] += 1
+            continue
+        if skip_no_gps and not exif.has_gps:
+            stats["skipped_no_gps"] += 1
+            continue
+        kept.append(file_path)
+    return kept
 
 
 def _report_unsupported(
@@ -1435,9 +1509,7 @@ def _summary_rows(stats: dict, args: argparse.Namespace | None) -> list[tuple[st
         rows.insert(9, ("Skipped (ext):", stats["skipped_extension"]))
     # Of the date-filter skips, how many had no capture date at all: those are
     # not "outside the range", their date is unknown. Only under a date filter.
-    if args is not None and any(
-        getattr(args, name, None) for name in ("date", "date_from", "date_to")
-    ):
+    if args is not None and _date_filter_active(args):
         after = next(i for i, (label, _) in enumerate(rows) if label == "Skipped (date):")
         rows.insert(after + 1, ("  without a date:", stats.get("skipped_no_date", 0)))
     # Only for the writes that were asked for, so the default summary is unchanged.
