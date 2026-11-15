@@ -9,15 +9,11 @@ the model under ``/api/tags`` and answers ``/api/chat`` with either an HTTP
 from __future__ import annotations
 
 import json
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from PIL import Image
 
-from tests.e2e_support import run_cli
+from tests.e2e_support import fake_ollama, run_cli
 
 _MODEL = "gemma4:e4b"
 _TAG_REPLY = json.dumps(
@@ -36,41 +32,13 @@ _TAG_REPLY = json.dumps(
 _JUDGE_REPLY = json.dumps({"score": 7, "reason": "fine"})
 
 
-@contextmanager
-def _fake_ollama(chat_ok: bool) -> Iterator[str]:
-    class Handler(BaseHTTPRequestHandler):
-        def _send(self, status: int, payload: object) -> None:
-            body = json.dumps(payload).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self) -> None:  # noqa: N802 — http.server API
-            self._send(200, {"models": [{"name": _MODEL}]})
-
-        def do_POST(self) -> None:  # noqa: N802 — http.server API
-            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            if not chat_ok:
-                self._send(500, {"error": "model crashed"})
-                return
-            prompt = request["messages"][-1]["content"]
-            reply = _JUDGE_REPLY if '"score"' in prompt else _TAG_REPLY
-            self._send(200, {"message": {"content": reply}})
-
-        def log_message(self, *_args: object) -> None:
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(5)
+def _fake_ollama(chat_ok: bool):
+    return fake_ollama(
+        models=(_MODEL,),
+        chat_status=200 if chat_ok else 500,
+        judge_reply=_JUDGE_REPLY,
+        tag_reply=_TAG_REPLY,
+    )
 
 
 def _photos(tmp_path: Path) -> Path:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def _make_args(tmp_path: Path, **overrides) -> MagicMock:
     args = MagicMock()
@@ -657,3 +659,80 @@ class TestCmdJudgeBasic:
             rc = cmd_judge(args, MagicMock())
 
         assert rc == 1
+
+
+class TestJudgeSummary:
+    """#437: judge always ends with counters and a one-line verdict."""
+
+    @staticmethod
+    def _run(tmp_path: Path, scores, extra=(), jobs: int = 1, db=None):
+        from pyimgtag.commands import judge
+        from pyimgtag.main import build_parser
+        from pyimgtag.models import JudgeScores
+
+        photos = []
+        for i in range(len(scores)):
+            p = tmp_path / f"p{i}.jpg"
+            p.write_bytes(b"x")
+            photos.append(p)
+        argv = ["judge", "--input-dir", str(tmp_path), "--no-web", "--jobs", str(jobs), *extra]
+        args = build_parser().parse_args(argv)
+        replies = [None if s is None else JudgeScores(score=s) for s in scores]
+        with (
+            patch("pyimgtag.commands.judge.check_ollama", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.check_ollama_model", return_value=(True, "")),
+            patch("pyimgtag.commands.judge.scan_directory", return_value=photos),
+            patch("pyimgtag.commands.judge.make_image_client") as factory,
+        ):
+            client = factory.return_value
+            by_path = dict(zip((str(p) for p in photos), replies, strict=True))
+            client.judge_image.side_effect = lambda path, *a, **k: by_path[str(path)]
+            client.last_error = "request failed: HTTP 500"
+            rc = judge.cmd_judge(args, db if db is not None else MagicMock())
+        return rc
+
+    def test_nothing_above_the_threshold_is_an_explained_empty_result(self, tmp_path, capsys):
+        rc = self._run(tmp_path, [3, 4, 5, 2, 6, 1], ["--min-score", "7"])
+        out, err = capsys.readouterr()
+        assert rc == 0
+        assert out == ""
+        assert err.rstrip().splitlines()[-1] == "Judged 6 photo(s): 0 at or above 7."
+        assert "  Below min score:  6" in err
+        assert "  Model failures:   0" in err
+
+    def test_every_call_failing_exits_3_and_names_the_failures(self, tmp_path, capsys):
+        rc = self._run(tmp_path, [None, None, None])
+        err = capsys.readouterr().err
+        assert rc == 3
+        assert "  Model failures:   3" in err
+        assert err.rstrip().splitlines()[-1] == "Judged 0 photo(s); 3 model call(s) failed."
+
+    def test_without_min_score_the_verdict_has_no_threshold(self, tmp_path, capsys):
+        rc = self._run(tmp_path, [8, None])
+        out, err = capsys.readouterr()
+        assert rc == 0
+        assert "p0.jpg" in out
+        assert err.rstrip().splitlines()[-1] == "Judged 1 photo(s); 1 model call(s) failed."
+        assert "Below min score" not in err
+
+    @pytest.mark.parametrize("jobs", [1, 2])
+    def test_already_judged_photos_are_counted(self, tmp_path, capsys, jobs):
+        db = MagicMock()
+        db.get_judge_result.side_effect = lambda path: object() if path.endswith("p0.jpg") else None
+        rc = self._run(tmp_path, [9, 9], ["--skip-judged", "--min-score", "5"], jobs=jobs, db=db)
+        err = capsys.readouterr().err
+        assert rc == 0
+        assert "  Skipped (judged): 1" in err
+        assert err.rstrip().splitlines()[-1] == "Judged 1 photo(s): 1 at or above 5."
+
+
+def test_an_interrupted_judge_says_so_in_the_verdict(capsys):
+    from pyimgtag.commands.judge import _print_summary
+
+    _print_summary(
+        scanned=5, judged=2, shown=2, already_judged=0, below_min_score=0,
+        failed=0, min_score=6.5, interrupted=True,
+    )  # fmt: skip
+    assert capsys.readouterr().err.rstrip().splitlines()[-1] == (
+        "Judged 2 photo(s): 2 at or above 6.5 (interrupted)."
+    )

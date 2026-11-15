@@ -1285,6 +1285,21 @@ pyimgtag judge --input-dir ~/Pictures/exported \
   --output-json ranking.json
 ```
 
+Every run that starts scoring ends with a summary on stderr: the counters
+(scanned, judged, skipped as already judged, below the minimum score, model
+failures) and one verdict line. A run where every model call failed says so
+and exits 3.
+
+```
+--- Summary ---
+  Scanned:          6
+  Judged:           6
+  Skipped (judged): 0
+  Below min score:  6
+  Model failures:   0
+Judged 6 photo(s): 0 at or above 7.
+```
+
 **Sample output (brief mode):**
 ```
 [1/5] golden_hour.jpg → 9/10 outstanding
