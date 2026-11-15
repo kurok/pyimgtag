@@ -1,0 +1,71 @@
+name: Windows UX audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      part:
+        description: "Which audit part to run"
+        type: choice
+        options: [ "1", "2", "all" ]
+        default: "2"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-ux-audit:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pyimgtag and the audit dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[heic,review,dedup,vocab,mcp]"
+          python -m pip install piexif
+
+      - name: Install exiftool
+        shell: pwsh
+        run: |
+          choco install exiftool -y --no-progress
+          $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+                      [System.Environment]::GetEnvironmentVariable("Path", "User")
+          exiftool -ver
+
+      - name: Run the Windows UX audit (part 1 — every documented command)
+        if: inputs.part == '1' || inputs.part == 'all'
+        shell: pwsh
+        run: |
+          pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir "C:\ux" *> audit1.out
+          Get-Content audit1.out
+
+      - name: Run the Windows-specific checks (part 2)
+        if: inputs.part == '2' || inputs.part == 'all'
+        shell: pwsh
+        run: |
+          pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit2.ps1 -WorkDir "C:\ux2" *> audit2.out
+          Get-Content audit2.out
+
+      - name: Collect the transcripts
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "audit-logs" | Out-Null
+          Copy-Item "audit1.out","audit2.out" "audit-logs\" -Force -ErrorAction SilentlyContinue
+          Copy-Item "C:\ux\*.log","C:\ux2\*.log" "audit-logs\" -Force -ErrorAction SilentlyContinue
+
+      - name: Upload the transcript
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: windows-ux-audit-log
+          path: |
+            audit-logs/
+            audit1.out
+            audit2.out
+          if-no-files-found: warn
