@@ -7,16 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Tests
-- **The webapp worker-poll tests no longer race a loaded CI runner** (#367): two tests in `test_webapp_smoke.py` started a background worker and then polled `/edit/api/status` 50 times at 50 ms — a hard 2.5-second budget that a `windows-latest` runner under xdist missed, reporting `'state': 'running', 'done': 0`, which is a slow runner rather than a hung worker. Both now call one `_wait_for_worker` helper with a 15-second budget and a 25 ms poll, so a healthy run still finishes in milliseconds, a genuinely stuck job still fails the test in bounded time instead of hanging the suite, and the budget lives in one place.
+## [0.30.0] - 2026-11-15
+
+### Added
+- **Insights library report** (#340): `pyimgtag insights` and an `/insights` webapp page.
+- **Controlled vocabulary, prompt templates and tag language** (#341).
+- **Watch mode** (#342): continuous incremental tagging, with `--install-service` for systemd/launchd.
+- **Duplicate workflow** (#343): `dedup scan`, `list` and `resolve`, plus a `/dedup` page; `undo --forget-missing` drops a quarantine that was deleted by hand (#464).
+- **`-j/--jobs`** (#344): concurrent tagging for `run` and `judge`.
+- **Read-only MCP server** (`pyimgtag mcp`, #345) with gated write tools; `query_photos` filters by event and `get_event` was added (#463).
+- **Map and timeline pages** (#346), with GPS persistence and bbox/date query filters.
+- **Local semantic search** (`pyimgtag index` / `search`, #352) and find-by-example with `--similar-to` (#353).
+- **Events and trips** (#354): group photos, name them and make albums.
+- **Video** (#355, #356): tag clips with `--include-video`, play them in the webapp and score them with `judge`.
+- **`pyimgtag export`** (#360): CSV, JSON and digiKam tag trees.
+- **Hierarchical XMP keywords** for Lightroom and digiKam (#361).
+- **Experimental Immich sync** (`pyimgtag immich-sync`, #362).
+- **`--format json`** on `status`, `cleanup`, `tags list` and `faces review` (#428).
+- **The CLI honours `PYIMGTAG_DB`** (#427), as `python -m pyimgtag.webapp` already did.
+- **Webapp empty states** with a next step on Review, Judge, Tags, Query and Dashboard (#420), and baseline accessibility: dialog semantics, labels and keyboard controls (#422).
+- **Lightroom Classic / digiKam verification fixture and checklist** (#357): `python -m pyimgtag.interop_fixture` writes an embedded-metadata image, a sidecar image and its `.xmp`, all carrying one sample that exercises every branch the taxonomy can emit — two people, a three-level place with a non-ASCII city, a plain tag, a controlled-vocabulary tag, an event and a star rating. `docs/interop-verification.md` states the exact tree to expect and walks through the import in both applications. This is the half of #357's remaining acceptance criterion that can be done without the applications; the other half is someone running the import and adding the screenshots. The sample is built by calling `pyimgtag.hierarchy`, and a test parses the checklist and compares it to what the fixture writes, so the page cannot quietly go stale.
+
+### Changed
+- **Exit codes** (#417, #462): `run` and `judge` exit 3 when every model call failed and say why; `run` exits 4 when it tagged images but every requested write failed.
+- **A database written by a newer schema is refused** (#412), and the database is backed up before a migration.
+- **One client factory** (#423); Ollama now retries 429/503 like the cloud clients.
+- **`run` internals** (#425): one context object and one session recorder; creators close their resources.
+- **One osascript runner** with a typed error and one classifier (#419).
+- **Faces and persons are paged and looked up in SQL** (#421) instead of in Python.
+- **The dead standalone review/faces apps were removed** (#426); one launcher serves the webapp.
+- **Run summary output aligned** (#457); the summary says how many vocabulary entries it leaves out (#455) and what `--write-exif`, `--sidecar-only` and `--write-back` wrote (#456).
+- **CI tests each OS with the Python its users run** (#387, #388): Ubuntu 3.14, macOS 3.15, Windows 3.15.
 
 ### Fixed
+- **Dashboard concurrency** (#410, #411): access to the shared SQLite connection is serialised, and Photos/DB work no longer blocks the event loop.
+- **`run` fails fast with an actionable message when Ollama is unusable** (#414); a failed model call shows a readable reason (#451); `judge` ends with a summary so an empty result is explained (#447).
+- **Argument validation at parse time** for `--date*`, `--limit`, `--jobs`, `--timeout` and `--top` (#415).
+- **Read-only commands no longer create a database at a mistyped `--db`** (#413).
+- **`tags`** reports unknown tags and rejects no-op rename/merge/delete (#416).
+- **Webapp** shows backend failures instead of "undefined results" or "Loading…" (#418); the nav bar works on narrow viewports (#429).
+- **Windows and non-ASCII text**: exiftool arguments go through one UTF-8 argument file (#371, #373), ffmpeg output is decoded as UTF-8 (#374), and the console is written as UTF-8 (#453).
+- **Geocoder** stores one native place name instead of Nominatim's list forms (#446); names stored before that are rewritten (#465).
+- **MCP**: `list_events` returns stored events (#448), `search_photos` searches the local CLIP index (#452), and every request read before stdin closes is answered (#470).
+- **Dedup**: a half-finished resolve stays undoable (#454).
+- **`watch --install-service` fails when systemctl/launchctl fails** (#443).
+- **preflight** warns on optional tools and marks skipped checks (#445).
+- **Packaging**: photoscript and osxphotos are darwin-only in every extra (#444).
+- **examples** write fixture GPS with Pillow so it is never silently lost (#442).
+- **CodeQL alerts** resolved (#348, #466).
 - **IPTC text is now declared as UTF-8** (#364): `write_exif_description` wrote `IPTC:Caption-Abstract` and `IPTC:Keywords` as UTF-8 but never wrote `IPTC:CodedCharacterSet`. IIM has no default encoding — an undeclared record is read as Latin-1 by anything following the spec — so a geocoded `Óbidos` or a person named `José` arrived as `Ã“bidos` and `JosÃ©` in other photo managers. One `-codedcharacterset=utf8` on the same exiftool pass, written only when IPTC text is actually going out (not for `fmt="xmp"`, `fmt="exif"`, or an XMP-only hierarchical/rating write). XMP was never affected. The reason this went unspotted: exiftool auto-detects valid UTF-8 in the record and decodes it correctly whether or not anything was declared, so verifying with a plain exiftool read could never have caught it — the new round-trip asserts the declaration itself.
 - **mypy's `disable_error_codes` setting was a misspelling and had never taken effect** (#365): the option is `disable_error_code`, singular. mypy did not recognize the plural, warned about it on every run, and ignored it — and since CI runs `mypy src/pyimgtag/` with no flags of its own, `pyproject.toml` was the entire configuration. The typecheck job was green because nothing currently raises `import-untyped`, not because the suppression worked. `CLAUDE.md`, `README.md` and `CONTRIBUTING.md` documented `--ignore-missing-imports --disable-error-code import-untyped` on the command line, which is redundant with the working config and has been dropped, leaving one way to run it that matches CI.
 - **mypy now type-checks against Python 3.11, the declared floor** (#365): it was set to 3.12 while the project supports 3.11–3.14, so syntax or stdlib usage that breaks on the oldest supported runtime would not have been caught. A no-op today — the tree is clean at 3.11 and at 3.14.
 
-### Added
-- **Lightroom Classic / digiKam verification fixture and checklist** (#357): `python -m pyimgtag.interop_fixture` writes an embedded-metadata image, a sidecar image and its `.xmp`, all carrying one sample that exercises every branch the taxonomy can emit — two people, a three-level place with a non-ASCII city, a plain tag, a controlled-vocabulary tag, an event and a star rating. `docs/interop-verification.md` states the exact tree to expect and walks through the import in both applications. This is the half of #357's remaining acceptance criterion that can be done without the applications; the other half is someone running the import and adding the screenshots. The sample is built by calling `pyimgtag.hierarchy`, and a test parses the checklist and compares it to what the fixture writes, so the page cannot quietly go stale.
+### Security
+- **Dependency floors raised** for published advisories: pip `>=26.2.0` (GHSA-qwm4-qh6w-59xr / CVE-2026-13346, #347), soupsieve `>=2.9.0` (GHSA-j934-xhv5-fg8f, GHSA-gjv8-xp57-g29c, #349), pyjwt `>=2.15.0` and urllib3 `>=2.8.0` (16 advisories, #379); lockfile refreshes for the rest.
+
+### Tests
+- **The webapp worker-poll tests no longer race a loaded CI runner** (#367): two tests in `test_webapp_smoke.py` started a background worker and then polled `/edit/api/status` 50 times at 50 ms — a hard 2.5-second budget that a `windows-latest` runner under xdist missed, reporting `'state': 'running', 'done': 0`, which is a slow runner rather than a hung worker. Both now call one `_wait_for_worker` helper with a 15-second budget and a 25 ms poll, so a healthy run still finishes in milliseconds, a genuinely stuck job still fails the test in bounded time instead of hanging the suite, and the budget lives in one place.
+- **Immich timestamp subtests** are labelled with strings so xdist can send them (#424).
+- **Windows UX audit** (#467) runs every documented command plus the Windows-specific traps; docs show how to check what `--write-exif` wrote on Windows (#471).
 
 ## [0.29.2] - 2026-07-29
 
