@@ -386,6 +386,24 @@ class TestQueryByExampleCli(unittest.TestCase):
         self.assertIn(copy.resolve(), self.embedder.embed_calls)
         self.assertEqual(out.splitlines()[0], str(fresh))
 
+    def test_table_keeps_the_end_of_a_long_path(self):
+        deep = self.tmp / ("Phone Import 2024 " * 4).strip() / "album"
+        deep.mkdir(parents=True)
+        db_path = self.tmp / "deep.db"
+        with ProgressDB(db_path=db_path) as db:
+            build_index(_make_images(deep, "beach.jpg", "forest.jpg"), db, self.embedder)
+
+        code, out, _ = self._run(
+            ["search", "--db", str(db_path), "--similar-to", str(deep / "beach.jpg")]
+        )
+
+        self.assertEqual(code, 0)
+        path_col = out.splitlines()[2][9:].rstrip()
+        full = str(deep / "forest.jpg")
+        kept = path_col[1:]
+        self.assertTrue(path_col.startswith("…") and full.endswith(kept), path_col)
+        self.assertIn(full[len(full) - len(kept) - 1], "/\\ _-", path_col)
+
     def test_an_unindexed_library_is_reported_before_anything_else(self):
         empty = self.tmp / "empty.db"
         ProgressDB(empty).close()  # read-only commands need an existing --db

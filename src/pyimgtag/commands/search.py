@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pyimgtag.commands.query import elide_path
 from pyimgtag.progress_db import ProgressDB
+from pyimgtag.text_fit import elide_path
 
 
 def _collect_paths(args: argparse.Namespace) -> list[Path]:

@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 
 import pytest
 
-from pyimgtag.commands.query import elide_path
 from pyimgtag.main import main
 from pyimgtag.models import ImageResult
 from pyimgtag.progress_db import ProgressDB
+from pyimgtag.text_fit import elide_path
+
+
+def _assert_starts_on_a_boundary(path: str, shown: str) -> None:
+    kept = shown[1:]
+    assert shown.startswith("…")
+    before = path[len(path) - len(kept) - 1]
+    assert kept[0] in "/\\" or before in "/\\ _-", shown
 
 
 class TestElidePath:
@@ -31,8 +39,8 @@ class TestElidePath:
         for width in range(12, len(path)):
             shown = elide_path(path, width)
             assert len(shown) <= width
-            assert shown.startswith("…/")
             assert path.endswith(shown[1:])
+            _assert_starts_on_a_boundary(path, shown)
 
     def test_windows_separator(self):
         path = "C:\\Users\\someone\\Pictures\\Phone Import 2024\\IMG_1.jpg"
@@ -44,6 +52,22 @@ class TestElidePath:
         assert len(shown) == 20
         assert shown.startswith("…")
         assert shown.endswith(".jpg")
+
+    def test_one_long_folder_past_the_cut_is_not_thrown_away(self):
+        path = "/x/A_very_long_album_folder_name_2024/a.jpg"
+        shown = elide_path(path, 40)
+        assert len(shown) <= 40
+        assert shown.endswith("folder_name_2024/a.jpg")
+        _assert_starts_on_a_boundary(path, shown)
+
+    def test_never_starts_on_a_combining_mark(self):
+        # "Zürich" as macOS stores it (NFD): u + U+0308.
+        name = "Zu\u0308rich.jpg"
+        path = "/" + name
+        for width in range(2, len(path)):
+            shown = elide_path(path, width)
+            assert len(shown) <= width
+            assert not unicodedata.combining(shown[1:2] or "a")
 
     @pytest.mark.parametrize(("width", "expected"), [(1, "…"), (0, "")])
     def test_tiny_width(self, width, expected):
@@ -68,8 +92,8 @@ class TestQueryTable:
 
         assert main(["query", "--db", db_path]) == 0
         path_col = capsys.readouterr().out.splitlines()[2][:50].rstrip()
-        assert path_col.startswith(("…/", "…\\"))
         assert str(img).endswith(path_col[1:])
+        _assert_starts_on_a_boundary(str(img), path_col)
         assert path_col.endswith(img.name)
 
     def test_long_tag_list_is_marked(self, tmp_path, capsys):
