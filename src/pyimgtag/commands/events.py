@@ -10,6 +10,7 @@ from typing import Any
 
 from pyimgtag.place_names import distinct_place_parts
 from pyimgtag.progress_db import ProgressDB
+from pyimgtag.text_fit import shorten
 
 #: Naming sends metadata only -- never image bytes -- so it is cheap, works
 #: against a local text model, and cannot leak a photo to a cloud backend.
@@ -160,11 +161,26 @@ def _list(args: argparse.Namespace, db: ProgressDB) -> int:
         print(_json.dumps(events, indent=2))
         return 0
 
+    # Generated names repeat (every day of a trip reads "Lisbon — June 2024").
+    # Such rows show the folder name 'events apply --export-dir' gives them,
+    # which is how the folders on disk tell them apart too. Computed over every
+    # event in apply's order, so it matches whatever --limit shows here.
+    all_events = events if args.limit is None else db.list_events()
+    used: set[str] = set()
+    suffixes = {event["id"]: _folder_name(event, used)[1] for event in all_events}
+    repeated = False
+
     name_w = 34
     print(f"{'ID':>5}  {'NAME':<{name_w}}  {'DATES':<23}  {'TRIP':>4}  {'PHOTOS':>6}")
     print("-" * (5 + 2 + name_w + 2 + 23 + 2 + 4 + 2 + 6))
     for event in events:
         name = event["name"] or ""
+        suffix = suffixes.get(event["id"], "")
+        if suffix:
+            # The folder's suffix (" (2024-09-01)" or " (17)") is what tells the
+            # rows apart, so it is kept whole and the name is shortened instead.
+            name = shorten(name, name_w - len(suffix)) + suffix
+            repeated = True
         if len(name) > name_w:
             # Mark the cut; the full name is in 'events show <id>'.
             name = name[: name_w - 1] + "…"
@@ -174,6 +190,12 @@ def _list(args: argparse.Namespace, db: ProgressDB) -> int:
             f"{event['id']:>5}  {name:<{name_w}}  {dates:<23}  {trip:>4}  {event['photo_count']:>6}"
         )
     print(f"\n{len(events)} event(s).", file=sys.stderr)
+    if repeated:
+        print(
+            "Events that share a name are listed by the folder name "
+            "'events apply --export-dir' gives each of them.",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -339,20 +361,39 @@ def _safe_dirname(name: str) -> str:
     return cleaned[:100] or "event"
 
 
-def _unique_dirname(event: dict, used: set[str]) -> str:
-    """A folder name for *event* that no earlier event has taken.
+_DIRNAME_MAX = 100
 
-    Falls back to the start date, then the event id — both stable across runs,
-    so re-exporting lands on the same folders rather than shuffling them.
+
+def _folder_name(event: dict, used: set[str]) -> tuple[str, str]:
+    """The folder for *event* that no earlier event has taken, and its suffix.
+
+    The plain name first, then the start date, then the event id appended —
+    all stable across runs, so re-exporting lands on the same folders rather
+    than shuffling them. The name is shortened to leave room for the suffix:
+    a suffix cut off by the length cap would put two events in one folder.
+
+    Returns:
+        ``(folder, suffix)``; *suffix* is ``""`` when the plain name was free,
+        else the ``" (YYYY-MM-DD)"`` or ``" (id)"`` that was added.
     """
-    base = _safe_dirname(event["name"])
+    base = _safe_dirname(event["name"] or "")
+    date = (event.get("started_at") or "")[:10]
+    suffixes = ["", f" ({date})" if date else None, f" ({event['id']})"]
     candidate = base
-    if candidate in used:
-        candidate = _safe_dirname(f"{base} ({(event.get('started_at') or '')[:10]})")
-    if candidate in used:
-        candidate = _safe_dirname(f"{base} ({event['id']})")
+    suffix = ""
+    for suffix in (s for s in suffixes if s is not None):
+        # The suffixes hold only digits, '-', spaces and parentheses, which
+        # every filesystem accepts, so only the base needs trimming.
+        candidate = base[: _DIRNAME_MAX - len(suffix)].rstrip(". ") + suffix
+        if candidate not in used:
+            break
     used.add(candidate)
-    return candidate
+    return candidate, suffix
+
+
+def _unique_dirname(event: dict, used: set[str]) -> str:
+    """The folder name :func:`_folder_name` picks for *event*."""
+    return _folder_name(event, used)[0]
 
 
 def _apply(args: argparse.Namespace, db: ProgressDB) -> int:
