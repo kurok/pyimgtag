@@ -84,11 +84,13 @@ def passes_date_filter(
     """Return *True* if the image date satisfies the active date filters.
 
     A photo with no capture date never satisfies an active date filter.
+    *file_path* is accepted for the callers' convenience and not read: the
+    file's own timestamps are not a capture date.
     """
     if date is None and date_from is None and date_to is None:
         return True
 
-    img_date = _resolve_date(exif, file_path)
+    img_date = _resolve_date(exif)
     if img_date is None:
         return False
 
@@ -102,13 +104,12 @@ def passes_date_filter(
     return True
 
 
-def _resolve_date(exif: ExifData, file_path: Path) -> datetime | None:
+def _resolve_date(exif: ExifData) -> datetime | None:
     """The EXIF capture date, or None when the file records none.
 
     The file's own creation/modification time is not a capture date (it is
     when the file was copied), so it is never used.
     """
-    del file_path  # kept for callers; the filesystem date is deliberately unused
     if exif.date_original:
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
             try:

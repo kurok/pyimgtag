@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import subprocess  # nosec B404
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +73,8 @@ def _read_exiftool(path: Path) -> ExifData | None:
                 "-GPSLongitude",
                 "-DateTimeOriginal",
                 "-CreateDate",
+                "-DateCreated",
+                "-CreationTime",
                 str(path),
             ],
             timeout=10,
@@ -85,8 +88,14 @@ def _read_exiftool(path: Path) -> ExifData | None:
 
         lat = info.get("GPSLatitude")
         lon = info.get("GPSLongitude")
-        date_str = info.get("DateTimeOriginal") or info.get("CreateDate")
-        date_iso = _parse_exif_date(date_str) if date_str else None
+        # Capture-date tags in order of trust; a later one is used only when the
+        # earlier ones are absent or unparseable. XMP/IPTC DateCreated and the
+        # PNG CreationTime keep a screenshot's or an export's real date.
+        date_iso = None
+        for tag in ("DateTimeOriginal", "CreateDate", "DateCreated", "CreationTime"):
+            date_iso = _parse_exif_date(str(info[tag])) if info.get(tag) else None
+            if date_iso:
+                break
         has_gps = lat is not None and lon is not None
 
         return ExifData(
@@ -214,8 +223,33 @@ def _dms_to_decimal(dms: tuple, ref: str) -> float:
 # ---------------------------------------------------------------------------
 
 
+#: A recorded date: ``YYYY:MM:DD`` (or ``-``), optionally a time, optionally
+#: fractional seconds and a zone. The zone is dropped: EXIF dates are local
+#: wall-clock time and are compared with each other as such.
+_DATE_RE = re.compile(
+    r"^(\d{4})[:-](\d{2})[:-](\d{2})"
+    r"(?:[ T](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?)?"
+    r"(?:Z|[+-]\d{2}:?\d{2})?$"
+)
+
+
 def _parse_exif_date(date_str: str | None) -> str | None:
+    """Normalize a recorded date to ``YYYY-MM-DD HH:MM:SS``, or None.
+
+    Accepts the EXIF form and the ISO form, with or without fractional seconds
+    or a zone suffix (XMP dates carry both), and a bare date (IPTC/XMP
+    ``DateCreated``), which is taken as midnight. A zeroed or impossible date
+    (``0000:00:00 00:00:00``) is None.
+    """
     if not date_str or not isinstance(date_str, str):
+        return None
+    match = _DATE_RE.match(date_str.strip())
+    if match is None:
+        return None
+    year, month, day, hour, minute, second = (int(g) if g else 0 for g in match.groups())
+    try:
+        return datetime(year, month, day, hour, minute, second).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
         return None
     date_str = date_str.strip()
     for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):

@@ -36,12 +36,15 @@ def _parse_date(raw: str | None) -> datetime | None:
     if len(text) >= 10 and text[4] == ":" and text[7] == ":":
         text = text[:4] + "-" + text[5:7] + "-" + text[8:]
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00").replace(" ", "T", 1))
+        when = datetime.fromisoformat(text.replace("Z", "+00:00").replace(" ", "T", 1))
     except ValueError:
         try:
             return datetime.strptime(text[:10], "%Y-%m-%d")
         except ValueError:
             return None
+    # Every taken_at must be naive to sort against the others: a stored value
+    # with a zone (an older clip's UTC creation_time) becomes local wall clock.
+    return when.astimezone().replace(tzinfo=None) if when.tzinfo else when
 
 
 def _points(db: ProgressDB) -> list:

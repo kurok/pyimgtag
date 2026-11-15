@@ -11,7 +11,7 @@ import sys
 import threading as _threading
 from collections.abc import Iterator
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from platform import system as get_platform_name
 from typing import Any
@@ -791,6 +791,30 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     return run_exit_code(stats)
 
 
+def _read_capture_metadata(file_path: Path, args: argparse.Namespace) -> ExifData:
+    """EXIF for *file_path*, with a clip's container date when EXIF has none.
+
+    Read before the date filter, so a clip whose only date is in its
+    QuickTime/MP4 header is filtered (and stored) by that date rather than
+    treated as undated.
+    """
+    try:
+        exif = read_exif(file_path)
+    except Exception as exc:  # noqa: BLE001 — EXIF is best-effort; never block tagging
+        logger.debug("EXIF read failed for %s: %s", file_path, exc)
+        exif = ExifData()
+    if exif.date_original is None and _is_video(file_path, args):
+        from pyimgtag.video import VideoToolError, probe
+
+        try:
+            created = probe(file_path).creation_time
+        except VideoToolError:
+            created = None
+        if created:
+            exif = replace(exif, date_original=created)
+    return exif
+
+
 def _is_video(file_path: Path, args: argparse.Namespace) -> bool:
     """True when this file should be treated as a clip rather than a still."""
     if not getattr(args, "include_video", False):
@@ -964,11 +988,7 @@ def _prepare_one(
         file_path=str(file_path), file_name=file_path.name, source_type=source_type
     )
 
-    try:
-        exif = read_exif(file_path)
-    except Exception as exc:  # noqa: BLE001 — EXIF is best-effort; never block tagging
-        logger.debug("EXIF read failed for %s: %s", file_path, exc)
-        exif = ExifData()
+    exif = _read_capture_metadata(file_path, args)
     result.image_date = exif.date_original
     result.gps_lat = exif.gps_lat
     result.gps_lon = exif.gps_lon
@@ -1157,11 +1177,7 @@ def _hydrate_from_db(
     result.file_path = str(file_path)
     result.file_name = file_path.name
 
-    try:
-        exif = read_exif(file_path)
-    except Exception as exc:  # noqa: BLE001 — EXIF is best-effort; never block tagging
-        logger.debug("EXIF read failed for %s: %s", file_path, exc)
-        exif = ExifData()
+    exif = _read_capture_metadata(file_path, args)
     result.image_date = exif.date_original
     result.gps_lat = exif.gps_lat
     result.gps_lon = exif.gps_lon
