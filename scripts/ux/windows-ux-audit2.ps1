@@ -129,3 +129,6 @@ Invoke-Step "webapp stderr" { Get-Content (Join-Path $WorkDir "webapp.err.log") 
 Write-Section "DONE"
 Write-Output "Audit finished."
 try { Stop-Transcript | Out-Null } catch { }
+# The mock server inherits this process's handles; killing it lets the
+# caller's pipeline close instead of hanging until the job timeout.
+try { Stop-Process -Id $mock.Id -Force -ErrorAction SilentlyContinue } catch { }

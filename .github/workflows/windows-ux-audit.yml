@@ -2,6 +2,12 @@ name: Windows UX audit
 
 on:
   workflow_dispatch:
+    inputs:
+      part:
+        description: "Which audit part to run"
+        type: choice
+        options: [ "1", "2", "all" ]
+        default: "2"
   push:
     branches: [ "test/windows-ux-audit" ]
 
@@ -11,7 +17,7 @@ permissions:
 jobs:
   windows-ux-audit:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
@@ -33,17 +39,19 @@ jobs:
                       [System.Environment]::GetEnvironmentVariable("Path", "User")
           exiftool -ver
 
-      - name: Run the Windows UX audit
+      - name: Run the Windows UX audit (part 1 — every documented command)
+        if: github.event_name == 'workflow_dispatch' && (inputs.part == '1' || inputs.part == 'all')
         shell: pwsh
         run: |
-          pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir "C:\ux" 2>&1 |
-            Tee-Object -FilePath "audit1.out"
+          pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir "C:\ux" *> audit1.out
+          Get-Content audit1.out
 
-      - name: Run the Windows-specific checks
+      - name: Run the Windows-specific checks (part 2)
+        if: github.event_name == 'workflow_dispatch' && (inputs.part == '2' || inputs.part == 'all')
         shell: pwsh
         run: |
-          pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit2.ps1 -WorkDir "C:\ux2" 2>&1 |
-            Tee-Object -FilePath "audit2.out"
+          pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit2.ps1 -WorkDir "C:\ux2" *> audit2.out
+          Get-Content audit2.out
 
       - name: Collect the transcripts
         if: always()
