@@ -1803,12 +1803,13 @@ Claude Code (`.mcp.json` in the project, or `claude mcp add`):
 
 | Tool | Returns |
 |---|---|
-| `query_photos` | Metadata search with `pyimgtag query` semantics: `tag`, `tags_any`, `city`, `country`, `scene_category`, `cleanup_class`, `status`, `has_text`, `min_score`, `max_score`, `judged`, `sort`, `limit` (max 500), `offset` |
+| `query_photos` | Metadata search with `pyimgtag query` semantics: `tag`, `tags_any`, `city`, `country`, `scene_category`, `cleanup_class`, `status`, `has_text`, `min_score`, `max_score`, `judged`, `event_id` (from `list_events`; filtered before paging), `sort`, `limit` (max 500), `offset` |
 | `get_photo` | Full metadata row for one path |
 | `get_thumbnail` | MCP image content — a JPEG thumbnail, `size` capped at 512 px |
 | `list_tags` | Tag vocabulary with per-tag photo counts |
 | `list_people` | Named face clusters with face counts |
 | `list_events` | Events from `pyimgtag events detect`, newest first (id, name, date range, place, trip, photo count), as `events list --format json`; `limit` (0 = all), plus `total` |
+| `get_event` | One event with its member photo paths, as `pyimgtag events show <id> --format json`; events over 500 photos are paged (`limit`, `offset`, `member_count`, `truncated`) |
 | `judge_ranking` | Best-of ranking over judged photos (`min_score`, `max_score`, `sort`, `limit`, `offset`) |
 | `library_stats` | The `pyimgtag insights` aggregates as JSON |
 | `search_photos` | Semantic search over the CLIP index from `pyimgtag index`: `query`, `limit`; returns `{file_path, score}` best first, as `pyimgtag search --format json`. Default `limit` 20, as `--top`. Needs the `[search]` extra and models already downloaded (run `pyimgtag search` once; pass `pyimgtag mcp --model-dir` if `index` used one); otherwise an actionable error |

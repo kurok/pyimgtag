@@ -831,3 +831,30 @@ def test_events_list_marks_a_cut_name_with_an_ellipsis(tmp_path, capsys):
     assert long_name[:33] + "…" in out
     assert "Short " in out
     assert long_name not in out
+
+
+def test_query_event_limit_counts_the_events_photos(tmp_path, capsys):
+    """#461 review: --event is filtered in SQL, so --limit N gives N of its photos
+    even when other photos sort first."""
+    from pyimgtag.main import main
+    from pyimgtag.models import ImageResult
+    from pyimgtag.progress_db import ProgressDB
+
+    db_path = tmp_path / "p.db"
+    paths = [str(tmp_path / f"{c}.jpg") for c in "abcde"]
+    with ProgressDB(db_path) as db:
+        for p in paths:
+            db.mark_done(
+                __import__("pathlib").Path(p),
+                ImageResult(file_path=p, file_name=p.rsplit("/", 1)[-1], tags=["x"]),
+            )
+        db.reconcile_events([_cluster("Late", paths[3:], "2025-01-01", "2025-01-02")])
+        event_id = db.list_events()[0]["id"]
+    capsys.readouterr()
+    rc = main(
+        ["query", "--db", str(db_path), "--event", str(event_id), "--limit", "1",
+         "--format", "paths"]
+    )  # fmt: skip
+    assert rc == 0
+    printed = [ln for ln in capsys.readouterr().out.splitlines() if ln.strip()]
+    assert len(printed) == 1 and printed[0] in paths[3:]

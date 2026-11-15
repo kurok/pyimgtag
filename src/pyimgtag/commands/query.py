@@ -37,12 +37,10 @@ def cmd_query(args: argparse.Namespace) -> int:
         return 1
 
     with ProgressDB(db_path=args.db, must_exist=args.db is not None) as db:
-        event_paths: set[str] | None = None
-        if getattr(args, "event", None) is not None:
-            if db.get_event(args.event) is None:
-                print(f"Error: no event with id {args.event}.", file=sys.stderr)
-                return 1
-            event_paths = db.event_paths(args.event)
+        event_id = getattr(args, "event", None)
+        if event_id is not None and db.get_event(event_id) is None:
+            print(f"Error: no event with id {event_id}.", file=sys.stderr)
+            return 1
 
         has_text: bool | None = None
         if args.has_text:
@@ -66,12 +64,9 @@ def cmd_query(args: argparse.Namespace) -> int:
             # these is set; both are already validated ISO prefixes.
             date_prefix=getattr(args, "month", None) or getattr(args, "year", None),
             media_type=getattr(args, "media_type", None),
+            # In SQL, so --limit counts this event's photos.
+            event_id=event_id,
         )
-        if event_paths is not None:
-            # Intersected here rather than pushed into SQL: event membership
-            # is its own table, and filtering the result keeps query_images a
-            # single shape for every caller.
-            results = [row for row in results if row["file_path"] in event_paths]
 
     if tags_any is not None:
         print(f"Matching tags: {', '.join(tags_any)}", file=sys.stderr)

@@ -714,6 +714,7 @@ class ProgressDB:
         bbox: tuple[float, float, float, float] | None = None,
         date_prefix: str | None = None,
         media_type: str | None = None,
+        event_id: int | None = None,
     ) -> list[dict]:
         """Delegate to :meth:`ImageDB.query_images`."""
         return self._images.query_images(
@@ -733,6 +734,7 @@ class ProgressDB:
             bbox,
             date_prefix,
             media_type,
+            event_id,
         )
 
     def export_rows(self) -> list[dict]:
