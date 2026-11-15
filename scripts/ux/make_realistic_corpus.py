@@ -19,7 +19,6 @@ Everything is deterministic, so two runs produce the same library.
 
 from __future__ import annotations
 
-import math
 import os
 import random
 import shutil
@@ -53,7 +52,9 @@ SCENES = {
 }
 
 
-def _gradient(size: tuple[int, int], top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
+def _gradient(
+    size: tuple[int, int], top: tuple[int, int, int], bottom: tuple[int, int, int]
+) -> Image.Image:
     w, h = size
     img = Image.new("RGB", size)
     draw = ImageDraw.Draw(img)
@@ -122,7 +123,9 @@ def _dms(deg: float) -> list[tuple[int, int]]:
     return [(d, 1), (m, 1), (int(s * 100), 100)]
 
 
-def _exif(date: str, city: tuple | None, make: str = "Apple", model: str = "iPhone 15 Pro") -> bytes:
+def _exif(
+    date: str, city: tuple | None, make: str = "Apple", model: str = "iPhone 15 Pro"
+) -> bytes:
     import piexif
 
     data: dict[str, dict] = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}}
@@ -141,8 +144,16 @@ def _exif(date: str, city: tuple | None, make: str = "Apple", model: str = "iPho
     return piexif.dump(data)
 
 
-def _write_photo(path: Path, scene: str, size: tuple[int, int], date: str, city: tuple | None, seed: int,
-                 blur: float = 0.0, noise: int = 0) -> None:
+def _write_photo(
+    path: Path,
+    scene: str,
+    size: tuple[int, int],
+    date: str,
+    city: tuple | None,
+    seed: int,
+    blur: float = 0.0,
+    noise: int = 0,
+) -> None:
     img = _scene(scene, size, seed)
     if blur:
         img = img.filter(ImageFilter.GaussianBlur(blur))
@@ -153,9 +164,11 @@ def _write_photo(path: Path, scene: str, size: tuple[int, int], date: str, city:
             x = rnd.randrange(img.width)
             y = rnd.randrange(img.height)
             r, g, b = px[x, y]
-            px[x, y] = (max(0, min(255, r + rnd.randint(-12, 12))),
-                        max(0, min(255, g + rnd.randint(-12, 12))),
-                        max(0, min(255, b + rnd.randint(-12, 12))))
+            px[x, y] = (
+                max(0, min(255, r + rnd.randint(-12, 12))),
+                max(0, min(255, g + rnd.randint(-12, 12))),
+                max(0, min(255, b + rnd.randint(-12, 12))),
+            )
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(path), format="JPEG", quality=88, exif=_exif(date, city))
 
@@ -215,9 +228,25 @@ def build() -> None:
     shutil.copy(PHONE / "IMG_20240811_143022.jpg", PHONE / "copy of IMG_20240811_143022.jpg")
 
     # --- names a user really has -------------------------------------------
-    _write_photo(PHONE / "Family Photo 2.jpg", "food", (4032, 3024), "2024:07:21 12:35:00", CITIES[0], seed=41)
-    _write_photo(PHONE / "Vacances à Montréal.jpg", "street", (4032, 3024), "2024:06:20 16:20:00", CITIES[3], seed=42)
-    _write_photo(PHONE / "写真 001.jpg", "forest", (4032, 3024), "2024:08:10 09:00:00", CITIES[3], seed=43)
+    _write_photo(
+        PHONE / "Family Photo 2.jpg",
+        "food",
+        (4032, 3024),
+        "2024:07:21 12:35:00",
+        CITIES[0],
+        seed=41,
+    )
+    _write_photo(
+        PHONE / "Vacances à Montréal.jpg",
+        "street",
+        (4032, 3024),
+        "2024:06:20 16:20:00",
+        CITIES[3],
+        seed=42,
+    )
+    _write_photo(
+        PHONE / "写真 001.jpg", "forest", (4032, 3024), "2024:08:10 09:00:00", CITIES[3], seed=43
+    )
 
     # --- screenshots (PNG, no EXIF, no date) --------------------------------
     for name in ("Screenshot 2024-06-14 at 10.32.11.png", "Screenshot 2024-08-12 at 09.14.02.png"):
@@ -233,7 +262,14 @@ def build() -> None:
 
         pillow_heif.register_heif_opener()
         heic_src = PHONE / "IMG_20240704_101010.heic"
-        _write_photo(PHONE / "_heic_tmp.jpg", "beach", (4032, 3024), "2024:07:04 10:10:10", CITIES[1], seed=77)
+        _write_photo(
+            PHONE / "_heic_tmp.jpg",
+            "beach",
+            (4032, 3024),
+            "2024:07:04 10:10:10",
+            CITIES[1],
+            seed=77,
+        )
         with Image.open(PHONE / "_heic_tmp.jpg") as src:
             src.save(str(heic_src), format="HEIF", exif=_exif("2024:07:04 10:10:10", CITIES[1]))
         (PHONE / "_heic_tmp.jpg").unlink()
@@ -254,8 +290,15 @@ def build() -> None:
     for name, secs in (("IMG_20240615_191500.mov", 3), ("IMG_20240720_203000.mov", 2)):
         subprocess.run(
             [
-                "ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc=duration={secs}:size=640x480:rate=15",
-                "-pix_fmt", "yuv420p", str(VIDEO / name),
+                "ffmpeg",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"testsrc=duration={secs}:size=640x480:rate=15",
+                "-pix_fmt",
+                "yuv420p",
+                str(VIDEO / name),
             ],
             check=False,
             capture_output=True,

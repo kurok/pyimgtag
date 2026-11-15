@@ -21,7 +21,6 @@ import io
 import json
 import statistics
 import sys
-import threading
 from typing import Any
 
 from PIL import Image
@@ -98,7 +97,9 @@ def _tags(f: dict[str, float]) -> tuple[list[str], str, str, bool, str, str]:
         cleanup = "keep"
 
     has_text = bool(sat < 0.08 and bright > 150)
-    significance = "high" if (contrast > 40 and bright > 110) else ("low" if bright < 70 else "medium")
+    significance = (
+        "high" if (contrast > 40 and bright > 110) else ("low" if bright < 70 else "medium")
+    )
     return tags[:5], scene, cleanup, has_text, tone, significance
 
 
@@ -156,7 +157,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path.rstrip("/") == "/api/tags":
             body = json.dumps(
-                {"models": [{"name": "gemma4:e4b", "model": "gemma4:e4b", "size": 0, "digest": "mock"}]}
+                {
+                    "models": [
+                        {"name": "gemma4:e4b", "model": "gemma4:e4b", "size": 0, "digest": "mock"}
+                    ]
+                }
             ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
