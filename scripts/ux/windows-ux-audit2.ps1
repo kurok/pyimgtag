@@ -101,6 +101,23 @@ Invoke-Step "query with a differently-cased path is irrelevant here, but a path 
     pyimgtag query --tag beach --format paths
 }
 
+# --- non-ASCII *metadata* round-trip (the regression guard for #366) ------
+Write-Section "NON-ASCII METADATA"
+$french = Join-Path $WorkDir "photos_fr"
+New-Item -ItemType Directory -Force -Path $french | Out-Null
+Invoke-Step "copy only the Paris fixture (its place is 'Île-de-France')" {
+    Copy-Item "$Photos\city_walk.jpg" (Join-Path $french "paris.jpg") -Force
+}
+Invoke-Step "run --write-exif on it" { pyimgtag run --input-dir $french --write-exif }
+Invoke-Step "read the description back (exiftool -@ argfile)" {
+    $argfile = Join-Path $WorkDir "args3.txt"
+    "-charset`nUTF8`n-a`n-G1`n-Description`n-Keywords`n" + (Join-Path $french "paris.jpg") | Set-Content -Path $argfile -Encoding UTF8
+    exiftool -@ $argfile
+}
+Invoke-Step "read the description back (Pillow, raw XMP bytes)" {
+    python -c "import sys,re;d=open(sys.argv[1],'rb').read();m=[x for x in re.findall(rb'<xmp:Description>.*?</xmp:Description>', d, re.S)];print(m[0][:400].decode('utf-8','replace') if m else 'NO XMP DESCRIPTION FOUND')" (Join-Path $french "paris.jpg")
+}
+
 # --- the webapp ------------------------------------------------------------
 Write-Section "WEBAPP"
 Invoke-Step "start the unified app (python -m pyimgtag.webapp) and probe every page" {
