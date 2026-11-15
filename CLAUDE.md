@@ -70,8 +70,9 @@ src/pyimgtag/
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
   db_location.py       resolve_db_path(): --db, then PYIMGTAG_DB, then the default
   db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
-                       versioned migrations via PRAGMA user_version — latest is v17, which
-                       adds media_type/duration_sec for video),
+                       versioned migrations via PRAGMA user_version — latest is v18, which
+                       rewrites stored place names to one name; v17 adds media_type/
+                       duration_sec for video),
                        image_db (ImageDB — incl. the bbox / ISO date-prefix query filters),
                        face_db (FaceDB), judge_db (JudgeDB), insights_db (InsightsDB —
                        SQL-side library aggregation for `insights`), dedup_db (DedupDB —
