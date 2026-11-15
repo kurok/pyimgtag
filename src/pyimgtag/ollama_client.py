@@ -10,6 +10,7 @@ import base64
 import contextlib
 import io
 import json
+import logging
 import os
 import re
 import threading
@@ -119,6 +120,8 @@ def _build_prompt_with_context(context: dict) -> str:
     )
 
 
+logger = logging.getLogger(__name__)
+
 # Reasons a judge call failed, as reported by ``last_error``.
 JUDGE_IMAGE_UNREADABLE = "image could not be loaded"
 JUDGE_UNPARSEABLE = "response could not be parsed"
@@ -139,6 +142,61 @@ def short_request_error(exc: requests.RequestException) -> str:
     else:
         reason = type(exc).__name__
     return f"request failed: {reason}"
+
+
+def describe_ollama_error(
+    exc: requests.RequestException, base_url: str, model: str, timeout: float
+) -> str:
+    """Return a one-line, actionable reason a tag request to Ollama failed,
+    followed (on a second line) by the raw exception for --verbose and the DB.
+
+    The first line is what the default per-image output shows; the second
+    keeps the urllib3/requests detail for anyone debugging.
+    """
+    if isinstance(exc, OllamaRateLimited):
+        # Same wording as the cloud backends' exhausted retry (#401); the
+        # exception text is already the whole story, so no detail line.
+        return f"Ollama request failed: {exc}"
+    response = getattr(exc, "response", None)
+    code = getattr(response, "status_code", None) if response is not None else None
+    if code is not None:
+        reason = getattr(response, "reason", "") or ""
+        summary = f"Ollama returned HTTP {code}" + (f" ({reason})" if reason else "")
+        # Ollama explains most failures in its JSON body ("model requires more
+        # system memory", "does not support images"): that is the useful part.
+        detail = _ollama_error_body(response)
+        if detail:
+            summary += f": {detail}"
+        elif code == 404:
+            summary += f" — is the model pulled? (ollama pull {model})"
+        elif code >= 500:
+            summary += " — is the model loaded? (ollama ps)"
+    elif isinstance(exc, requests.exceptions.SSLError):
+        summary = (
+            f"TLS error talking to Ollama at {base_url} — check the URL scheme and certificate"
+        )
+    elif isinstance(exc, (requests.ConnectTimeout, requests.ConnectionError)):
+        # ConnectTimeout is also a Timeout, but it means "nobody answered the
+        # connection", not "the model is slow": treat it as unreachable.
+        summary = f"Ollama is not reachable at {base_url} — start it with 'ollama serve'"
+    elif isinstance(exc, requests.Timeout):
+        summary = (
+            f"Ollama did not answer within {timeout:g}s — the model may still be "
+            "loading; retry, or raise --timeout"
+        )
+    else:
+        summary = f"Ollama request failed ({type(exc).__name__})"
+    return f"{summary}\n{type(exc).__name__}: {exc}"
+
+
+def _ollama_error_body(response: object) -> str | None:
+    """Return Ollama's ``{"error": ...}`` text from an error response, if any."""
+    try:
+        body = response.json()  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 — a non-JSON or unreadable body has no detail
+        return None
+    error = body.get("error") if isinstance(body, dict) else None
+    return error.strip() if isinstance(error, str) and error.strip() else None
 
 
 class JudgeErrorMixin:
@@ -226,7 +284,10 @@ class OllamaClient(JudgeErrorMixin):
         try:
             resp = self._post_chat(prompt, img_b64)
         except requests.RequestException as e:
-            return TagResult(error=f"Ollama request failed: {e}")
+            logger.debug("Ollama tag request failed for %s", file_path, exc_info=True)
+            return TagResult(
+                error=describe_ollama_error(e, self.base_url, self.model, self.timeout)
+            )
 
         try:
             text = resp.json().get("message", {}).get("content", "")

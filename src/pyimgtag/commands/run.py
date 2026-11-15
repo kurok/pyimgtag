@@ -1239,12 +1239,32 @@ def _print_brief(result: ImageResult, idx: int, total: int) -> None:
         loc = f"{loc}, {result.nearest_country}"
     status = result.processing_status
     if result.error_message:
-        status = f"error: {result.error_message[:60]}"
+        status = f"error: {_shorten(_error_summary(result.error_message), 140)}"
     parts = [f"[{idx}/{total}]", result.file_name, "->", tags]
     if loc:
         parts.append(f"| {loc}")
     parts.append(f"| {status}")
     print(" ".join(parts), file=sys.stderr)
+
+
+def _error_summary(message: str) -> str:
+    """The first line of an error: the readable part (details follow it)."""
+    return message.partition("\n")[0]
+
+
+def _shorten(text: str, width: int) -> str:
+    """Cut *text* to *width* characters on a word boundary, marked with "…"."""
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return "…"[:width]
+    cut = text[: width - 1]
+    if text[width - 1] != " ":
+        # The cut falls inside a word: back up to the previous space.
+        space = cut.rfind(" ")
+        if space >= width // 2:
+            cut = cut[:space]
+    return cut.rstrip(" ,;:—-") + "…"
 
 
 def _print_verbose(result: ImageResult, idx: int, total: int) -> None:
@@ -1286,7 +1306,10 @@ def _print_verbose(result: ImageResult, idx: int, total: int) -> None:
     print(f"  Location: {', '.join(loc_parts) if loc_parts else '(none)'}", file=sys.stderr)
     print(f"  Status:   {result.processing_status}", file=sys.stderr)
     if result.error_message:
-        print(f"  Error:    {result.error_message}", file=sys.stderr)
+        summary, _, detail = result.error_message.partition("\n")
+        print(f"  Error:    {summary}", file=sys.stderr)
+        if detail:
+            print(f"  Detail:   {detail}", file=sys.stderr)
     print(file=sys.stderr)
 
 
