@@ -303,6 +303,45 @@ pyimgtag status
 
 **Note:** On Windows, use `\` path separators or quote paths with spaces: `"C:\My Photos"`.
 
+#### Checking what `--write-exif` wrote (Windows, non-ASCII paths)
+
+Each progress line ends with `| exif` (or `| sidecar`) when the write
+succeeded, and the summary counts `Metadata written` / `Write failures`, so the
+run itself tells you whether a file was written. The database records what was
+tagged (the written description is the scene summary, then the place and the
+month), but it records it whether or not the write succeeded:
+
+```powershell
+pyimgtag query --tag beach --format json |
+  ConvertFrom-Json |
+  Select-Object file_path, tags_list, scene_summary, nearest_city, nearest_country, image_date
+```
+
+To read the file itself, note that a plain `exiftool … "C:\Фото\закат.jpg"`
+fails on Windows with `Wildcards don't work in the directory specification` /
+`No matching files`: Windows converts the command line to the ANSI code page
+before exiftool sees it, so a Cyrillic, CJK or other non-ASCII name arrives
+mangled. pyimgtag avoids this by passing its arguments in a UTF-8 argument
+file, and you can do the same (paste this into the console; a saved `.ps1`
+must be UTF-8 *with* BOM on PowerShell 5.1):
+
+```powershell
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new()   # show UTF-8 values correctly
+$lines = @("-s", "-G1",
+           "-ImageDescription", "-XPKeywords",              # EXIF
+           "-XMP-dc:Description", "-XMP-dc:Subject",        # XMP
+           "-IPTC:Caption-Abstract", "-IPTC:Keywords",      # IPTC
+           "-XMP-lr:HierarchicalSubject",                   # with --hierarchical-keywords
+           "C:\Фото Архив\закат.jpg")                       # for "| sidecar": the .xmp file
+[IO.File]::WriteAllLines("$PWD\args.txt", $lines)        # UTF-8, no BOM
+exiftool -charset UTF8 -charset filename=utf8 -@ args.txt
+Remove-Item args.txt
+```
+
+`-charset filename=utf8` makes exiftool open the path through the Unicode file
+API; `-charset UTF8` keeps tag values in UTF-8. The same applies on any system
+whose console code page is not UTF-8.
+
 ### Platform Troubleshooting
 
 **macOS:**
@@ -418,7 +457,7 @@ identically for `pyimgtag judge`.
 | `--write-back` | Write tags/description back to Apple Photos *(macOS only; uses osascript by default — set `PYIMGTAG_USE_PHOTOSCRIPT=1` to opt into the faster in-process photoscript path on stable hosts)*. Each progress line ends with `\| photos` when the write succeeds; the summary adds `Written back` and `Photos failures` |
 | `--write-back-mode overwrite\|append` | Write-back strategy: replace all keywords (`overwrite`, default) or merge with existing (`append`) |
 | `--skip-if-tagged` | Skip the model for photos that already have keywords in Apple Photos *(`--photos-library` only)* |
-| `--write-exif` | Write description and keywords to image EXIF via exiftool. Each progress line ends with `\| exif` (or `\| sidecar` for formats exiftool cannot write in place), and the summary adds `Metadata written`, `Sidecars written` and `Write failures` |
+| `--write-exif` | Write description and keywords to image EXIF via exiftool. Each progress line ends with `\| exif` (or `\| sidecar` for formats exiftool cannot write in place), and the summary adds `Metadata written`, `Sidecars written` and `Write failures`. To check the result on Windows with a non-ASCII path, see [Checking what `--write-exif` wrote](#checking-what---write-exif-wrote-windows-non-ascii-paths) |
 | `--sidecar-only` | Write metadata to an XMP sidecar (`.xmp`) instead of modifying the original. Each progress line ends with `\| sidecar`; the summary adds `Sidecars written` and `Write failures` |
 | `--metadata-format auto\|xmp\|iptc\|exif` | Which metadata fields to write with `--write-exif` (default: `auto`, all fields) |
 | `--dedup` | Skip duplicates via perceptual hash |
