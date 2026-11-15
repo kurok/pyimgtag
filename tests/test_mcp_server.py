@@ -314,11 +314,75 @@ def test_list_people_only_named(tmp_path):
     assert person["confirmed"] is True
 
 
-def test_list_events_is_a_documented_stub(tmp_path):
+def _seed_events(db_path: Path) -> None:
+    db = ProgressDB(db_path=db_path)
+    db.reconcile_events(
+        [
+            {
+                "members": ["/p/a.jpg", "/p/b.jpg"],
+                "started_at": "2025-06-01T10:00:00",
+                "ended_at": "2025-06-03T18:00:00",
+                "place": "Óbidos",
+                "trip": None,
+                "fallback_name": "Óbidos, June 2025",
+            },
+            {
+                "members": ["/p/c.jpg"],
+                "started_at": "2025-08-10T09:00:00",
+                "ended_at": "2025-08-10T20:00:00",
+                "place": "Lisbon",
+                "trip": None,
+                "fallback_name": "Lisbon, August 2025",
+            },
+        ]
+    )
+    db.close()
+
+
+def test_list_events_returns_the_stored_events(tmp_path):
+    """#430: the tool reads the events tables, like 'events list --format json'."""
+    db_path = _seed_db(tmp_path)
+    _seed_events(db_path)
+    server = _server(db_path)
+    data = _payload(_call(server, "list_events", {}))
+    assert (data["total"], data["count"]) == (2, 2)
+    assert [e["name"] for e in data["events"]] == ["Lisbon, August 2025", "Óbidos, June 2025"]
+    assert [e["photo_count"] for e in data["events"]] == [1, 2]
+    assert {"id", "started_at", "ended_at", "place", "trip_id"} <= set(data["events"][0])
+    assert "not implemented" not in json.dumps(data)
+    assert "hint" not in data
+
+    db = ProgressDB(db_path=db_path)
+    assert data["events"] == db.list_events()
+    db.close()
+
+    limited = _payload(_call(server, "list_events", {"limit": 1}))
+    assert [e["name"] for e in limited["events"]] == ["Lisbon, August 2025"]
+    assert (limited["total"], limited["count"]) == (2, 1)
+    # As in 'events list --limit 0': zero means every event.
+    assert _payload(_call(server, "list_events", {"limit": 0}))["count"] == 2
+
+
+def test_list_events_on_a_library_without_events_says_how_to_make_them(tmp_path):
     server = _server(_seed_db(tmp_path))
     data = _payload(_call(server, "list_events", {}))
-    assert data["events"] == []
-    assert "roadmap" in data["note"]
+    assert data == {
+        "total": 0,
+        "count": 0,
+        "events": [],
+        "hint": "No events yet: run 'pyimgtag events detect' to group photos into events.",
+    }
+
+
+def test_list_events_description_no_longer_says_roadmap(tmp_path):
+    async def _run():
+        async with Client(_server(_seed_db(tmp_path))) as client:
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            return tools["list_events"].description
+
+    description = anyio.run(_run)
+    assert "roadmap" not in description.lower()
+    assert "events detect" in description
 
 
 def test_judge_ranking(tmp_path):

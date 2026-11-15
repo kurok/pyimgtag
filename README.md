@@ -1801,7 +1801,7 @@ Claude Code (`.mcp.json` in the project, or `claude mcp add`):
 | `get_thumbnail` | MCP image content — a JPEG thumbnail, `size` capped at 512 px |
 | `list_tags` | Tag vocabulary with per-tag photo counts |
 | `list_people` | Named face clusters with face counts |
-| `list_events` | Roadmap placeholder — always empty, with a note |
+| `list_events` | Events from `pyimgtag events detect`, newest first (id, name, date range, place, trip, photo count), as `events list --format json`; `limit` (0 = all), plus `total` |
 | `judge_ranking` | Best-of ranking over judged photos (`min_score`, `max_score`, `sort`, `limit`, `offset`) |
 | `library_stats` | The `pyimgtag insights` aggregates as JSON |
 | `search_photos` | Semantic search — not implemented yet; returns an actionable error pointing at `query_photos` |
