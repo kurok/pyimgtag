@@ -975,6 +975,8 @@ def _prepare_one(
 
     if not passes_date_filter(exif, file_path, args.date, args.date_from, args.date_to):
         bump("skipped_date")
+        if exif.date_original is None:
+            bump("skipped_no_date")
         return None
 
     if args.skip_no_gps and not exif.has_gps:
@@ -1166,6 +1168,8 @@ def _hydrate_from_db(
 
     if not passes_date_filter(exif, file_path, args.date, args.date_from, args.date_to):
         stats["skipped_date"] += 1
+        if exif.date_original is None:
+            stats["skipped_no_date"] += 1
         return None
 
     if args.skip_no_gps and not exif.has_gps:
@@ -1291,6 +1295,7 @@ def _new_stats(scanned: int) -> dict[str, int]:
         "scanned": scanned,
         "processed": 0,
         "skipped_date": 0,
+        "skipped_no_date": 0,
         "skipped_no_gps": 0,
         "skipped_no_local": 0,
         "skipped_cached": 0,
@@ -1415,6 +1420,13 @@ def _summary_rows(stats: dict, args: argparse.Namespace | None) -> list[tuple[st
     # and a row reading 0 there would claim nothing was left out.
     if "skipped_extension" in stats:
         rows.insert(9, ("Skipped (ext):", stats["skipped_extension"]))
+    # Of the date-filter skips, how many had no capture date at all: those are
+    # not "outside the range", their date is unknown. Only under a date filter.
+    if args is not None and any(
+        getattr(args, name, None) for name in ("date", "date_from", "date_to")
+    ):
+        after = next(i for i, (label, _) in enumerate(rows) if label == "Skipped (date):")
+        rows.insert(after + 1, ("  without a date:", stats.get("skipped_no_date", 0)))
     # Only for the writes that were asked for, so the default summary is unchanged.
     if args is not None:
         sidecar_only = bool(getattr(args, "sidecar_only", False))

@@ -1453,7 +1453,7 @@ Each result (JSON/CSV) includes:
 | `file_path` | Full path to image |
 | `file_name` | Filename |
 | `source_type` | `directory` or `photos_library` |
-| `image_date` | EXIF or file date |
+| `image_date` | EXIF capture date; empty when the file records none (the file's own creation or modification time is never used) |
 | `tags` | 1-5 vision model tags |
 | `scene_summary` | Short scene description |
 | `scene_category` | `indoor_home`, `indoor_work`, `outdoor_leisure`, `outdoor_travel`, `transport`, `other` |

@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 import subprocess  # nosec B404
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -15,7 +14,6 @@ from pyimgtag.exif_reader import (
     _dms_to_decimal,
     _exifread_dms_to_decimal,
     _exifread_gps,
-    _get_file_date,
     _parse_exif_date,
     _parse_gps_ifd,
     _read_exifread,
@@ -184,7 +182,7 @@ class TestReadExifread:
             mock_er.process_file.side_effect = Exception("corrupt file")
             assert _read_exifread(Path("/fake/photo.jpg")) is None
 
-    def test_date_fallback_to_file_date(self, tmp_path: Path):
+    def test_unparseable_date_is_no_date(self, tmp_path: Path):
         fake_img = tmp_path / "photo.jpg"
         fake_img.write_bytes(b"fake")
         mock_tag = MagicMock()
@@ -193,13 +191,12 @@ class TestReadExifread:
         tags = {"EXIF DateTimeOriginal": mock_tag}
         with (
             patch("pyimgtag.exif_reader.exifread") as mock_er,
-            patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
         ):
             mock_er.process_file.return_value = tags
             result = _read_exifread(fake_img)
         assert result is not None
-        # date parse fails ("not a date") → falls back to the file date
-        assert result.date_original == "2026-01-01 00:00:00"
+        # date parse fails ("not a date") → no capture date, never the file's own
+        assert result.date_original is None
 
 
 class TestReadExif:
@@ -289,7 +286,7 @@ class TestReadExiftool:
         assert abs(result.gps_lat - 48.8566) < 1e-6
         assert result.date_original == "2026-04-01 14:30:00"
 
-    def test_no_exif_date_falls_back_to_file_date(self, tmp_path: Path):
+    def test_no_exif_date_is_no_date(self, tmp_path: Path):
         """exiftool tier must apply the same file-date fallback as the
         exifread and Pillow tiers when the image has no EXIF date."""
         import json
@@ -303,11 +300,10 @@ class TestReadExiftool:
         mock_proc.stdout = json.dumps([{"SourceFile": str(fake_img)}])
         with (
             patch("pyimgtag.exif_reader.exiftool.run", return_value=mock_proc),
-            patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
         ):
             result = _read_exiftool(fake_img)
         assert result is not None
-        assert result.date_original == "2026-01-01 00:00:00"
+        assert result.date_original is None
 
     def test_nonzero_returncode_returns_none(self, tmp_path: Path):
         """exiftool exit != 0 returns None (line 78)."""
@@ -375,34 +371,20 @@ class TestReadExiftool:
         assert result is None
 
 
-class TestGetFileDate:
-    def test_uses_st_birthtime_when_present(self, tmp_path: Path):
-        fake_img = tmp_path / "photo.jpg"
-        fake_img.write_bytes(b"fake")
-        stat_with_birthtime = SimpleNamespace(st_birthtime=1_000_000.0, st_mtime=2_000_000.0)
-        with patch.object(Path, "stat", return_value=stat_with_birthtime):
-            result = _get_file_date(fake_img)
-        from datetime import datetime
+class TestNoFileDateFallback:
+    """A file without a recorded capture date is undated (#475).
 
-        expected = datetime.fromtimestamp(1_000_000.0).strftime("%Y-%m-%d %H:%M:%S")
-        assert result == expected
+    Its creation/modification time is when it was copied, not when it was
+    taken, so it must never stand in for the capture date.
+    """
 
-    def test_falls_back_to_mtime_when_no_birthtime(self, tmp_path: Path):
-        fake_img = tmp_path / "photo.jpg"
-        fake_img.write_bytes(b"fake")
-        stat_without_birthtime = SimpleNamespace(st_mtime=2_000_000.0)
-        with patch.object(Path, "stat", return_value=stat_without_birthtime):
-            result = _get_file_date(fake_img)
-        from datetime import datetime
+    def test_a_png_without_exif_has_no_date(self, tmp_path: Path):
+        from PIL import Image
 
-        expected = datetime.fromtimestamp(2_000_000.0).strftime("%Y-%m-%d %H:%M:%S")
-        assert result == expected
-
-    def test_returns_none_on_oserror(self, tmp_path: Path):
-        fake_img = tmp_path / "photo.jpg"
-        with patch.object(Path, "stat", side_effect=OSError("no access")):
-            result = _get_file_date(fake_img)
-        assert result is None
+        shot = tmp_path / "Screenshot 2024-06-14 at 10.32.11.png"
+        Image.new("RGB", (4, 4)).save(shot)
+        with patch("pyimgtag.exif_reader.exiftool.run", side_effect=FileNotFoundError):
+            assert read_exif(shot).date_original is None
 
 
 class TestParseGpsIfd:
@@ -420,7 +402,7 @@ class TestParseGpsIfd:
 
 
 class TestReadPillow:
-    def test_empty_exif_uses_file_date(self, tmp_path: Path):
+    def test_empty_exif_has_no_date(self, tmp_path: Path):
         fake_img = tmp_path / "photo.jpg"
         fake_img.write_bytes(b"fake")
         mock_exif = MagicMock()
@@ -431,21 +413,19 @@ class TestReadPillow:
         mock_img.getexif.return_value = mock_exif
         with (
             patch("pyimgtag.exif_reader.Image.open", return_value=mock_img),
-            patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
         ):
             result = _read_pillow(fake_img)
-        assert result.date_original == "2026-01-01 00:00:00"
+        assert result.date_original is None
         assert result.has_gps is False
 
-    def test_exception_falls_back_to_file_date(self, tmp_path: Path):
+    def test_exception_gives_an_empty_result(self, tmp_path: Path):
         fake_img = tmp_path / "photo.jpg"
         fake_img.write_bytes(b"fake")
         with (
             patch("pyimgtag.exif_reader.Image.open", side_effect=OSError("corrupt")),
-            patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
         ):
             result = _read_pillow(fake_img)
-        assert result.date_original == "2026-01-01 00:00:00"
+        assert result.date_original is None
         assert result.has_gps is False
 
 
@@ -483,8 +463,8 @@ class TestReadPillowGpsMocked:
         assert result.gps_lon is not None and result.gps_lon < -122
         assert result.date_original == "2026-04-01 14:30:00"
 
-    def test_no_exif_date_falls_back_to_file_date(self, tmp_path: Path):
-        """When the EXIF date IFD has no usable date, fall back to file date (lines 181-182)."""
+    def test_no_exif_date_is_no_date(self, tmp_path: Path):
+        """No usable date in the EXIF IFD: no capture date, not the file date (#475)."""
         fake_img = tmp_path / "photo.jpg"
         fake_img.write_bytes(b"fake")
         gps_ifd = {1: "N", 2: (37.0, 46.0, 30.0), 3: "E", 4: (2.0, 21.0, 7.0)}
@@ -492,11 +472,10 @@ class TestReadPillowGpsMocked:
         img = self._make_img(gps_ifd, exif_ifd)
         with (
             patch("pyimgtag.exif_reader.Image.open", return_value=img),
-            patch("pyimgtag.exif_reader._get_file_date", return_value="2026-01-01 00:00:00"),
         ):
             result = _read_pillow(fake_img)
         assert result.has_gps
-        assert result.date_original == "2026-01-01 00:00:00"
+        assert result.date_original is None
 
 
 class TestParseGpsIfdConversionError:

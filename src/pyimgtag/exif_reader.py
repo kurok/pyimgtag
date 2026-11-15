@@ -39,9 +39,12 @@ def read_exif(file_path: str | Path) -> ExifData:
 
     Returns:
         An :class:`ExifData`. This never raises on a bad or missing file: every
-        backend degrades, and the final Pillow tier returns an ExifData with
-        only a file-derived date. Fields are left None when nothing is
-        recoverable.
+        backend degrades, and the final Pillow tier returns an empty ExifData.
+        Fields are left None when nothing is recoverable. ``date_original`` is
+        only ever a date recorded in the file's metadata, never the file's
+        own creation or modification time: a copied screenshot would otherwise
+        be dated the day it was copied, and that date would drive the date
+        filters, the timeline and the event names.
     """
     path = Path(file_path)
     result = _read_exiftool(path)
@@ -84,8 +87,6 @@ def _read_exiftool(path: Path) -> ExifData | None:
         lon = info.get("GPSLongitude")
         date_str = info.get("DateTimeOriginal") or info.get("CreateDate")
         date_iso = _parse_exif_date(date_str) if date_str else None
-        if date_iso is None:
-            date_iso = _get_file_date(path)
         has_gps = lat is not None and lon is not None
 
         return ExifData(
@@ -126,8 +127,6 @@ def _read_exifread(path: Path) -> ExifData | None:
         if date_tag:
             date_str = str(date_tag)
         date_iso = _parse_exif_date(date_str) if date_str else None
-        if date_iso is None:
-            date_iso = _get_file_date(path)
 
         return ExifData(gps_lat=lat, gps_lon=lon, date_original=date_iso, has_gps=has_gps)
     except Exception:  # noqa: BLE001 — best-effort tier; any failure falls through to Pillow
@@ -171,7 +170,7 @@ def _read_pillow(path: Path) -> ExifData:
         with Image.open(path) as img:
             exif = img.getexif()
             if not exif:
-                return ExifData(date_original=_get_file_date(path))
+                return ExifData()
 
             gps_ifd = exif.get_ifd(0x8825)
             lat, lon, has_gps = _parse_gps_ifd(gps_ifd)
@@ -179,12 +178,10 @@ def _read_pillow(path: Path) -> ExifData:
             exif_ifd = exif.get_ifd(0x8769)
             date_str = exif_ifd.get(36867) or exif_ifd.get(36868)
             date_iso = _parse_exif_date(date_str) if date_str else None
-            if date_iso is None:
-                date_iso = _get_file_date(path)
 
             return ExifData(gps_lat=lat, gps_lon=lon, date_original=date_iso, has_gps=has_gps)
-    except Exception:  # noqa: BLE001 — last-resort backend; degrade to a file-date-only result
-        return ExifData(date_original=_get_file_date(path))
+    except Exception:  # noqa: BLE001 — last-resort backend; degrade to an empty result
+        return ExifData()
 
 
 def _parse_gps_ifd(gps_ifd: dict) -> tuple[float | None, float | None, bool]:
@@ -227,12 +224,3 @@ def _parse_exif_date(date_str: str | None) -> str | None:
         except ValueError:
             continue
     return None
-
-
-def _get_file_date(path: Path) -> str | None:
-    try:
-        stat = path.stat()
-        ts = getattr(stat, "st_birthtime", None) or stat.st_mtime
-        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-    except OSError:
-        return None
