@@ -26,6 +26,47 @@ from pyimgtag.cache import DiskCache
 from pyimgtag.models import GeoResult
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+
+# Multilingual places carry every official name in their OSM ``name`` tag,
+# joined by a separator that depends on the mappers' convention (sampled from
+# real Nominatim replies):
+#   country   "Schweiz / Suisse / Svizzera / Svizra", "België / Belgique / Belgien"
+#   region    "Valais/Wallis", "Bern/Berne",
+#             "Région de Bruxelles-Capitale - Brussels Hoofdstedelijk Gewest"
+# By convention the first name is the majority/local language, so that one
+# is kept.
+_COUNTRY_SEPARATORS = (" / ", "/")
+_REGION_SEPARATORS = (" / ", "/", " - ")
+# Cities and places are left alone apart from the spaced slash: a bare slash or
+# a spaced hyphen there ("Biel/Bienne", "Bolzano - Bozen") is usually the
+# locally used double name, not a list to pick from.
+_LOCALITY_SEPARATORS = (" / ",)
+
+
+def native_name(name: str | None, separators: tuple[str, ...] = (" / ",)) -> str | None:
+    """Return the first name of a multilingual place name.
+
+    ``"Schweiz / Suisse / Svizzera / Svizra"`` becomes ``"Schweiz"``. Only the
+    given *separators* split; a name without one is returned unchanged.
+    """
+    if not name:
+        return name
+    for separator in separators:
+        if separator in name:
+            first = name.split(separator, 1)[0].strip()
+            return first or name
+    return name
+
+
+def _normalise(result: GeoResult) -> GeoResult:
+    """One name per field, applied to fresh lookups and old cache entries."""
+    result.nearest_place = native_name(result.nearest_place, _LOCALITY_SEPARATORS)
+    result.nearest_city = native_name(result.nearest_city, _LOCALITY_SEPARATORS)
+    result.nearest_region = native_name(result.nearest_region, _REGION_SEPARATORS)
+    result.nearest_country = native_name(result.nearest_country, _COUNTRY_SEPARATORS)
+    return result
+
+
 # Nominatim's usage policy requires an identifying User-Agent; keep the version
 # in sync with the package so OSM operators see the real release.
 _USER_AGENT = f"pyimgtag/{__version__} (https://github.com/kurok/pyimgtag)"
@@ -103,7 +144,7 @@ class ReverseGeocoder:
         if cached is None:
             return None
         try:
-            return GeoResult(**cached)
+            return _normalise(GeoResult(**cached))
         except TypeError:
             return None  # stale cache entry with unexpected keys — re-fetch
 
@@ -142,11 +183,13 @@ class ReverseGeocoder:
             return GeoResult(error=f"Geocoding failed for {lat},{lon}: {data['error']}")
 
         addr = data.get("address", {})
-        return GeoResult(
-            nearest_place=addr.get("village") or addr.get("town") or addr.get("suburb"),
-            nearest_city=addr.get("city") or addr.get("town") or addr.get("municipality"),
-            nearest_region=addr.get("state") or addr.get("region"),
-            nearest_country=addr.get("country"),
+        return _normalise(
+            GeoResult(
+                nearest_place=addr.get("village") or addr.get("town") or addr.get("suburb"),
+                nearest_city=addr.get("city") or addr.get("town") or addr.get("municipality"),
+                nearest_region=addr.get("state") or addr.get("region"),
+                nearest_country=addr.get("country"),
+            )
         )
 
     def _rate_limit(self) -> None:
