@@ -1572,6 +1572,14 @@ def _add_mcp_subcommand(subparsers: Any) -> None:
         "--export-root",
         help="Directory export_photos may copy into; without it exports are refused",
     )
+    mcp_p.add_argument(
+        "--model-dir",
+        help=(
+            "Folder holding the CLIP model files for search_photos (default: "
+            "$PYIMGTAG_SEARCH_MODEL_DIR, else ~/.cache/pyimgtag/search_models); use the "
+            "same --model-dir you gave 'pyimgtag index'"
+        ),
+    )
 
 
 def _add_prompt_subcommand(subparsers: Any) -> None:

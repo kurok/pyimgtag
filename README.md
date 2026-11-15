@@ -1804,7 +1804,7 @@ Claude Code (`.mcp.json` in the project, or `claude mcp add`):
 | `list_events` | Events from `pyimgtag events detect`, newest first (id, name, date range, place, trip, photo count), as `events list --format json`; `limit` (0 = all), plus `total` |
 | `judge_ranking` | Best-of ranking over judged photos (`min_score`, `max_score`, `sort`, `limit`, `offset`) |
 | `library_stats` | The `pyimgtag insights` aggregates as JSON |
-| `search_photos` | Semantic search — not implemented yet; returns an actionable error pointing at `query_photos` |
+| `search_photos` | Semantic search over the CLIP index from `pyimgtag index`: `query`, `limit`; returns `{file_path, score}` best first, as `pyimgtag search --format json`. Default `limit` 20, as `--top`. Needs the `[search]` extra and models already downloaded (run `pyimgtag search` once; pass `pyimgtag mcp --model-dir` if `index` used one); otherwise an actionable error |
 
 ### Write tools (opt-in)
 
@@ -1860,7 +1860,7 @@ a default server cannot see them at all. No tool deletes anything.
 | `PYIMGTAG_NO_WEB` | All commands that start the dashboard | `1` / `true` / `yes` disables the dashboard by default (same as `--no-web`). |
 | `PYIMGTAG_MAP_TILES` | `/map` page | Raster tile URL template (default `https://tile.openstreetmap.org/{z}/{x}/{y}.png`). Point at a LAN/offline tile server to keep browsing private — see [Map tiles and privacy](#map-tiles-and-privacy). |
 | `PYIMGTAG_MAP_TILES_ATTRIBUTION` | `/map` page | Attribution line drawn on the map (default `© OpenStreetMap contributors`). |
-| `PYIMGTAG_SEARCH_MODEL_DIR` | `pyimgtag index` / `search` / `/search` | Directory holding the CLIP ONNX files. Point it at pre-downloaded models for an air-gapped install (default `~/.cache/pyimgtag/search_models/`). Overridden by `--model-dir`. |
+| `PYIMGTAG_SEARCH_MODEL_DIR` | `pyimgtag index` / `search` / `/search` / `mcp` (`search_photos`) | Directory holding the CLIP ONNX files. Point it at pre-downloaded models for an air-gapped install (default `~/.cache/pyimgtag/search_models/`). Overridden by `--model-dir`. |
 | `PYIMGTAG_NO_UPDATE_CHECK` | All `pyimgtag` invocations | Skip the PyPI update check on startup. |
 | `PYIMGTAG_NO_MIGRATION_BACKUP` | Anything that opens the progress DB | `1` skips the `<db>.bak-v<N>` copy written before an existing database is migrated to a newer schema (see [Database upgrades](#database-upgrades)). |
 | `PYIMGTAG_USE_PHOTOSCRIPT` | `--write-back` / faces import | `1` / `true` / `yes` opts into the in-process [photoscript](https://pypi.org/project/photoscript/) path instead of the default `osascript` subprocess. |

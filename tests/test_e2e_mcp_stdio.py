@@ -60,3 +60,13 @@ def test_list_events_over_stdio(tmp_path: Path) -> None:
     assert data["count"] == 1
     assert data["events"][0]["name"] == "Porto, June 2025"
     assert data["events"][0]["photo_count"] == 2
+
+
+def test_search_photos_over_stdio_without_an_index(tmp_path: Path) -> None:
+    """#431: no claim that search is unimplemented; it says how to build the index."""
+    db_path = tmp_path / "p.db"
+    ProgressDB(db_path).close()
+    data = _call(db_path, tmp_path, "search_photos", {"query": "beach at sunset"})
+    assert data["error"] == "no semantic index"
+    assert "pyimgtag index --input-dir" in data["hint"]
+    assert "not implemented" not in json.dumps(data)
