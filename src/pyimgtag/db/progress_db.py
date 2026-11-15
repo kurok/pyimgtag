@@ -1086,6 +1086,14 @@ class ProgressDB:
         """Delegate to :meth:`DedupDB.record_action`."""
         self._dedup.record_action(group_id, file_path, action, moved_to)
 
+    def clear_dedup_action(self, group_id: int, file_path: str) -> None:
+        """Delegate to :meth:`DedupDB.clear_action`."""
+        self._dedup.clear_action(group_id, file_path)
+
+    def set_dedup_keep_path(self, group_id: int, keep_path: str | None) -> None:
+        """Delegate to :meth:`DedupDB.set_keep_path`."""
+        self._dedup.set_keep_path(group_id, keep_path)
+
     def mark_dedup_resolved(self, group_id: int, keep_path: str) -> None:
         """Delegate to :meth:`DedupDB.mark_resolved`."""
         self._dedup.mark_resolved(group_id, keep_path)

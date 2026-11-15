@@ -26,9 +26,14 @@ from pyimgtag.progress_db import ProgressDB
 # event_for_path, event_stats, rename_event, set_event_name, unnamed_events,
 # reconcile_events and clear_events delegate to EventsDB. All additions;
 # nothing has been removed or changed.
+#
+# Added by #450: clear_dedup_action, which forgets a move recorded just before
+# it failed (moves are recorded before they happen), and set_dedup_keep_path,
+# which pins the kept copy from a group's first action on.
 EXPECTED_PUBLIC_API = [
     "all_phashes",
     "clear_auto_persons",
+    "clear_dedup_action",
     "clear_embeddings",
     "clear_events",
     "close",
@@ -118,6 +123,7 @@ EXPECTED_PUBLIC_API = [
     "restore_face",
     "save_judge_result",
     "search_similar",
+    "set_dedup_keep_path",
     "set_event_name",
     "set_person_id",
     "set_person_id_many",

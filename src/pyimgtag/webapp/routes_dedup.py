@@ -20,16 +20,19 @@ The web action is deliberately narrower than the CLI:
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pyimgtag.db.dedup_db import ACTION_MOVE, ACTION_TAG
+from pyimgtag.db.dedup_db import ACTION_MOVE, ACTION_TAG, ACTION_TRASH
 from pyimgtag.dedup_groups import (
     CRITERIA,
+    action_never_completed,
+    free_destination,
+    in_place,
     is_photos_library_path,
     parse_prefer,
     quarantine_destination,
+    safe_move,
     summarize_group,
 )
 
@@ -79,28 +82,43 @@ def _apply_group(db: ProgressDB, group: dict, keep_path: str, move_to: str) -> d
     tagged = 0
     errors: list[str] = []
     acted = False
+    if group.get("keep_path") != keep_path:
+        # Pin the keeper before acting, so a re-run keeps the same copy.
+        db.set_dedup_keep_path(group["id"], keep_path)
     for member in group["members"]:
         path = member["file_path"]
         if path == keep_path:
+            if action_never_completed(member):
+                db.clear_dedup_action(group["id"], path)  # stale record
             continue
+        if member.get("action") in (ACTION_MOVE, ACTION_TRASH):
+            if not action_never_completed(member):
+                acted = True  # done by an earlier run that stopped part-way
+                continue
+            db.clear_dedup_action(group["id"], path)
         if is_photos_library_path(path):
             db.record_dedup_action(group["id"], path, ACTION_TAG)
             tagged += 1
             acted = True
             continue
-        dest = quarantine_destination(path, move_to)
+        dest = free_destination(quarantine_destination(path, move_to))
+        # Record before moving, so no file reaches the quarantine unrecorded.
+        db.record_dedup_action(group["id"], path, ACTION_MOVE, str(dest))
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(path, str(dest))
+            safe_move(path, dest)
         except OSError as exc:
+            db.clear_dedup_action(group["id"], path)
             logger.warning("dedup apply: move failed for %s: %s", path, exc)
             errors.append(f"{Path(path).name}: {exc}")
             continue
-        db.record_dedup_action(group["id"], path, ACTION_MOVE, str(dest))
         moved += 1
         acted = True
     if acted:
         db.mark_dedup_resolved(group["id"], keep_path)
+    elif not any(
+        m.get("action") for m in (db.get_dedup_group(group["id"]) or {}).get("members", [])
+    ):
+        db.set_dedup_keep_path(group["id"], None)  # nothing done: drop the pin
     return {"moved": moved, "tagged": tagged, "errors": errors}
 
 
@@ -108,17 +126,29 @@ def _undo_group(db: ProgressDB, group: dict) -> dict:
     """Move a group's quarantined copies back and clear its records."""
     restored = 0
     errors: list[str] = []
+    lost: list[str] = []
     for member in group["members"]:
         if member.get("action") != ACTION_MOVE or not member.get("moved_to"):
             continue
         source = Path(member["moved_to"])
         target = Path(member["file_path"])
+        if target.exists():
+            continue  # the original is in place; never overwrite it
+        if not source.exists() and not source.parent.is_dir():
+            # Unplugged or unmounted quarantine: keep the record for later.
+            errors.append(f"{source.name}: the quarantine is not reachable")
+            continue
         if not source.exists():
-            errors.append(f"{source.name}: quarantined file is gone")
+            # Gone from both places: report it, but do not keep the group
+            # locked forever over a copy nothing can bring back.
+            lost.append(f"{target.name}: neither the original nor the quarantined copy exists")
+            continue
+        if not target.parent.is_dir():
+            # Unplugged library drive: do not re-create the folder elsewhere.
+            errors.append(f"{target.name}: the original location is not reachable")
             continue
         try:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(target))
+            safe_move(source, target, create_parents=False)
         except OSError as exc:
             logger.warning("dedup undo: restore failed for %s: %s", target, exc)
             errors.append(f"{target.name}: {exc}")
@@ -126,7 +156,7 @@ def _undo_group(db: ProgressDB, group: dict) -> dict:
         restored += 1
     if not errors:
         db.undo_dedup_group(group["id"])
-    return {"restored": restored, "errors": errors}
+    return {"restored": restored, "errors": errors + lost}
 
 
 def build_dedup_router(db: ProgressDB, api_base: str = "") -> Any:
@@ -216,8 +246,23 @@ def build_dedup_router(db: ProgressDB, api_base: str = "") -> Any:
                     continue
                 group = summarize_group(raw)
                 keep_path = body.keep.get(str(group_id)) or group["best_path"]
-                if keep_path not in {m["file_path"] for m in group["members"]}:
+                members = {m["file_path"]: m for m in group["members"]}
+                if keep_path not in members:
                     errors.append(f"group {group_id}: keep path is not a member")
+                    continue
+                if not in_place(members[keep_path]):
+                    errors.append(
+                        f"group {group_id}: the copy to keep was already moved; "
+                        "undo the group first"
+                    )
+                    continue
+                stored = raw.get("keep_path")
+                acted = any(m.get("action") for m in raw["members"])
+                if acted and stored and keep_path != stored:
+                    errors.append(
+                        f"group {group_id}: a run already started keeping "
+                        f"{Path(stored).name}; undo the group to choose another copy"
+                    )
                     continue
                 report = _apply_group(db, group, keep_path, move_to)
                 moved += report["moved"]

@@ -93,12 +93,20 @@ class DedupDB:
 
     # --- group bookkeeping -------------------------------------------------
 
+    # A group is "acted on" once it is resolved or any member has a recorded
+    # action (a resolve that stopped part-way). Its records are what undo needs,
+    # so a rescan must neither rewrite nor drop it.
+    _ACTED_GROUP_SQL = (
+        "(g.resolved_at IS NOT NULL OR EXISTS ("
+        "SELECT 1 FROM dedup_members a WHERE a.group_id = g.id AND a.action IS NOT NULL))"
+    )
+
     def _locked_paths(self) -> set[str]:
-        """Paths belonging to a resolved group; excluded from new plans."""
+        """Paths belonging to an acted-on group; excluded from new plans."""
         rows = self._conn.execute(
             "SELECT dm.file_path FROM dedup_members dm "
             "JOIN dedup_groups g ON g.id = dm.group_id "
-            "WHERE g.resolved_at IS NOT NULL"
+            "WHERE " + self._ACTED_GROUP_SQL  # nosec B608 — constant SQL fragment
         ).fetchall()
         return {r[0] for r in rows}
 
@@ -121,7 +129,7 @@ class DedupDB:
         existing_rows = self._conn.execute(
             "SELECT dm.group_id, dm.file_path FROM dedup_members dm "
             "JOIN dedup_groups g ON g.id = dm.group_id "
-            "WHERE g.resolved_at IS NULL"
+            "WHERE NOT " + self._ACTED_GROUP_SQL  # nosec B608 — constant SQL fragment
         ).fetchall()
         path_to_group: dict[str, int] = {}
         for group_id, file_path in existing_rows:
@@ -143,7 +151,8 @@ class DedupDB:
                     group_id = int(cur.lastrowid or 0)
                 else:
                     self._conn.execute(
-                        "UPDATE dedup_groups SET threshold = ?, kind = ? WHERE id = ?",
+                        "UPDATE dedup_groups SET threshold = ?, kind = ?, keep_path = NULL "
+                        "WHERE id = ?",
                         (int(threshold), kind, group_id),
                     )
                     self._conn.execute("DELETE FROM dedup_members WHERE group_id = ?", (group_id,))
@@ -154,7 +163,7 @@ class DedupDB:
                 keep.add(group_id)
             # Drop every unresolved group the new plan no longer produces.
             stale = self._conn.execute(
-                "SELECT id FROM dedup_groups WHERE resolved_at IS NULL"
+                "SELECT g.id FROM dedup_groups g WHERE NOT " + self._ACTED_GROUP_SQL  # nosec B608 — constant SQL fragment
             ).fetchall()
             for (group_id,) in stale:
                 if group_id in keep:
@@ -267,6 +276,22 @@ class DedupDB:
             "UPDATE dedup_members SET action = ?, moved_to = ?, acted_at = ? "
             "WHERE group_id = ? AND file_path = ?",
             (action, moved_to, _now(), int(group_id), file_path),
+        )
+        self._conn.commit()
+
+    def clear_action(self, group_id: int, file_path: str) -> None:
+        """Forget the action recorded for one member (it did not happen)."""
+        self._conn.execute(
+            "UPDATE dedup_members SET action = NULL, moved_to = NULL, acted_at = NULL "
+            "WHERE group_id = ? AND file_path = ?",
+            (int(group_id), file_path),
+        )
+        self._conn.commit()
+
+    def set_keep_path(self, group_id: int, keep_path: str | None) -> None:
+        """Remember the copy being kept, from a group's first action on."""
+        self._conn.execute(
+            "UPDATE dedup_groups SET keep_path = ? WHERE id = ?", (keep_path, int(group_id))
         )
         self._conn.commit()
 

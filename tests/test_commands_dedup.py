@@ -391,24 +391,30 @@ def test_undo_unknown_group(tmp_path, capsys):
     args = _args("undo", "--group", "42")
     args.db = str(db_path)
     assert cmd_dedup(args) == 1
-    assert "No resolved group with id 42" in capsys.readouterr().err
+    assert "No resolved or partly applied group with id 42" in capsys.readouterr().err
 
 
-def test_undo_keeps_the_record_when_the_quarantined_file_is_gone(tmp_path, capsys):
+def test_undo_reports_a_copy_lost_from_both_places_and_unlocks_the_group(tmp_path, capsys):
+    """Neither the quarantined copy nor the original exists: report it, then
+    forget the record so the group is not locked out of every later scan."""
     db_path, small, big = _seeded_group(tmp_path)
     db = ProgressDB(db_path=db_path)
     group_id = db.list_dedup_groups()[0]["id"]
     db.record_dedup_action(group_id, small, ACTION_MOVE, str(tmp_path / "gone" / "small.jpg"))
     db.mark_dedup_resolved(group_id, big)
     db.close()
+    Path(small).unlink()
+    (tmp_path / "gone").mkdir()  # the quarantine is reachable; the copy is not in it
 
     args = _args("undo")
     args.db = str(db_path)
     assert cmd_dedup(args) == 1
-    assert "missing quarantined file" in capsys.readouterr().err
+    assert "lost: neither" in capsys.readouterr().err
 
     db = ProgressDB(db_path=db_path)
-    assert db.get_dedup_group(group_id)["resolved_at"] is not None
+    group = db.get_dedup_group(group_id)
+    assert group["resolved_at"] is None
+    assert all(m["action"] is None for m in group["members"])
     db.close()
 
 
@@ -485,3 +491,441 @@ def test_resolve_write_back_off_platform_is_reported(tmp_path, monkeypatch, caps
     args.db = str(db_path)
     assert cmd_dedup(args) == 1
     assert "macOS only" in capsys.readouterr().err
+
+
+# --- #450: a resolve that stops half-way stays undoable ----------------------
+
+
+def _four_copies(tmp_path: Path) -> tuple[Path, list[str]]:
+    """One group: the big keeper plus three smaller copies (one Cyrillic)."""
+    db_path = tmp_path / "progress.db"
+    db = ProgressDB(db_path=db_path)
+    paths = []
+    for i, (name, size) in enumerate(
+        (("keep.jpg", 900), ("a.jpg", 100), ("b.jpg", 100), ("закат.jpg", 100))
+    ):
+        p = tmp_path / "lib" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x" * size)
+        os.utime(p, (1_000_000 + i, 1_000_000 + i))
+        paths.append(_seed_row(db, p, HASH_A, size=None))
+    db.replace_unresolved_dedup_groups([("duplicate", paths)], 5)
+    db.close()
+    return db_path, paths
+
+
+def _undo(db_path: Path) -> int:
+    undo = _args("undo")
+    undo.db = str(db_path)
+    return cmd_dedup(undo)
+
+
+def _resolve(db_path: Path, quarantine: Path) -> int:
+    args = _args("resolve", "--move-to", str(quarantine))
+    args.db = str(db_path)
+    return cmd_dedup(args)
+
+
+def _unresolved(db_path: Path) -> list[dict]:
+    db = ProgressDB(db_path=db_path)
+    try:
+        return db.list_dedup_groups()
+    finally:
+        db.close()
+
+
+def test_an_interrupted_resolve_stays_listed_and_undoable(tmp_path, monkeypatch, capsys):
+    from pyimgtag.commands import dedup as dedup_mod
+
+    db_path, paths = _four_copies(tmp_path)
+    quarantine = tmp_path / "q"
+    real_move = dedup_mod._move_loser
+    calls = {"n": 0}
+
+    def _move_then_ctrl_c(path, root):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real_move(path, root)
+
+    monkeypatch.setattr(dedup_mod, "_move_loser", _move_then_ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        _resolve(db_path, quarantine)
+    monkeypatch.setattr(dedup_mod, "_move_loser", real_move)
+    assert sum(not Path(p).exists() for p in paths[1:]) == 1
+
+    # Not marked resolved: the copies it never reached are still planned...
+    (group,) = _unresolved(db_path)
+    assert group["resolved_at"] is None
+    # ...and undo still finds and restores the one that moved.
+    assert _undo(db_path) == 0
+    assert "Restored 1 file(s)" in capsys.readouterr().out
+    assert all(Path(p).exists() for p in paths)
+
+
+def test_a_rerun_finishes_an_interrupted_resolve(tmp_path, monkeypatch, capsys):
+    from pyimgtag.commands import dedup as dedup_mod
+
+    db_path, paths = _four_copies(tmp_path)
+    quarantine = tmp_path / "q"
+    real_move = dedup_mod._move_loser
+    calls = {"n": 0}
+
+    def _move_then_ctrl_c(path, root):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real_move(path, root)
+
+    monkeypatch.setattr(dedup_mod, "_move_loser", _move_then_ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        _resolve(db_path, quarantine)
+    monkeypatch.setattr(dedup_mod, "_move_loser", real_move)
+    capsys.readouterr()
+
+    assert _resolve(db_path, quarantine) == 0
+    out = capsys.readouterr().out
+    assert "already move:" in out
+    assert "move failed" not in out
+    assert not any(Path(p).exists() for p in paths[1:])
+    assert _unresolved(db_path) == []
+    assert _undo(db_path) == 0
+    assert all(Path(p).exists() for p in paths)
+
+
+def test_an_interrupt_right_after_a_move_is_still_recorded(tmp_path, monkeypatch, capsys):
+    """The move is recorded before it happens, so no file escapes undo."""
+    from pyimgtag.commands import dedup as dedup_mod
+
+    db_path, paths = _four_copies(tmp_path)
+    real_move = dedup_mod._move_loser
+
+    def _move_then_ctrl_c(path, root):
+        real_move(path, root)
+        raise KeyboardInterrupt  # after the file moved, before resolve continues
+
+    monkeypatch.setattr(dedup_mod, "_move_loser", _move_then_ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        _resolve(db_path, tmp_path / "q")
+    assert _undo(db_path) == 0
+    assert all(Path(p).exists() for p in paths)
+
+
+def test_an_interrupted_undo_can_be_run_again(tmp_path, monkeypatch, capsys):
+    from pyimgtag.commands import dedup as dedup_mod
+
+    db_path, paths = _four_copies(tmp_path)
+    assert _resolve(db_path, tmp_path / "q") == 0
+    real_move = dedup_mod.safe_move
+    calls = {"n": 0}
+
+    def _restore_then_ctrl_c(src, dst, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real_move(src, dst, **kwargs)
+
+    monkeypatch.setattr(dedup_mod, "safe_move", _restore_then_ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        _undo(db_path)
+    monkeypatch.setattr(dedup_mod, "safe_move", real_move)
+    assert _undo(db_path) == 0
+    assert all(Path(p).exists() for p in paths)
+    (group,) = _unresolved(db_path)
+    assert all(m["action"] is None for m in group["members"])
+
+
+def test_a_rescan_keeps_the_records_of_a_group_acted_on(tmp_path, monkeypatch, capsys):
+    from pyimgtag.commands import dedup as dedup_mod
+
+    db_path, paths = _four_copies(tmp_path)
+    real_move = dedup_mod._move_loser
+    calls = {"n": 0}
+
+    def _move_then_ctrl_c(path, root):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real_move(path, root)
+
+    monkeypatch.setattr(dedup_mod, "_move_loser", _move_then_ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        _resolve(db_path, tmp_path / "q")
+    db = ProgressDB(db_path=db_path)
+    db.replace_unresolved_dedup_groups([("duplicate", paths)], 5)  # what `dedup scan` does
+    db.close()
+    assert _undo(db_path) == 0
+    assert all(Path(p).exists() for p in paths)
+
+
+def test_a_keeper_moved_by_an_earlier_run_is_never_left_without_a_copy(tmp_path, capsys):
+    db_path, paths = _four_copies(tmp_path)
+    best = _unresolved(db_path)[0]
+    from pyimgtag.dedup_groups import summarize_group
+
+    keeper = summarize_group(best)["best_path"]
+    # An earlier run (other --prefer) moved today's best pick away.
+    target = tmp_path / "q" / Path(keeper).name
+    target.parent.mkdir(parents=True)
+    Path(keeper).rename(target)
+    db = ProgressDB(db_path=db_path)
+    db.record_dedup_action(best["id"], keeper, ACTION_MOVE, str(target))
+    db.close()
+
+    assert _resolve(db_path, tmp_path / "q2") == 0
+    in_place = [p for p in paths if Path(p).exists()]
+    assert len(in_place) == 1  # one copy always stays in the library
+
+
+def test_undo_also_finds_a_partial_group_left_by_an_older_crash(tmp_path, capsys):
+    """A DB where a move was recorded but the group never got resolved_at."""
+    db_path, paths = _four_copies(tmp_path)
+    quarantine = tmp_path / "q"
+    target = quarantine / "a.jpg"
+    target.parent.mkdir(parents=True)
+    Path(paths[1]).rename(target)
+    db = ProgressDB(db_path=db_path)
+    group_id = db.list_dedup_groups()[0]["id"]
+    db.record_dedup_action(group_id, paths[1], ACTION_MOVE, str(target))
+    db.close()
+
+    assert _undo(db_path) == 0
+    assert "Restored 1 file(s)" in capsys.readouterr().out
+    assert Path(paths[1]).exists()
+
+
+def test_a_console_that_cannot_print_a_name_does_not_stop_the_resolve(
+    tmp_path, monkeypatch, capsys
+):
+    import builtins
+
+    db_path, paths = _four_copies(tmp_path)
+    real_print = builtins.print
+
+    def _cp1252_print(*a, **k):
+        text = " ".join(str(x) for x in a)
+        text.encode("cp1252")  # raises UnicodeEncodeError on the Cyrillic name
+        real_print(*a, **k)
+
+    monkeypatch.setattr(builtins, "print", _cp1252_print)
+    args = _args("resolve", "--move-to", str(tmp_path / "q"))
+    args.db = str(db_path)
+    assert cmd_dedup(args) == 0
+    assert not any(Path(p).exists() for p in paths[1:])
+    monkeypatch.setattr(builtins, "print", real_print)
+    assert _undo(db_path) == 0
+    assert all(Path(p).exists() for p in paths)
+
+
+def test_one_member_failing_to_move_still_resolves_the_others(tmp_path, monkeypatch, capsys):
+    from pyimgtag.commands import dedup as dedup_mod
+
+    db_path, paths = _four_copies(tmp_path)
+    real_move = dedup_mod._move_loser
+
+    def _locked_b(path, root):
+        if path.endswith("b.jpg"):
+            return None, "simulated EACCES"
+        return real_move(path, root)
+
+    monkeypatch.setattr(dedup_mod, "_move_loser", _locked_b)
+    args = _args("resolve", "--move-to", str(tmp_path / "q"))
+    args.db = str(db_path)
+    assert cmd_dedup(args) == 1
+    db = ProgressDB(db_path=db_path)
+    group = db.list_dedup_groups(include_resolved=True)[0]
+    db.close()
+    assert group["resolved_at"] is not None
+    assert _undo(db_path) == 0
+    assert all(Path(p).exists() for p in paths)
+
+
+def test_a_rerun_skips_members_an_earlier_run_already_moved(tmp_path, capsys):
+    db_path, paths = _four_copies(tmp_path)
+    quarantine = tmp_path / "q"
+    target = quarantine / "a.jpg"
+    target.parent.mkdir(parents=True)
+    Path(paths[1]).rename(target)
+    db = ProgressDB(db_path=db_path)
+    group_id = db.list_dedup_groups()[0]["id"]
+    db.record_dedup_action(group_id, paths[1], ACTION_MOVE, str(target))
+    db.close()
+
+    args = _args("resolve", "--move-to", str(quarantine))
+    args.db = str(db_path)
+    assert cmd_dedup(args) == 0
+    out = capsys.readouterr().out
+    assert f"already move: {paths[1]}" in out
+    assert "move failed" not in out
+
+
+# --- second review: partial cross-device copies, pinned keeper ----------------
+
+
+def test_an_interrupted_cross_device_copy_never_replaces_the_original(tmp_path, monkeypatch):
+    """A Ctrl-C mid-copy leaves a truncated file at the destination; neither a
+    re-run nor undo may let it replace the intact original."""
+    from pyimgtag import dedup_groups
+
+    db_path, paths = _four_copies(tmp_path)
+    originals = {p: Path(p).read_bytes() for p in paths}
+    quarantine = tmp_path / "q"
+
+    def _partial_copy_then_ctrl_c(src, dst, **kwargs):
+        Path(dst).parent.mkdir(parents=True, exist_ok=True)
+        Path(dst).write_bytes(b"trunc")  # what an interrupted copy2 leaves
+        raise KeyboardInterrupt
+
+    from pyimgtag.commands import dedup as dedup_mod
+
+    monkeypatch.setattr(dedup_mod, "safe_move", _partial_copy_then_ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        _resolve(db_path, quarantine)
+    monkeypatch.setattr(dedup_mod, "safe_move", dedup_groups.safe_move)
+
+    # Undo straight away: the original stays as it was.
+    assert _undo(db_path) == 0
+    assert {p: Path(p).read_bytes() for p in paths} == originals
+
+    # And a re-run moves the copy properly, then undo restores it intact.
+    assert _resolve(db_path, quarantine) == 0
+    assert _undo(db_path) == 0
+    assert {p: Path(p).read_bytes() for p in paths} == originals
+
+
+def test_safe_move_across_devices_is_atomic_at_the_destination(tmp_path, monkeypatch):
+    import errno as _errno
+
+    from pyimgtag import dedup_groups
+
+    src = tmp_path / "a.jpg"
+    src.write_bytes(b"x" * 100)
+    dst = tmp_path / "q" / "a.jpg"
+
+    def _cross_device(a, b):
+        raise OSError(_errno.EXDEV, "Invalid cross-device link")
+
+    monkeypatch.setattr(dedup_groups.os, "rename", _cross_device)
+
+    def _copy_then_ctrl_c(a, b):
+        Path(b).write_bytes(b"part")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(dedup_groups.shutil, "copy2", _copy_then_ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        dedup_groups.safe_move(src, dst)
+    assert src.read_bytes() == b"x" * 100
+    assert not dst.exists()  # only a temporary name was ever partial
+    assert list(dst.parent.iterdir()) == []
+
+
+def test_the_keeper_is_pinned_from_the_first_action(tmp_path, monkeypatch):
+    """A re-run with another ranking keeps the copy the first run kept."""
+    from pyimgtag.commands import dedup as dedup_mod
+
+    db_path, paths = _four_copies(tmp_path)
+    real_move = dedup_mod._move_loser
+    calls = {"n": 0}
+
+    def _move_then_ctrl_c(path, root):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+        return real_move(path, root)
+
+    monkeypatch.setattr(dedup_mod, "_move_loser", _move_then_ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        _resolve(db_path, tmp_path / "q")
+    monkeypatch.setattr(dedup_mod, "_move_loser", real_move)
+    (group,) = _unresolved(db_path)
+    first_keeper = group["keep_path"]
+    assert first_keeper is not None
+
+    args = _args("resolve", "--move-to", str(tmp_path / "q"), "--prefer", "mtime")
+    args.db = str(db_path)
+    assert cmd_dedup(args) == 0
+    assert Path(first_keeper).exists()
+    assert [p for p in paths if Path(p).exists()] == [first_keeper]
+
+
+def test_an_unplugged_quarantine_keeps_the_records_for_a_later_undo(tmp_path, capsys):
+    """Undo with the quarantine drive away must not forget what was moved."""
+    db_path, paths = _four_copies(tmp_path)
+    quarantine = tmp_path / "drive" / "q"
+    assert _resolve(db_path, quarantine) == 0
+    away = tmp_path / "drive-unplugged"
+    (tmp_path / "drive").rename(away)
+
+    assert _undo(db_path) == 1
+    assert "quarantine not reachable" in capsys.readouterr().err
+    away.rename(tmp_path / "drive")
+
+    assert _undo(db_path) == 0
+    assert all(Path(p).exists() for p in paths)
+
+
+def test_safe_move_never_overwrites_an_existing_destination(tmp_path):
+    from pyimgtag.dedup_groups import safe_move
+
+    src = tmp_path / "a.jpg"
+    src.write_bytes(b"new")
+    dst = tmp_path / "q" / "a.jpg"
+    dst.parent.mkdir()
+    dst.write_bytes(b"old")
+    with pytest.raises(FileExistsError):
+        safe_move(src, dst)
+    assert (src.read_bytes(), dst.read_bytes()) == (b"new", b"old")
+
+
+def test_a_leftover_in_the_quarantine_gets_a_new_name_not_overwritten(tmp_path):
+    from pyimgtag.dedup_groups import free_destination
+
+    dest = tmp_path / "a.jpg"
+    assert free_destination(dest) == dest
+    dest.write_bytes(b"x")
+    (tmp_path / "a~1.jpg").write_bytes(b"x")
+    assert free_destination(dest) == tmp_path / "a~2.jpg"
+
+
+def test_a_run_that_changed_nothing_drops_the_keeper_pin(tmp_path, monkeypatch):
+    from pyimgtag.commands import dedup as dedup_mod
+
+    db_path, _ = _four_copies(tmp_path)
+    monkeypatch.setattr(dedup_mod, "_move_loser", lambda path, root: (None, "read-only"))
+    assert _resolve(db_path, tmp_path / "q") == 1
+    (group,) = _unresolved(db_path)
+    assert group["keep_path"] is None
+    assert all(m["action"] is None for m in group["members"])
+
+
+def test_undo_never_recreates_a_library_folder_that_is_not_there(tmp_path, capsys):
+    """An unplugged library drive: restoring would land on the wrong disk."""
+    db_path, paths = _four_copies(tmp_path)
+    assert _resolve(db_path, tmp_path / "q") == 0
+    (tmp_path / "lib").rename(tmp_path / "lib-unplugged")
+
+    assert _undo(db_path) == 1
+    assert "original location not reachable" in capsys.readouterr().err
+    assert not (tmp_path / "lib").exists()
+
+    (tmp_path / "lib-unplugged").rename(tmp_path / "lib")
+    assert _undo(db_path) == 0
+    assert all(Path(p).exists() for p in paths)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Windows needs a writable handle; there it is best effort"
+)
+def test_fsync_flushes_a_read_only_copy(tmp_path, monkeypatch):
+    import os as _os
+
+    from pyimgtag import dedup_groups
+
+    f = tmp_path / "ro.jpg"
+    f.write_bytes(b"x")
+    f.chmod(0o444)
+    calls = []
+    real = _os.fsync
+    monkeypatch.setattr(dedup_groups.os, "fsync", lambda fd: (calls.append(fd), real(fd)))
+    dedup_groups._fsync_file(f)
+    assert calls

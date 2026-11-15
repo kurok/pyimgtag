@@ -25,10 +25,16 @@ testable key function; ``--prefer`` reorders them.
 
 from __future__ import annotations
 
+import errno
+import os
+import shutil
+import stat
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from math import comb
 from pathlib import Path, PurePath
+
+from pyimgtag.db.dedup_db import ACTION_MOVE, ACTION_TAG, ACTION_TRASH
 
 #: Default Hamming distance for ``pyimgtag dedup scan`` (matches ``run --dedup-threshold``).
 DEFAULT_THRESHOLD = 5
@@ -233,6 +239,132 @@ def quarantine_destination(file_path: str, dest_dir: str) -> Path:
     # Windows; dropping it is what keeps the result inside *dest_dir*.
     rel = src.relative_to(src.anchor) if src.anchor else src
     return Path(dest_dir).expanduser().joinpath(*rel.parts)
+
+
+def action_never_completed(member: dict) -> bool:
+    """True for a recorded move/trash whose original is still in its place.
+
+    Moves and trashes are recorded *before* they run, and a move removes the
+    original only as its very last step, so an original that still exists
+    means the action never finished, whatever is at the destination (an
+    interrupted cross-device copy can leave a partial file there).
+    """
+    return (
+        member.get("action") in (ACTION_MOVE, ACTION_TRASH) and Path(member["file_path"]).exists()
+    )
+
+
+def in_place(member: dict) -> bool:
+    """True when this copy is still in the library (not moved or trashed away)."""
+    return member.get("action") not in (ACTION_MOVE, ACTION_TRASH) or action_never_completed(member)
+
+
+def pick_keeper(group: dict) -> str | None:
+    """The copy to keep for a summarized group (members best-first).
+
+    The keeper stored on the group's first action wins while that copy is in
+    place, so a re-run never switches to another copy. Otherwise the best copy
+    in place, preferring one without a Photos duplicate tag. ``None`` when no
+    copy is in place at all: the group must not be acted on again.
+    """
+    present = [m for m in group["members"] if in_place(m)]
+    stored = group.get("keep_path")
+    if stored and any(m["file_path"] == stored for m in present):
+        return str(stored)
+    untagged = [m for m in present if m.get("action") != ACTION_TAG]
+    for member in untagged or present:
+        return str(member["file_path"])
+    return None
+
+
+def free_destination(dest: Path) -> Path:
+    """*dest*, or ``name~1.ext``, ``name~2.ext``... when something is there.
+
+    A leftover from an interrupted earlier run is never overwritten or
+    deleted; the new copy goes next to it.
+    """
+    candidate, n = dest, 0
+    while os.path.lexists(candidate):
+        n += 1
+        candidate = dest.with_name(f"{dest.stem}~{n}{dest.suffix}")
+    return candidate
+
+
+def safe_move(src: str | Path, dst: str | Path, *, create_parents: bool = True) -> None:
+    """Move a file so that *dst* is never a partial copy and never overwritten.
+
+    A rename is atomic. Across devices the file is copied to a temporary name
+    next to *dst*, flushed to disk, renamed into place, and only then is *src*
+    removed, so an interruption or power loss leaves either the original alone
+    or two complete copies. An existing *dst* is never replaced.
+
+    Raises:
+        FileExistsError: *dst* already exists; nothing was moved.
+        OSError: The move failed; *src* is still in place.
+    """
+    target = Path(dst)
+    if os.path.lexists(target):
+        raise FileExistsError(errno.EEXIST, "destination already exists", str(target))
+    if create_parents:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.rename(src, target)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+    partial = target.with_name(target.name + ".pyimgtag-partial")
+    try:
+        shutil.copy2(src, partial)
+        _fsync_file(partial)
+        if os.path.lexists(target):
+            raise FileExistsError(errno.EEXIST, "destination already exists", str(target))
+        os.replace(partial, target)
+        _fsync_dir(target.parent)
+    finally:
+        partial.unlink(missing_ok=True)
+    try:
+        os.unlink(src)
+    except OSError:
+        # The original stays; do not leave an untracked second copy behind
+        # (copy2 kept a read-only bit, which Windows would refuse to delete).
+        try:
+            os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _fsync_file(path: Path) -> None:
+    """Flush a written file to disk (best effort: some filesystems refuse).
+
+    POSIX can fsync a read-only descriptor, so a read-only copy is flushed
+    too; Windows needs a writable handle.
+    """
+    try:
+        if os.name == "posix":
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        else:
+            with open(path, "rb+") as fh:
+                os.fsync(fh.fileno())
+    except OSError:
+        pass
+
+
+def _fsync_dir(path: Path) -> None:
+    """Persist a rename on POSIX (directories cannot be opened on Windows)."""
+    if os.name != "posix":
+        return
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def candidates_from_members(members: Sequence[dict]) -> list[PhotoCandidate]:
