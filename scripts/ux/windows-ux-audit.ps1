@@ -1,10 +1,13 @@
 ﻿# Windows UX audit — runs the documented pyimgtag workflows on a Windows runner.
 #
 # Usage (on a Windows machine with the repo checked out):
-#   powershell -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir C:\ux
+#   pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir C:\ux
 #
 # Everything is captured to a transcript so the output can be inspected after
 # the fact (this is what the GitHub Actions workflow uploads as an artifact).
+#
+# NOTE: keep this file UTF-8 *with a BOM*. Windows PowerShell 5.1 reads a .ps1
+# as ANSI without it, and the non-ASCII paths below then break the parser.
 
 param(
     [string]$WorkDir = "C:\ux",

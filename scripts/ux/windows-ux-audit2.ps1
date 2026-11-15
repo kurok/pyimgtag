@@ -2,6 +2,8 @@
 #
 # Companion to windows-ux-audit.ps1: long paths, non-ASCII paths, the EXIF
 # round-trip, and the webapp pages.
+#
+# NOTE: keep this file UTF-8 *with a BOM* — see windows-ux-audit.ps1.
 
 param(
     [string]$WorkDir = "C:\ux2"
