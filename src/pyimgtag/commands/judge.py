@@ -85,6 +85,7 @@ def _judge_concurrent(
     db: Any,
     finalize: Callable[[int, Path, JudgeScores | None, str | None], None],
     args: Any = None,
+    tally: dict[str, int] | None = None,
 ) -> bool:
     """Score ``files`` with ``jobs`` in-flight model calls. True if interrupted.
 
@@ -99,6 +100,8 @@ def _judge_concurrent(
             if skip_judged and db.get_judge_result(str(file_path)) is not None:
                 if session is not None:
                     session.increment("skipped_already_judged")
+                if tally is not None:
+                    tally["already_judged"] += 1
                 continue
             yield idx, file_path
 
@@ -194,8 +197,9 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
             persistence.
 
     Returns:
-        Exit code: ``0`` on success, ``1`` if interrupted or on a fatal
-        scan or backend error.
+        Exit code: ``0`` on success (or nothing to do), ``1`` if interrupted
+        or on a fatal scan or backend error, ``3`` when every model call
+        failed.
     """
     backend = getattr(args, "backend", "ollama")
     if not isinstance(backend, str):
@@ -274,6 +278,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
         session.mark_running()
 
     attempts = {"called": 0, "failed": 0}
+    tally = {"already_judged": 0, "below_min_score": 0}
 
     def _finalize(
         idx: int, file_path: Path, scores: JudgeScores | None, reason: str | None = None
@@ -309,6 +314,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
             _db.save_judge_result(result)
 
         if args.min_score is not None and weighted < args.min_score:
+            tally["below_min_score"] += 1
             if session is not None:
                 session.increment("skipped_min_score")
             return
@@ -344,7 +350,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
 
         if jobs > 1:
             interrupted = _judge_concurrent(
-                files, ollama, jobs, session, skip_judged, _db, _finalize, args
+                files, ollama, jobs, session, skip_judged, _db, _finalize, args, tally
             )
         else:
             try:
@@ -354,6 +360,7 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
                         session.set_current(str(file_path))
 
                     if skip_judged and _db.get_judge_result(str(file_path)) is not None:
+                        tally["already_judged"] += 1
                         if session is not None:
                             session.increment("skipped_already_judged")
                             session.set_current(None)
@@ -386,6 +393,50 @@ def cmd_judge(args: argparse.Namespace, _db: Any) -> int:
             dashboard.stop()
         run_registry.set_current(None)
 
+    _print_summary(
+        scanned=total,
+        judged=attempts["called"] - attempts["failed"],
+        shown=len(results),
+        already_judged=tally["already_judged"],
+        below_min_score=tally["below_min_score"],
+        failed=attempts["failed"],
+        min_score=args.min_score,
+        interrupted=interrupted,
+    )
     if interrupted:
         return 1
     return exit_code_for(attempts["called"], attempts["failed"])
+
+
+def _print_summary(
+    *,
+    scanned: int,
+    judged: int,
+    shown: int,
+    already_judged: int,
+    below_min_score: int,
+    failed: int,
+    min_score: float | None,
+    interrupted: bool = False,
+) -> None:
+    """Print the counters and a one-line verdict, so an empty result is explained.
+
+    Goes to stderr, like ``run``'s summary: stdout keeps only the per-image
+    lines, for piping.
+    """
+    print("\n--- Summary ---", file=sys.stderr)
+    print(f"  Scanned:          {scanned}", file=sys.stderr)
+    print(f"  Judged:           {judged}", file=sys.stderr)
+    print(f"  Skipped (judged): {already_judged}", file=sys.stderr)
+    if min_score is not None:
+        print(f"  Below min score:  {below_min_score}", file=sys.stderr)
+    print(f"  Model failures:   {failed}", file=sys.stderr)
+    line = f"Judged {judged} photo(s)"
+    if min_score is not None:
+        # --min-score is a float; print 7 rather than 7.0.
+        line += f": {shown} at or above {min_score:g}"
+    if failed:
+        line += f"; {failed} model call(s) failed"
+    if interrupted:
+        line += " (interrupted)"
+    print(line + ".", file=sys.stderr)
