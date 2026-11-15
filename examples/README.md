@@ -34,6 +34,10 @@ export OLLAMA_URL=http://127.0.0.1:11435
 To regenerate the captured output in `captured/`:
 
 ```bash
-python3 fixtures/create_fixtures.py   # create test images
+python3 fixtures/create_fixtures.py   # create test images (needs only Pillow)
 python3 capture_demo.py               # run all commands and save output
 ```
+
+`create_fixtures.py` writes the EXIF GPS block with Pillow, and prints the
+coordinates it wrote for each image. Pass `--output-dir DIR` to write the
+JPEGs somewhere other than `fixtures/`.
