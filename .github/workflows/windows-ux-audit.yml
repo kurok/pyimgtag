@@ -11,7 +11,7 @@ permissions:
 jobs:
   windows-ux-audit:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
 
@@ -22,7 +22,7 @@ jobs:
       - name: Install pyimgtag and the audit dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[heic,review,dedup,vocab,mcp,search]"
+          python -m pip install -e ".[heic,review,dedup,vocab,mcp]"
           python -m pip install piexif
 
       - name: Install exiftool
@@ -36,10 +36,22 @@ jobs:
       - name: Run the Windows UX audit
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Continue"
           pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit.ps1 -WorkDir "C:\ux" 2>&1 |
-            Tee-Object -FilePath "windows-ux-audit.out"
-          Get-Content "C:\ux\windows-ux-audit.log" -ErrorAction SilentlyContinue
+            Tee-Object -FilePath "audit1.out"
+
+      - name: Run the Windows-specific checks
+        shell: pwsh
+        run: |
+          pwsh -ExecutionPolicy Bypass -File scripts/ux/windows-ux-audit2.ps1 -WorkDir "C:\ux2" 2>&1 |
+            Tee-Object -FilePath "audit2.out"
+
+      - name: Collect the transcripts
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "audit-logs" | Out-Null
+          Copy-Item "audit1.out","audit2.out" "audit-logs\" -Force -ErrorAction SilentlyContinue
+          Copy-Item "C:\ux\*.log","C:\ux2\*.log" "audit-logs\" -Force -ErrorAction SilentlyContinue
 
       - name: Upload the transcript
         if: always()
@@ -47,6 +59,7 @@ jobs:
         with:
           name: windows-ux-audit-log
           path: |
-            windows-ux-audit.out
-            C:\ux\*.log
+            audit-logs/
+            audit1.out
+            audit2.out
           if-no-files-found: warn
