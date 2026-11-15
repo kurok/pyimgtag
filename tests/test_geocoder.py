@@ -278,3 +278,136 @@ class TestConcurrentRateLimit:
         assert len(calls) == 1
         assert clock.now == pytest.approx(1.1)
         geo.close()
+
+
+# Real Nominatim replies (zoom 10, addressdetails=1), trimmed to the fields
+# the geocoder reads.
+_SWISS = {
+    "address": {
+        "town": "Zermatt",
+        "state": "Valais/Wallis",
+        "country": "Schweiz / Suisse / Svizzera / Svizra",
+        "country_code": "ch",
+    }
+}
+_BRUSSELS = {
+    "address": {
+        "city": "Bruxelles - Brussel",
+        "region": "Région de Bruxelles-Capitale - Brussels Hoofdstedelijk Gewest",
+        "country": "België / Belgique / Belgien",
+        "country_code": "be",
+    }
+}
+
+
+def _reply(payload: dict) -> MagicMock:
+    resp = MagicMock()
+    resp.json.return_value = payload
+    resp.raise_for_status.return_value = None
+    return resp
+
+
+class TestOneNamePerPlace:
+    """#434: Nominatim's slash-joined multilingual names become one name."""
+
+    def test_country_and_region_are_the_native_name(self, tmp_path):
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        with patch.object(geo._session, "get", return_value=_reply(_SWISS)), patch("time.sleep"):
+            result = geo.resolve(46.02, 7.75)
+        assert result.nearest_country == "Schweiz"
+        assert result.nearest_region == "Valais"
+        assert result.nearest_city == "Zermatt"
+
+    def test_brussels_keeps_its_double_city_name(self, tmp_path):
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        with patch.object(geo._session, "get", return_value=_reply(_BRUSSELS)), patch("time.sleep"):
+            result = geo.resolve(50.85, 4.35)
+        assert result.nearest_country == "België"
+        assert result.nearest_region == "Région de Bruxelles-Capitale"
+        # The city's double name is how it is signposted: kept on purpose.
+        assert result.nearest_city == "Bruxelles - Brussel"
+
+    def test_the_cache_round_trips_the_normalised_value(self, tmp_path):
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        with patch.object(geo._session, "get", return_value=_reply(_SWISS)), patch("time.sleep"):
+            geo.resolve(46.02, 7.75)
+        fresh = ReverseGeocoder(cache_dir=tmp_path)
+        with patch.object(fresh._session, "get") as get:
+            again = fresh.resolve(46.02, 7.75)
+        get.assert_not_called()
+        assert again.nearest_country == "Schweiz"
+
+    def test_an_old_cache_entry_is_normalised_on_read(self, tmp_path):
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        key = "46.02,7.75"
+        # What a geocode_cache.json written before #434 holds.
+        geo._cache.set(
+            key,
+            {
+                "nearest_place": "Zermatt",
+                "nearest_city": None,
+                "nearest_region": "Wallis / Valais",
+                "nearest_country": "Schweiz / Suisse / Svizzera / Svizra",
+                "error": None,
+            },
+        )
+        with patch.object(geo._session, "get") as get:
+            result = geo._cached(key)
+        get.assert_not_called()
+        assert result is not None
+        assert (result.nearest_country, result.nearest_region) == ("Schweiz", "Wallis")
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("Schweiz / Suisse / Svizzera / Svizra", "Schweiz"),
+            ("België / Belgique / Belgien", "België"),
+            ("France", "France"),
+            (None, None),
+            ("", ""),
+        ],
+    )
+    def test_country(self, raw, expected):
+        assert geo_mod.native_name(raw, geo_mod._COUNTRY_SEPARATORS) == expected
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("Valais/Wallis", "Valais"),
+            ("Bern/Berne", "Bern"),
+            ("Trentino-Alto Adige/Südtirol", "Trentino-Alto Adige"),
+            (
+                "Région de Bruxelles-Capitale - Brussels Hoofdstedelijk Gewest",
+                "Région de Bruxelles-Capitale",
+            ),
+            ("Île-de-France", "Île-de-France"),
+            ("Provence-Alpes-Côte d'Azur", "Provence-Alpes-Côte d'Azur"),
+        ],
+    )
+    def test_region(self, raw, expected):
+        assert geo_mod.native_name(raw, geo_mod._REGION_SEPARATORS) == expected
+
+    @pytest.mark.parametrize(
+        "raw", ["Biel/Bienne", "Bolzano - Bozen", "Bruxelles - Brussel", "香港 Hong Kong"]
+    )
+    def test_city_double_names_are_kept(self, raw):
+        """Known limit: a city's double name is not split (it is its signposted name)."""
+        assert geo_mod.native_name(raw, geo_mod._LOCALITY_SEPARATORS) == raw
+
+    def test_the_digikam_tree_has_one_places_node_per_country(self, tmp_path):
+        from pyimgtag.commands.export import build_tag_tree
+
+        geo = ReverseGeocoder(cache_dir=tmp_path)
+        with patch.object(geo._session, "get", return_value=_reply(_SWISS)), patch("time.sleep"):
+            result = geo.resolve(46.02, 7.75)
+        rows = [
+            {
+                "tags": ["mountain"],
+                "nearest_country": result.nearest_country,
+                "nearest_region": result.nearest_region,
+                "nearest_city": result.nearest_city,
+            }
+        ]
+        places = build_tag_tree(rows)["Places"]
+        assert list(places) == ["Schweiz"]
+        assert list(places["Schweiz"]) == ["Valais"]
