@@ -415,11 +415,11 @@ identically for `pyimgtag judge`.
 | `--jsonl-stdout` | JSONL output to stdout |
 | `--no-recursive` | Only scan the top-level directory (no subdirectories) |
 | `--newest-first` | Process newest files first (by modification time) |
-| `--write-back` | Write tags/description back to Apple Photos *(macOS only; uses osascript by default — set `PYIMGTAG_USE_PHOTOSCRIPT=1` to opt into the faster in-process photoscript path on stable hosts)* |
+| `--write-back` | Write tags/description back to Apple Photos *(macOS only; uses osascript by default — set `PYIMGTAG_USE_PHOTOSCRIPT=1` to opt into the faster in-process photoscript path on stable hosts)*. Each progress line ends with `\| photos` when the write succeeds; the summary adds `Written back` and `Photos failures` |
 | `--write-back-mode overwrite\|append` | Write-back strategy: replace all keywords (`overwrite`, default) or merge with existing (`append`) |
 | `--skip-if-tagged` | Skip the model for photos that already have keywords in Apple Photos *(`--photos-library` only)* |
-| `--write-exif` | Write description and keywords to image EXIF via exiftool |
-| `--sidecar-only` | Write metadata to an XMP sidecar (`.xmp`) instead of modifying the original |
+| `--write-exif` | Write description and keywords to image EXIF via exiftool. Each progress line ends with `\| exif` (or `\| sidecar` for formats exiftool cannot write in place), and the summary adds `Metadata written`, `Sidecars written` and `Write failures` |
+| `--sidecar-only` | Write metadata to an XMP sidecar (`.xmp`) instead of modifying the original. Each progress line ends with `\| sidecar`; the summary adds `Sidecars written` and `Write failures` |
 | `--metadata-format auto\|xmp\|iptc\|exif` | Which metadata fields to write with `--write-exif` (default: `auto`, all fields) |
 | `--dedup` | Skip duplicates via perceptual hash |
 | `--dedup-threshold N` | Hamming distance threshold (default: 5) |

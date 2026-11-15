@@ -754,7 +754,7 @@ def cmd_run(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         try:
             interrupted = _tag(ctx)
             _write_run_outputs(results, args, vocabulary)
-            _print_summary(stats)
+            _print_summary(stats, args)
             if vocabulary is not None:
                 report = getattr(args, "output_json", None)
                 _print_vocabulary_summary(
@@ -1030,8 +1030,14 @@ def _write_metadata(
     rich_desc: str | None,
     args: argparse.Namespace,
     vocabulary: Vocabulary | None = None,
-) -> None:
-    """Write metadata for one image: sidecar-only, direct, or auto-fallback."""
+) -> str | None:
+    """Write metadata for one image: sidecar-only, direct, or auto-fallback.
+
+    Returns:
+        ``"exif"`` when written into the file, ``"sidecar"`` when an XMP
+        sidecar was written (asked for, or the format cannot be written
+        directly), ``None`` when the write failed (the reason is printed).
+    """
     from pyimgtag.exif_writer import (
         SUPPORTED_DIRECT_WRITE_EXTENSIONS,
         write_exif_description,
@@ -1049,7 +1055,8 @@ def _write_metadata(
         )
         if err:
             print(f"  Sidecar write failed: {err}", file=sys.stderr)
-        return
+            return None
+        return "sidecar"
 
     # Direct write with auto-fallback for unsupported extensions
     ext = Path(result.file_path).suffix.lower()
@@ -1066,7 +1073,8 @@ def _write_metadata(
         )
         if err:
             print(f"  Sidecar write failed: {err}", file=sys.stderr)
-        return
+            return None
+        return "sidecar"
 
     err = write_exif_description(
         result.file_path,
@@ -1077,6 +1085,8 @@ def _write_metadata(
     )
     if err:
         print(f"  EXIF write failed: {err}", file=sys.stderr)
+        return None
+    return "exif"
 
 
 def _hierarchical_for(
@@ -1176,6 +1186,7 @@ def _finalize_result(
         progress_db.mark_done(file_path, result)
 
     rich_desc = result.build_description()
+    written: list[str] = []
 
     if (
         args.write_back
@@ -1194,6 +1205,10 @@ def _finalize_result(
         )
         if err:
             print(f"  Write-back failed: {err}", file=sys.stderr)
+            stats["write_back_failures"] += 1
+        else:
+            stats["written_back"] += 1
+            written.append("photos")
 
     if (getattr(args, "write_exif", False) or getattr(args, "sidecar_only", False)) and result.tags:
         if args.dry_run:
@@ -1204,7 +1219,15 @@ def _finalize_result(
                     print(f"    description: {rich_desc[:80]}", file=sys.stderr)
                 print(f"    keywords: {', '.join(result.tags)}", file=sys.stderr)
         else:
-            _write_metadata(result, rich_desc, args, vocabulary)
+            wrote = _write_metadata(result, rich_desc, args, vocabulary)
+            if wrote == "sidecar":
+                stats["sidecars_written"] += 1
+                written.append(wrote)
+            elif wrote == "exif":
+                stats["metadata_written"] += 1
+                written.append(wrote)
+            else:
+                stats["metadata_write_failures"] += 1
 
     result.phash = phash_map.get(str(file_path))
     results.append(result)
@@ -1213,9 +1236,9 @@ def _finalize_result(
     if args.jsonl_stdout:
         print(result_to_jsonl(result))
     elif args.verbose or args.dry_run:
-        _print_verbose(result, stats["processed"], args.limit or stats["scanned"])
+        _print_verbose(result, stats["processed"], args.limit or stats["scanned"], written)
     else:
-        _print_brief(result, stats["processed"], args.limit or stats["scanned"])
+        _print_brief(result, stats["processed"], args.limit or stats["scanned"], written)
 
 
 def _new_stats(scanned: int) -> dict[str, int]:
@@ -1233,10 +1256,17 @@ def _new_stats(scanned: int) -> dict[str, int]:
         "model_failures": 0,
         "geocode_failures": 0,
         "resumed_from_db": 0,
+        "metadata_written": 0,
+        "sidecars_written": 0,
+        "metadata_write_failures": 0,
+        "written_back": 0,
+        "write_back_failures": 0,
     }
 
 
-def _print_brief(result: ImageResult, idx: int, total: int) -> None:
+def _print_brief(
+    result: ImageResult, idx: int, total: int, written: list[str] | None = None
+) -> None:
     tags = ", ".join(result.tags) if result.tags else "(none)"
     loc = result.nearest_city or result.nearest_place or ""
     if result.nearest_country and loc:
@@ -1248,6 +1278,9 @@ def _print_brief(result: ImageResult, idx: int, total: int) -> None:
     if loc:
         parts.append(f"| {loc}")
     parts.append(f"| {status}")
+    if written:
+        # Where this photo's tags went: exif / sidecar / photos.
+        parts.append(f"| {' + '.join(written)}")
     print(" ".join(parts), file=sys.stderr)
 
 
@@ -1271,7 +1304,9 @@ def _shorten(text: str, width: int) -> str:
     return cut.rstrip(" ,;:—-") + "…"
 
 
-def _print_verbose(result: ImageResult, idx: int, total: int) -> None:
+def _print_verbose(
+    result: ImageResult, idx: int, total: int, written: list[str] | None = None
+) -> None:
     print(f"[{idx}/{total}] {result.file_name}", file=sys.stderr)
     print(f"  Path:     {result.file_path}", file=sys.stderr)
     print(f"  Date:     {result.image_date or '(unknown)'}", file=sys.stderr)
@@ -1314,10 +1349,19 @@ def _print_verbose(result: ImageResult, idx: int, total: int) -> None:
         print(f"  Error:    {summary}", file=sys.stderr)
         if detail:
             print(f"  Detail:   {detail}", file=sys.stderr)
+    if written:
+        print(f"  Written:  {', '.join(written)}", file=sys.stderr)
     print(file=sys.stderr)
 
 
-def _print_summary(stats: dict) -> None:
+def _writes_requested(args: argparse.Namespace) -> bool:
+    """True when the run writes metadata anywhere (files, sidecars, Photos)."""
+    return any(
+        bool(getattr(args, flag, False)) for flag in ("write_exif", "sidecar_only", "write_back")
+    )
+
+
+def _print_summary(stats: dict, args: argparse.Namespace | None = None) -> None:
     print("\n--- Summary ---", file=sys.stderr)
     print(f"  Scanned:          {stats['scanned']}", file=sys.stderr)
     print(f"  Processed:        {stats['processed']}", file=sys.stderr)
@@ -1331,6 +1375,19 @@ def _print_summary(stats: dict) -> None:
     print(f"  Model failures:   {stats['model_failures']}", file=sys.stderr)
     print(f"  Geocode failures: {stats['geocode_failures']}", file=sys.stderr)
     print(f"  Resumed (DB):     {stats['resumed_from_db']}", file=sys.stderr)
+    # Only for the writes that were asked for, so the default summary is unchanged.
+    if args is None:
+        return
+    sidecar_only = bool(getattr(args, "sidecar_only", False))
+    write_exif = bool(getattr(args, "write_exif", False))
+    if write_exif and not sidecar_only:
+        print(f"  Metadata written: {stats.get('metadata_written', 0)}", file=sys.stderr)
+    if write_exif or sidecar_only:
+        print(f"  Sidecars written: {stats.get('sidecars_written', 0)}", file=sys.stderr)
+        print(f"  Write failures:   {stats.get('metadata_write_failures', 0)}", file=sys.stderr)
+    if getattr(args, "write_back", False):
+        print(f"  Written back:     {stats.get('written_back', 0)}", file=sys.stderr)
+        print(f"  Photos failures:  {stats.get('write_back_failures', 0)}", file=sys.stderr)
 
 
 def _print_vocabulary_summary(
