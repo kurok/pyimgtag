@@ -1738,6 +1738,15 @@ def _add_dedup_subcommand(subparsers: Any) -> None:
     undo_p = dedup_sub.add_parser("undo", help="Move quarantined copies back and un-resolve")
     undo_p.add_argument("--db", help=_DEFAULT_DB_HELP)
     undo_p.add_argument("--group", type=int, metavar="ID", help="Only undo this group id")
+    undo_p.add_argument(
+        "--forget-missing",
+        action="store_true",
+        help=(
+            "With --group: forget copies whose quarantine folder you are sure was deleted "
+            "(not just unmounted or mounted under another name), so the group can be "
+            "planned again. Only applies while the library itself is reachable"
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
