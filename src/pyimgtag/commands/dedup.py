@@ -102,7 +102,10 @@ def _handle_scan(args: argparse.Namespace) -> int:
     with ProgressDB(db_path=args.db) as db:
         if db.count_images() == 0:
             # dedup works on the tagged library, not a folder: an empty DB is
-            # "nothing scanned yet", which "0 groups" would hide.
+            # "nothing scanned yet", which "0 groups" would hide. A plan left
+            # from rows that are gone (reprocess, cleanup-drift) is cleared, so
+            # 'dedup list' does not keep offering groups of nothing.
+            db.replace_unresolved_dedup_groups([], threshold)
             print(
                 "The database has no tagged photos yet, so there is nothing to scan. "
                 "Run 'pyimgtag run --input-dir <DIR>' first.",

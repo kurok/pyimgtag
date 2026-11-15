@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pyimgtag.commands.events import _folder_name
 from pyimgtag.main import main
 from pyimgtag.models import ImageResult
 from pyimgtag.progress_db import ProgressDB
@@ -85,3 +86,64 @@ def test_unique_names_are_unchanged(tmp_path, capsys):
     out = capsys.readouterr()
     assert "(2024-" not in out.out
     assert "folder name" not in out.err
+
+
+# --- folder names: suffix chosen once, always kept whole --------------------
+
+
+def _event(event_id: int, name: str, date: str = "2024-09-01 10:00:00") -> dict:
+    return {"id": event_id, "name": name, "started_at": date}
+
+
+def test_same_name_same_day_falls_back_to_the_id():
+    used: set[str] = set()
+    names = [
+        _folder_name(_event(1, "Zürich"), used),
+        _folder_name(_event(2, "Zürich"), used),
+        _folder_name(_event(3, "Zürich"), used),
+    ]
+    assert names == [
+        ("Zürich", ""),
+        ("Zürich (2024-09-01)", " (2024-09-01)"),
+        ("Zürich (3)", " (3)"),
+    ]
+
+
+def test_a_long_name_keeps_its_suffix_and_distinct_folders():
+    long_name = "A" * 110
+    used: set[str] = set()
+    first, _ = _folder_name(_event(1, long_name), used)
+    second, suffix = _folder_name(_event(2, long_name), used)
+    assert first != second
+    assert len(second) <= 100
+    assert second.endswith(suffix) and suffix == " (2024-09-01)"
+
+
+def test_a_name_ending_in_a_dot_gets_a_clean_suffix():
+    used: set[str] = set()
+    _folder_name(_event(1, "Trip to St."), used)
+    folder, suffix = _folder_name(_event(2, "Trip to St."), used)
+    assert folder == "Trip to St (2024-09-01)"
+    assert suffix == " (2024-09-01)"
+
+
+def test_names_equal_only_after_cleaning_are_suffixed_too():
+    used: set[str] = set()
+    _folder_name(_event(1, "A/B"), used)
+    assert _folder_name(_event(2, "A-B"), used)[1] == " (2024-09-01)"
+
+
+def test_dedup_scan_on_an_emptied_db_clears_the_old_plan(tmp_path, capsys):
+    db_path = tmp_path / "p.db"
+    with ProgressDB(db_path=db_path) as db:
+        img = tmp_path / "a.jpg"
+        img.write_bytes(b"x")
+        db.mark_done(img, ImageResult(file_path=str(img), file_name="a.jpg", tags=["x"]))
+        db.replace_unresolved_dedup_groups([("duplicate", [str(img), str(img) + "2"])], 5)
+        assert db.list_dedup_groups()
+        db.reset_all()
+
+    assert main(["dedup", "scan", "--db", str(db_path)]) == 0
+
+    with ProgressDB(db_path=db_path) as db:
+        assert db.list_dedup_groups() == []

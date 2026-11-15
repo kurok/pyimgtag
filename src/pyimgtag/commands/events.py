@@ -166,11 +166,8 @@ def _list(args: argparse.Namespace, db: ProgressDB) -> int:
     # which is how the folders on disk tell them apart too. Computed over every
     # event in apply's order, so it matches whatever --limit shows here.
     all_events = events if args.limit is None else db.list_events()
-    name_counts: dict[str, int] = {}
-    for event in all_events:
-        name_counts[event["name"] or ""] = name_counts.get(event["name"] or "", 0) + 1
     used: set[str] = set()
-    folders = {event["id"]: _unique_dirname(event, used) for event in all_events}
+    suffixes = {event["id"]: _folder_name(event, used)[1] for event in all_events}
     repeated = False
 
     name_w = 34
@@ -178,10 +175,10 @@ def _list(args: argparse.Namespace, db: ProgressDB) -> int:
     print("-" * (5 + 2 + name_w + 2 + 23 + 2 + 4 + 2 + 6))
     for event in events:
         name = event["name"] or ""
-        if name_counts.get(name, 0) > 1:
+        suffix = suffixes.get(event["id"], "")
+        if suffix:
             # The folder's suffix (" (2024-09-01)" or " (17)") is what tells the
             # rows apart, so it is kept whole and the name is shortened instead.
-            suffix = folders[event["id"]][len(_safe_dirname(name)) :]
             name = shorten(name, name_w - len(suffix)) + suffix
             repeated = True
         if len(name) > name_w:
@@ -364,20 +361,39 @@ def _safe_dirname(name: str) -> str:
     return cleaned[:100] or "event"
 
 
-def _unique_dirname(event: dict, used: set[str]) -> str:
-    """A folder name for *event* that no earlier event has taken.
+_DIRNAME_MAX = 100
 
-    Falls back to the start date, then the event id — both stable across runs,
-    so re-exporting lands on the same folders rather than shuffling them.
+
+def _folder_name(event: dict, used: set[str]) -> tuple[str, str]:
+    """The folder for *event* that no earlier event has taken, and its suffix.
+
+    The plain name first, then the start date, then the event id appended —
+    all stable across runs, so re-exporting lands on the same folders rather
+    than shuffling them. The name is shortened to leave room for the suffix:
+    a suffix cut off by the length cap would put two events in one folder.
+
+    Returns:
+        ``(folder, suffix)``; *suffix* is ``""`` when the plain name was free,
+        else the ``" (YYYY-MM-DD)"`` or ``" (id)"`` that was added.
     """
-    base = _safe_dirname(event["name"])
+    base = _safe_dirname(event["name"] or "")
+    date = (event.get("started_at") or "")[:10]
+    suffixes = ["", f" ({date})" if date else None, f" ({event['id']})"]
     candidate = base
-    if candidate in used:
-        candidate = _safe_dirname(f"{base} ({(event.get('started_at') or '')[:10]})")
-    if candidate in used:
-        candidate = _safe_dirname(f"{base} ({event['id']})")
+    suffix = ""
+    for suffix in (s for s in suffixes if s is not None):
+        # The suffixes hold only digits, '-', spaces and parentheses, which
+        # every filesystem accepts, so only the base needs trimming.
+        candidate = base[: _DIRNAME_MAX - len(suffix)].rstrip(". ") + suffix
+        if candidate not in used:
+            break
     used.add(candidate)
-    return candidate
+    return candidate, suffix
+
+
+def _unique_dirname(event: dict, used: set[str]) -> str:
+    """The folder name :func:`_folder_name` picks for *event*."""
+    return _folder_name(event, used)[0]
 
 
 def _apply(args: argparse.Namespace, db: ProgressDB) -> int:
