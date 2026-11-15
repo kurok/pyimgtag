@@ -764,7 +764,9 @@ Events|Italy 2025
 
 Places nest country → region → city. A photo geocoded to a country but no city
 becomes `Places|Spain` — never `Places|Spain||Madrid`, which would import as a
-nameless tag. With a controlled vocabulary loaded, a tag's own hierarchy is
+nameless tag. A city named like its region or country is one node:
+Zürich in canton Zürich is `Places|Schweiz|Zürich`, not a folder inside
+itself. With a controlled vocabulary loaded, a tag's own hierarchy is
 used: `beach` under `Nature|Coast` writes `Tags|Nature|Coast|beach`.
 
 Sidecars get the same treatment (`--sidecar-only`), which matters because RAW
