@@ -1552,7 +1552,7 @@ An older pyimgtag refuses a database written by a newer one rather than
 running against a schema it does not know:
 
 ```text
-Error: database ~/.cache/pyimgtag/progress.db has schema v18, but this pyimgtag supports up to v17. Upgrade pyimgtag, or point --db at another file.
+Error: database ~/.cache/pyimgtag/progress.db has schema v19, but this pyimgtag supports up to v18. Upgrade pyimgtag, or point --db at another file.
 ```
 
 To go back to an older release, stop every pyimgtag process (CLI, dashboard,

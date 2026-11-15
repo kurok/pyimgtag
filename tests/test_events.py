@@ -858,3 +858,29 @@ def test_query_event_limit_counts_the_events_photos(tmp_path, capsys):
     assert rc == 0
     printed = [ln for ln in capsys.readouterr().out.splitlines() if ln.strip()]
     assert len(printed) == 1 and printed[0] in paths[3:]
+
+
+def test_redetection_refreshes_a_fallback_name_but_keeps_a_chosen_one(tmp_path):
+    """#460 review: an event named after its place follows the cleaned place;
+    a user or model name stays."""
+    from pyimgtag.progress_db import ProgressDB
+
+    with ProgressDB(tmp_path / "p.db") as db:
+        db.reconcile_events(
+            [
+                _cluster(
+                    "Valais/Wallis — June 2024", ["/a.jpg", "/b.jpg"], "2024-06-01", "2024-06-02"
+                )
+            ]
+        )
+        auto = db.list_events()[0]["id"]
+        db.reconcile_events(
+            [_cluster("Valais — June 2024", ["/a.jpg", "/b.jpg"], "2024-06-01", "2024-06-02")]
+        )
+        assert db.get_event(auto)["name"] == "Valais — June 2024"
+
+        db.rename_event(auto, "Ski trip")
+        db.reconcile_events(
+            [_cluster("Valais — June 2024", ["/a.jpg", "/b.jpg"], "2024-06-01", "2024-06-02")]
+        )
+        assert db.get_event(auto)["name"] == "Ski trip"

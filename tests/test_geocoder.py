@@ -368,7 +368,7 @@ class TestOneNamePerPlace:
         ],
     )
     def test_country(self, raw, expected):
-        assert geo_mod.native_name(raw, geo_mod._COUNTRY_SEPARATORS) == expected
+        assert geo_mod.native_name(raw, geo_mod.COUNTRY_SEPARATORS) == expected
 
     @pytest.mark.parametrize(
         ("raw", "expected"),
@@ -385,14 +385,14 @@ class TestOneNamePerPlace:
         ],
     )
     def test_region(self, raw, expected):
-        assert geo_mod.native_name(raw, geo_mod._REGION_SEPARATORS) == expected
+        assert geo_mod.native_name(raw, geo_mod.REGION_SEPARATORS) == expected
 
     @pytest.mark.parametrize(
         "raw", ["Biel/Bienne", "Bolzano - Bozen", "Bruxelles - Brussel", "香港 Hong Kong"]
     )
     def test_city_double_names_are_kept(self, raw):
         """Known limit: a city's double name is not split (it is its signposted name)."""
-        assert geo_mod.native_name(raw, geo_mod._LOCALITY_SEPARATORS) == raw
+        assert geo_mod.native_name(raw, geo_mod.LOCALITY_SEPARATORS) == raw
 
     def test_the_digikam_tree_has_one_places_node_per_country(self, tmp_path):
         from pyimgtag.commands.export import build_tag_tree

@@ -24,46 +24,24 @@ import requests
 from pyimgtag import __version__
 from pyimgtag.cache import DiskCache
 from pyimgtag.models import GeoResult
+from pyimgtag.place_names import (
+    COUNTRY_SEPARATORS,
+    LOCALITY_SEPARATORS,
+    REGION_SEPARATORS,
+    native_name,
+)
 
 _NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 
-# Multilingual places carry every official name in their OSM ``name`` tag,
-# joined by a separator that depends on the mappers' convention (sampled from
-# real Nominatim replies):
-#   country   "Schweiz / Suisse / Svizzera / Svizra", "België / Belgique / Belgien"
-#   region    "Valais/Wallis", "Bern/Berne",
-#             "Région de Bruxelles-Capitale - Brussels Hoofdstedelijk Gewest"
-# By convention the first name is the majority/local language, so that one
-# is kept.
-_COUNTRY_SEPARATORS = (" / ", "/")
-_REGION_SEPARATORS = (" / ", "/", " - ")
-# Cities and places are left alone apart from the spaced slash: a bare slash or
-# a spaced hyphen there ("Biel/Bienne", "Bolzano - Bozen") is usually the
-# locally used double name, not a list to pick from.
-_LOCALITY_SEPARATORS = (" / ",)
 
-
-def native_name(name: str | None, separators: tuple[str, ...] = (" / ",)) -> str | None:
-    """Return the first name of a multilingual place name.
-
-    ``"Schweiz / Suisse / Svizzera / Svizra"`` becomes ``"Schweiz"``. Only the
-    given *separators* split; a name without one is returned unchanged.
-    """
-    if not name:
-        return name
-    for separator in separators:
-        if separator in name:
-            first = name.split(separator, 1)[0].strip()
-            return first or name
-    return name
-
-
+# One name per place field (#434, #460): the rules live in place_names so the
+# DB migration that cleans older rows applies exactly the same ones.
 def _normalise(result: GeoResult) -> GeoResult:
     """One name per field, applied to fresh lookups and old cache entries."""
-    result.nearest_place = native_name(result.nearest_place, _LOCALITY_SEPARATORS)
-    result.nearest_city = native_name(result.nearest_city, _LOCALITY_SEPARATORS)
-    result.nearest_region = native_name(result.nearest_region, _REGION_SEPARATORS)
-    result.nearest_country = native_name(result.nearest_country, _COUNTRY_SEPARATORS)
+    result.nearest_place = native_name(result.nearest_place, LOCALITY_SEPARATORS)
+    result.nearest_city = native_name(result.nearest_city, LOCALITY_SEPARATORS)
+    result.nearest_region = native_name(result.nearest_region, REGION_SEPARATORS)
+    result.nearest_country = native_name(result.nearest_country, COUNTRY_SEPARATORS)
     return result
 
 

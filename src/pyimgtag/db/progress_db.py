@@ -21,6 +21,12 @@ from pyimgtag.db.judge_db import _DEFAULT_JUDGE_RESULTS_LIMIT, JudgeDB
 from pyimgtag.db.map_db import MAX_CELLS, MapDB
 from pyimgtag.db.search_db import SearchDB
 from pyimgtag.models import FaceDetection, ImageResult, PersonCluster
+from pyimgtag.place_names import (
+    COUNTRY_SEPARATORS,
+    LOCALITY_SEPARATORS,
+    REGION_SEPARATORS,
+    native_name,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -150,6 +156,50 @@ def _serialise_connection_access(cls: _C) -> _C:
             continue
         setattr(cls, name, _locked(attr))
     return cls
+
+
+#: Marks a data-only migration statement that applies to one column, as
+#: ``/* optional data fix: <table>.<column> */``. The runner checks with
+#: ``PRAGMA table_info`` that the column exists and skips the statement when it
+#: does not (nothing to fix there); no error is ever swallowed.
+_OPTIONAL_DATA_FIX = "/* optional data fix: "
+
+#: SQL function name for :func:`pyimgtag.place_names.native_name`, registered on
+#: every connection so a migration applies exactly the geocoder's rule.
+_NATIVE_NAME_SQL = "pyimgtag_native_name"
+_SEPARATOR_SETS = {
+    "country": COUNTRY_SEPARATORS,
+    "region": REGION_SEPARATORS,
+    "locality": LOCALITY_SEPARATORS,
+}
+
+
+def _native_name_sql(value: str | None, kind: str) -> str | None:
+    return native_name(value, _SEPARATOR_SETS[kind])
+
+
+def _first_name_update(column: str, kind: str) -> str:
+    """Migration SQL that keeps the first name of a separator-joined place.
+
+    It calls :func:`pyimgtag.place_names.native_name` through a registered SQL
+    function, so the stored values and new lookups follow one rule.
+    """
+    where = " OR ".join(f"instr({column}, '{sep}') > 0" for sep in _SEPARATOR_SETS[kind])
+    # Column names and separator kinds are module constants, never user input.
+    return (
+        f"{_OPTIONAL_DATA_FIX}processed_images.{column} */ "
+        f"UPDATE processed_images SET {column} = {_NATIVE_NAME_SQL}({column}, '{kind}') "  # nosec B608
+        f"WHERE {where}"
+    )
+
+
+def _optional_column(sql: str) -> tuple[str, str] | None:
+    """``(table, column)`` of an optional data fix, else ``None``."""
+    if not sql.startswith(_OPTIONAL_DATA_FIX):
+        return None
+    target = sql[len(_OPTIONAL_DATA_FIX) :].split(" */", 1)[0]
+    table, _, column = target.partition(".")
+    return table, column
 
 
 @_serialise_connection_access
@@ -341,6 +391,13 @@ class ProgressDB:
         (17, "ALTER TABLE processed_images ADD COLUMN duration_sec REAL"),
         (17, "UPDATE processed_images SET media_type = 'image' WHERE media_type IS NULL"),
         (17, "CREATE INDEX IF NOT EXISTS idx_pi_media_type ON processed_images(media_type)"),
+        # 0.35.0: one place name per field (#460). Nominatim returns multilingual
+        # places as every official name joined by a separator; #446 keeps only
+        # the first for new lookups (geocoder.native_name). These rewrite rows
+        # tagged before that with the same rule.
+        (18, _first_name_update("nearest_country", "country")),
+        (18, _first_name_update("nearest_region", "region")),
+        (18, _first_name_update("nearest_city", "locality")),
     )
 
     def __init__(self, db_path: str | Path | None = None, *, must_exist: bool = False) -> None:
@@ -616,11 +673,16 @@ class ProgressDB:
             return
         if backup and os.environ.get(NO_MIGRATION_BACKUP_ENV) != "1":
             self._backup_before_migrating(current)
+        # Data fixes call the geocoder's own naming rule (v18).
+        self._conn.create_function(_NATIVE_NAME_SQL, 2, _native_name_sql, deterministic=True)
         for target_ver in pending_versions:
             stmts = [sql for ver, sql in self._MIGRATIONS if ver == target_ver]
             self._conn.execute(f"SAVEPOINT migrate_v{int(target_ver)}")  # nosec B608
             try:
                 for sql in stmts:
+                    optional = _optional_column(sql)
+                    if optional is not None and not self._has_column(*optional):
+                        continue  # a data fix for a column this table never had
                     try:
                         self._conn.execute(sql)
                     except sqlite3.OperationalError as exc:
@@ -634,6 +696,10 @@ class ProgressDB:
                 self._conn.execute(f"ROLLBACK TO migrate_v{int(target_ver)}")  # nosec B608
                 raise
         self._conn.commit()
+
+    def _has_column(self, table: str, column: str) -> bool:
+        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()  # nosec B608
+        return any(row[1] == column for row in rows)
 
     def _backup_before_migrating(self, version: int) -> Path:
         """Copy the database to ``<db>.bak-v<version>``; keep only that backup.
