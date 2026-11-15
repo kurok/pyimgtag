@@ -46,18 +46,18 @@ def test_write_exif_counts_every_file(tmp_path: Path) -> None:
     result = _run(tmp_path, "--write-exif")
     assert result.returncode == 0, result.stderr
     if shutil.which("exiftool"):
-        assert "  Metadata written: 2" in result.stderr
+        assert "  Metadata written:  2" in result.stderr
         assert result.stderr.count("| exif") == 2
     else:
-        assert "  Metadata written: 0" in result.stderr
-        assert "  Write failures:   2" in result.stderr
+        assert "  Metadata written:  0" in result.stderr
+        assert "  Write failures:    2" in result.stderr
 
 
 def test_dry_run_reports_zero_written(tmp_path: Path) -> None:
     result = _run(tmp_path, "--write-exif", "--dry-run")
     assert result.returncode == 0, result.stderr
-    assert "  Metadata written: 0" in result.stderr
-    assert "  Write failures:   0" in result.stderr
+    assert "  Metadata written:  0" in result.stderr
+    assert "  Write failures:    0" in result.stderr
 
 
 def test_without_write_flags_the_summary_is_unchanged(tmp_path: Path) -> None:

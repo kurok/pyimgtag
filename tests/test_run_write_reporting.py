@@ -49,8 +49,8 @@ def test_two_exif_writes_are_counted_and_shown(tmp_path, capsys):
     _print_summary(stats, args)
     captured = capsys.readouterr()
     assert (captured.out + captured.err).count("| exif") == 2
-    assert "  Metadata written: 2" in captured.err
-    assert "  Write failures:   0" in captured.err
+    assert "  Metadata written:  2" in captured.err
+    assert "  Write failures:    0" in captured.err
 
 
 def test_sidecar_only_counts_sidecars(tmp_path, capsys):
@@ -61,7 +61,7 @@ def test_sidecar_only_counts_sidecars(tmp_path, capsys):
     _print_summary(stats, args)
     captured = capsys.readouterr()
     assert (captured.out + captured.err).count("| sidecar") == 2
-    assert "  Sidecars written: 2" in captured.err
+    assert "  Sidecars written:  2" in captured.err
     assert "Metadata written" not in captured.err
 
 
@@ -83,8 +83,8 @@ def test_a_failed_write_is_counted_and_not_marked(tmp_path, capsys):
     _print_summary(stats, args)
     captured = capsys.readouterr()
     assert "| exif" not in captured.out + captured.err
-    assert "  Metadata written: 0" in captured.err
-    assert "  Write failures:   1" in captured.err
+    assert "  Metadata written:  0" in captured.err
+    assert "  Write failures:    1" in captured.err
 
 
 def test_dry_run_writes_nothing_and_the_counter_is_zero(tmp_path, capsys):
@@ -94,7 +94,7 @@ def test_dry_run_writes_nothing_and_the_counter_is_zero(tmp_path, capsys):
         _finalize([_result(tmp_path / "a.jpg"), _result(tmp_path / "b.jpg")], args, stats)
     write.assert_not_called()
     _print_summary(stats, args)
-    assert "  Metadata written: 0" in capsys.readouterr().err
+    assert "  Metadata written:  0" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(("error", "written", "failed"), [(None, 1, 0), ("no access", 0, 1)])
@@ -106,8 +106,8 @@ def test_write_back_success_and_failure_are_told_apart(tmp_path, capsys, error, 
     _print_summary(stats, args)
     captured = capsys.readouterr()
     assert (stats["written_back"], stats["write_back_failures"]) == (written, failed)
-    assert f"  Written back:     {written}" in captured.err
-    assert f"  Photos failures:  {failed}" in captured.err
+    assert f"  Written back:      {written}" in captured.err
+    assert f"  Photos failures:   {failed}" in captured.err
     assert ("| photos" in captured.out + captured.err) is bool(written)
 
 

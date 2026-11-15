@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from pyimgtag.cleanup_drift import prune_drift, scan_drift
+from pyimgtag.cleanup_drift import PLATFORM_UNSUPPORTED, prune_drift, scan_drift
 from pyimgtag.progress_db import ProgressDB
 
 
@@ -65,7 +65,7 @@ def cmd_cleanup_drift(args: argparse.Namespace) -> int:
         f"{deleted_count} {verb}"
     )
     print(summary)
-    if report.photos_probe_error is not None:
+    if report.photos_probe_error not in (None, PLATFORM_UNSUPPORTED):
         _emit(
             f"note: Photos.app probe degraded ({report.photos_probe_error}); "
             "only disk_missing rows are detectable in this run."

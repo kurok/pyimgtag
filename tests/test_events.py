@@ -805,3 +805,29 @@ class TestAlbumApplescript(unittest.TestCase):
 
         with mock.patch("pyimgtag.applescript_writer._IS_MACOS", False):
             self.assertEqual(add_to_album("Trip", ["/photos/a.jpg"]), (False, 0))
+
+
+def test_events_list_marks_a_cut_name_with_an_ellipsis(tmp_path, capsys):
+    """#441: a name longer than the column ends in "…", never cut silently."""
+
+    from pyimgtag.commands.events import cmd_events
+    from pyimgtag.progress_db import ProgressDB
+
+    db_path = tmp_path / "p.db"
+    long_name = "City of Westminster — November 2026 walk"
+    with ProgressDB(db_path) as db:
+        db.reconcile_events([_cluster(long_name, ["/a.jpg"], "2026-11-14", "2026-11-14")])
+        db.reconcile_events(
+            [
+                _cluster(long_name, ["/a.jpg"], "2026-11-14", "2026-11-14"),
+                _cluster("Short", ["/b.jpg"], "2026-10-01", "2026-10-01"),
+            ]
+        )
+    from pyimgtag.main import build_parser
+
+    args = build_parser().parse_args(["events", "list", "--db", str(db_path)])
+    assert cmd_events(args) == 0
+    out = capsys.readouterr().out
+    assert long_name[:33] + "…" in out
+    assert "Short " in out
+    assert long_name not in out

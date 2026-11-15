@@ -744,3 +744,84 @@ class TestOutputFlagsAreConsistent:
             _parse(*argv, "--format", bad)
         assert exc.value.code == 2
         assert "invalid choice" in capsys.readouterr().err
+
+
+class TestNegativeBbox:
+    """#441: a negative first --bbox value works without the "=" form.
+
+    The bug exists on Python 3.12/3.13 (requires-python >= 3.12); 3.14's
+    argparse already accepts it, so the rewrite unit tests are the guard there.
+    """
+
+    def test_space_separated_negative_bbox_parses_through_main(self, tmp_path, capsys):
+        db = tmp_path / "p.db"
+        from pyimgtag.progress_db import ProgressDB
+
+        ProgressDB(db).close()
+        assert main(["query", "--db", str(db), "--bbox", "-20,170,-10,-170"]) == 0
+        assert "expected one argument" not in capsys.readouterr().err
+
+    def test_the_rewrite_only_touches_bbox_values(self) -> None:
+        from pyimgtag.main import _join_negative_option_values
+
+        assert _join_negative_option_values(["query", "--bbox", "-20,170,-10,-170"]) == [
+            "query",
+            "--bbox=-20,170,-10,-170",
+        ]
+        assert _join_negative_option_values(["query", "--bbox", "10,1,20,2"]) == [
+            "query",
+            "--bbox",
+            "10,1,20,2",
+        ]
+        assert _join_negative_option_values(["query", "--bb", "-20,170,-10,-170"]) == [
+            "query",
+            "--bb=-20,170,-10,-170",
+        ]
+        assert _join_negative_option_values(["query", "--", "--bbox", "-1,2,3,4"]) == [
+            "query",
+            "--",
+            "--bbox",
+            "-1,2,3,4",
+        ]
+        assert _join_negative_option_values(["query", "--b", "-1,2,3,4"]) == [
+            "query",
+            "--b",
+            "-1,2,3,4",
+        ]
+        assert _join_negative_option_values(["query", "--bbox", "--format", "json"]) == [
+            "query",
+            "--bbox",
+            "--format",
+            "json",
+        ]
+
+    def test_the_help_names_both_forms(self, capsys) -> None:
+        with pytest.raises(SystemExit):
+            _parse("query", "--help")
+        out = " ".join(capsys.readouterr().out.split())
+        assert "--bbox -20,170,-10,-170 or --bbox=-20,170,-10,-170" in out
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        {},
+        {"write_exif": True},
+        {"sidecar_only": True},
+        {"write_back": True, "write_exif": True},
+        {"write_back": True, "sidecar_only": True},
+    ],
+)
+def test_the_run_summary_is_aligned(capsys, flags) -> None:
+    """#441: every value in the run summary starts in the same column."""
+    from pyimgtag.commands.run import _new_stats, _print_summary
+
+    args = argparse.Namespace(write_exif=False, sidecar_only=False, write_back=False)
+    for k, v in flags.items():
+        setattr(args, k, v)
+    _print_summary(_new_stats(1234), args)
+    lines = [ln for ln in capsys.readouterr().err.splitlines() if ln.startswith("  ")]
+    columns = {len(ln) - len(ln.split()[-1]) for ln in lines}
+    assert len(columns) == 1, lines
+    assert all(ln.rstrip()[-1].isdigit() for ln in lines)
+    assert any(ln.startswith("  Skipped (no file): ") for ln in lines)
