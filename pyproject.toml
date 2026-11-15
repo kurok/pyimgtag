@@ -17,6 +17,8 @@ classifiers = [
     "Topic :: Multimedia :: Graphics",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
     "Intended Audience :: End Users/Desktop",
 ]
 dependencies = [
@@ -28,11 +30,11 @@ dependencies = [
 
 [project.optional-dependencies]
 heic = ["pillow-heif>=1.3"]
-photos = ["photoscript>=0.5.3"]
+photos = ["photoscript>=0.5.3; sys_platform == 'darwin'"]
 # Reliable Apple Photos reader: osxphotos reads the library SQLite directly
 # (exact names + photo UUIDs), so `faces import-photos` works on Photos builds
 # where AppleScript can't enumerate people (the -2741 failure).
-photos-db = ["osxphotos>=0.69"]
+photos-db = ["osxphotos>=0.69; sys_platform == 'darwin'"]
 # face_recognition_models is NOT on PyPI (archived git-only project).
 # _face_model_cache.inject_shim auto-downloads the .dat files on first use
 # to ~/.cache/pyimgtag/face_models/ so no manual install step is required.
@@ -74,8 +76,10 @@ search = [
 ]
 all = [
     "pillow-heif>=1.3",
-    "photoscript>=0.5.3",
-    "osxphotos>=0.69",
+    # Apple Photos access (macOS only; the markers make these no-ops elsewhere,
+    # so `pip install "pyimgtag[all]"` works on Linux and Windows).
+    "photoscript>=0.5.3; sys_platform == 'darwin'",
+    "osxphotos>=0.69; sys_platform == 'darwin'",
     "face-recognition>=1.3",
     "scikit-learn>=1.8",
     "fastapi>=0.136",

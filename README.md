@@ -237,6 +237,9 @@ ollama pull gemma4:e4b
 
 # Install pyimgtag
 pip install "pyimgtag[heic]"   # includes pillow-heif for HEIC
+# [all] works here too: the macOS-only parts (photoscript, osxphotos, Vision
+# OCR) are skipped, but face-recognition builds dlib from source and needs
+# CMake and a C++ compiler first: sudo apt-get install build-essential cmake
 # or from source
 git clone https://github.com/kurok/pyimgtag.git
 cd pyimgtag
@@ -276,6 +279,8 @@ ollama pull gemma4:e4b
 
 # Install pyimgtag
 pip install "pyimgtag[heic]"
+# [all] works here too (the macOS-only parts are skipped), but face-recognition
+# builds dlib from source: install CMake and Visual Studio Build Tools (C++) first
 # or from source
 git clone https://github.com/kurok/pyimgtag.git
 cd pyimgtag
