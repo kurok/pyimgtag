@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import html
 import os
+import re
 import shlex
 import subprocess  # nosec B404 - fixed argv, no shell
 import sys
@@ -45,7 +46,46 @@ Runner = Callable[[Sequence[str]], object]
 
 
 def _default_runner(argv: Sequence[str]) -> object:
-    return subprocess.run(list(argv), check=False, capture_output=True, text=True)  # nosec B603
+    try:
+        return subprocess.run(list(argv), check=False, capture_output=True, text=True)  # nosec B603
+    except FileNotFoundError:
+        # No service manager on PATH (e.g. a container without systemd).
+        return subprocess.CompletedProcess(list(argv), 127, "", f"{argv[0]}: command not found")
+    except OSError as exc:
+        return subprocess.CompletedProcess(list(argv), 126, "", f"{argv[0]}: {exc.strerror}")
+
+
+# launchctl load/unload exit 0 even when they fail; the failure is a stderr
+# line such as "Load failed: 5: Input/output error".
+_LAUNCHCTL_FAILED = re.compile(r"^(?:Load|Unload) failed:", re.MULTILINE)
+
+# The job is not loaded (or there is no user service manager to hold it), so
+# there is nothing to stop: uninstalling is still a success.
+_NOT_LOADED = (
+    "not loaded",
+    "does not exist",
+    "Could not find specified service",
+    "No such process",
+    "Failed to connect to bus",
+)
+
+
+def _failure(result: object, cmd: Sequence[str]) -> str | None:
+    """Return an error line if *result* says *cmd* failed, else ``None``.
+
+    A runner may return ``None`` (test doubles); that counts as success.
+    """
+    code = getattr(result, "returncode", 0) or 0
+    stderr = (getattr(result, "stderr", "") or "").strip()
+    if code == 0 and not _LAUNCHCTL_FAILED.search(stderr):
+        return None
+    detail = stderr or f"exit status {code}"
+    return f"Error: {' '.join(shlex.quote(c) for c in cmd)} failed: {detail}"
+
+
+def _not_loaded(result: object) -> bool:
+    stderr = getattr(result, "stderr", "") or ""
+    return any(marker in stderr for marker in _NOT_LOADED)
 
 
 def service_argv(cli_args: Sequence[str], python: str | None = None) -> list[str]:
@@ -170,8 +210,17 @@ def install_service(
         path.write_text(render_systemd_unit(argv), encoding="utf-8")
         run(["systemctl", "--user", "daemon-reload"])
         cmd = ["systemctl", "--user", "enable", "--now", SYSTEMD_UNIT_NAME]
-    run(cmd)
+    error = _failure(run(cmd), cmd)
     print(f"Wrote {path}", file=sys.stderr)
+    if error:
+        print(error, file=sys.stderr)
+        print(
+            "The unit file was written but the service is not running. Fix the "
+            "error above and re-run with --force, or remove the unit with "
+            "--uninstall-service.",
+            file=sys.stderr,
+        )
+        return 1
     print(f"Ran: {' '.join(shlex.quote(c) for c in cmd)}", file=sys.stderr)
     print(f"Service command: {' '.join(shlex.quote(a) for a in argv)}", file=sys.stderr)
     return 0
@@ -197,7 +246,13 @@ def uninstall_service(
         cmd = ["launchctl", "unload", "-w", str(path)]
     else:
         cmd = ["systemctl", "--user", "disable", "--now", SYSTEMD_UNIT_NAME]
-    run(cmd)
+    result = run(cmd)
+    error = _failure(result, cmd)
+    if error and not _not_loaded(result):
+        # The job may still be loaded: keep the unit so a retry can stop it.
+        print(error, file=sys.stderr)
+        print(f"Kept {path} so --uninstall-service can be retried.", file=sys.stderr)
+        return 1
     try:
         os.remove(path)
     except OSError as exc:
@@ -206,5 +261,8 @@ def uninstall_service(
     if plat != "Darwin":
         run(["systemctl", "--user", "daemon-reload"])
     print(f"Removed {path}", file=sys.stderr)
+    if error:
+        print("(the service was not loaded)", file=sys.stderr)
+        return 0
     print(f"Ran: {' '.join(shlex.quote(c) for c in cmd)}", file=sys.stderr)
     return 0

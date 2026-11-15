@@ -958,6 +958,9 @@ runs `<current python> -m pyimgtag watch …` so it does not depend on PATH,
 sets `PYIMGTAG_NO_WEB=1`, and restarts on failure. Logs go to
 `~/Library/Logs/pyimgtag-watch.log` (macOS) or `journalctl --user -u pyimgtag-watch`
 (Linux). An existing unit is never overwritten without `--force`.
+If `systemctl`/`launchctl` reports a failure, install and uninstall print
+its error and exit 1; a failed uninstall keeps the unit file so it can be
+retried, while a job that was never loaded is simply removed.
 
 #### Controlled vocabulary & custom prompts
 
