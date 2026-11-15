@@ -81,11 +81,16 @@ def passes_date_filter(
     date_from: str | None = None,
     date_to: str | None = None,
 ) -> bool:
-    """Return *True* if the image date satisfies the active date filters."""
+    """Return *True* if the image date satisfies the active date filters.
+
+    A photo with no capture date never satisfies an active date filter.
+    *file_path* is accepted for the callers' convenience and not read: the
+    file's own timestamps are not a capture date.
+    """
     if date is None and date_from is None and date_to is None:
         return True
 
-    img_date = _resolve_date(exif, file_path)
+    img_date = _resolve_date(exif)
     if img_date is None:
         return False
 
@@ -99,17 +104,16 @@ def passes_date_filter(
     return True
 
 
-def _resolve_date(exif: ExifData, file_path: Path) -> datetime | None:
-    """EXIF original date first, file creation/modification date as fallback."""
+def _resolve_date(exif: ExifData) -> datetime | None:
+    """The EXIF capture date, or None when the file records none.
+
+    The file's own creation/modification time is not a capture date (it is
+    when the file was copied), so it is never used.
+    """
     if exif.date_original:
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
             try:
                 return datetime.strptime(exif.date_original, fmt)
             except ValueError:
                 continue
-    try:
-        stat = file_path.stat()
-        ts = getattr(stat, "st_birthtime", None) or stat.st_mtime
-        return datetime.fromtimestamp(ts)
-    except OSError:
-        return None
+    return None

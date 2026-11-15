@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import re
 import subprocess  # nosec B404
 from datetime import datetime
 from pathlib import Path
@@ -39,9 +40,12 @@ def read_exif(file_path: str | Path) -> ExifData:
 
     Returns:
         An :class:`ExifData`. This never raises on a bad or missing file: every
-        backend degrades, and the final Pillow tier returns an ExifData with
-        only a file-derived date. Fields are left None when nothing is
-        recoverable.
+        backend degrades, and the final Pillow tier returns an empty ExifData.
+        Fields are left None when nothing is recoverable. ``date_original`` is
+        only ever a date recorded in the file's metadata, never the file's
+        own creation or modification time: a copied screenshot would otherwise
+        be dated the day it was copied, and that date would drive the date
+        filters, the timeline and the event names.
     """
     path = Path(file_path)
     result = _read_exiftool(path)
@@ -69,6 +73,8 @@ def _read_exiftool(path: Path) -> ExifData | None:
                 "-GPSLongitude",
                 "-DateTimeOriginal",
                 "-CreateDate",
+                "-DateCreated",
+                "-CreationTime",
                 str(path),
             ],
             timeout=10,
@@ -82,10 +88,14 @@ def _read_exiftool(path: Path) -> ExifData | None:
 
         lat = info.get("GPSLatitude")
         lon = info.get("GPSLongitude")
-        date_str = info.get("DateTimeOriginal") or info.get("CreateDate")
-        date_iso = _parse_exif_date(date_str) if date_str else None
-        if date_iso is None:
-            date_iso = _get_file_date(path)
+        # Capture-date tags in order of trust; a later one is used only when the
+        # earlier ones are absent or unparseable. XMP/IPTC DateCreated and the
+        # PNG CreationTime keep a screenshot's or an export's real date.
+        date_iso = None
+        for tag in ("DateTimeOriginal", "CreateDate", "DateCreated", "CreationTime"):
+            date_iso = _parse_exif_date(str(info[tag])) if info.get(tag) else None
+            if date_iso:
+                break
         has_gps = lat is not None and lon is not None
 
         return ExifData(
@@ -126,8 +136,6 @@ def _read_exifread(path: Path) -> ExifData | None:
         if date_tag:
             date_str = str(date_tag)
         date_iso = _parse_exif_date(date_str) if date_str else None
-        if date_iso is None:
-            date_iso = _get_file_date(path)
 
         return ExifData(gps_lat=lat, gps_lon=lon, date_original=date_iso, has_gps=has_gps)
     except Exception:  # noqa: BLE001 — best-effort tier; any failure falls through to Pillow
@@ -171,7 +179,7 @@ def _read_pillow(path: Path) -> ExifData:
         with Image.open(path) as img:
             exif = img.getexif()
             if not exif:
-                return ExifData(date_original=_get_file_date(path))
+                return ExifData()
 
             gps_ifd = exif.get_ifd(0x8825)
             lat, lon, has_gps = _parse_gps_ifd(gps_ifd)
@@ -179,12 +187,10 @@ def _read_pillow(path: Path) -> ExifData:
             exif_ifd = exif.get_ifd(0x8769)
             date_str = exif_ifd.get(36867) or exif_ifd.get(36868)
             date_iso = _parse_exif_date(date_str) if date_str else None
-            if date_iso is None:
-                date_iso = _get_file_date(path)
 
             return ExifData(gps_lat=lat, gps_lon=lon, date_original=date_iso, has_gps=has_gps)
-    except Exception:  # noqa: BLE001 — last-resort backend; degrade to a file-date-only result
-        return ExifData(date_original=_get_file_date(path))
+    except Exception:  # noqa: BLE001 — last-resort backend; degrade to an empty result
+        return ExifData()
 
 
 def _parse_gps_ifd(gps_ifd: dict) -> tuple[float | None, float | None, bool]:
@@ -217,8 +223,33 @@ def _dms_to_decimal(dms: tuple, ref: str) -> float:
 # ---------------------------------------------------------------------------
 
 
+#: A recorded date: ``YYYY:MM:DD`` (or ``-``), optionally a time, optionally
+#: fractional seconds and a zone. The zone is dropped: EXIF dates are local
+#: wall-clock time and are compared with each other as such.
+_DATE_RE = re.compile(
+    r"^(\d{4})[:-](\d{2})[:-](\d{2})"
+    r"(?:[ T](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?)?"
+    r"(?:Z|[+-]\d{2}:?\d{2})?$"
+)
+
+
 def _parse_exif_date(date_str: str | None) -> str | None:
+    """Normalize a recorded date to ``YYYY-MM-DD HH:MM:SS``, or None.
+
+    Accepts the EXIF form and the ISO form, with or without fractional seconds
+    or a zone suffix (XMP dates carry both), and a bare date (IPTC/XMP
+    ``DateCreated``), which is taken as midnight. A zeroed or impossible date
+    (``0000:00:00 00:00:00``) is None.
+    """
     if not date_str or not isinstance(date_str, str):
+        return None
+    match = _DATE_RE.match(date_str.strip())
+    if match is None:
+        return None
+    year, month, day, hour, minute, second = (int(g) if g else 0 for g in match.groups())
+    try:
+        return datetime(year, month, day, hour, minute, second).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
         return None
     date_str = date_str.strip()
     for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
@@ -227,12 +258,3 @@ def _parse_exif_date(date_str: str | None) -> str | None:
         except ValueError:
             continue
     return None
-
-
-def _get_file_date(path: Path) -> str | None:
-    try:
-        stat = path.stat()
-        ts = getattr(stat, "st_birthtime", None) or stat.st_mtime
-        return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
-    except OSError:
-        return None

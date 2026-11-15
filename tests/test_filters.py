@@ -78,23 +78,22 @@ class TestPassesDateFilter:
             is False
         )
 
-    def test_no_exif_date_uses_file(self, tmp_path):
+    def test_no_exif_date_never_uses_the_file_date(self, tmp_path):
+        # The file was created today, which is inside the range; it must not count
+        # as a capture date (#475).
         f = tmp_path / "img.jpg"
         f.touch()
-        # File date is today, so a wide range should match
-        assert passes_date_filter(self._exif(), f, date_from="2020-01-01") is True
+        assert passes_date_filter(self._exif(), f, date_from="2020-01-01") is False
 
     def test_no_date_at_all(self, tmp_path):
         f = tmp_path / "img.jpg"
         # File doesn't exist -> no date -> filter fails
         assert passes_date_filter(self._exif(), f, date="2026-04-01") is False
 
-    def test_invalid_exif_date_falls_back_to_file_mtime(self, tmp_path):
-        # date_original is set but matches neither supported format —
-        # both strptime attempts raise ValueError (lines 47-48 in filters.py)
-        # and the function falls back to file mtime.
+    def test_invalid_exif_date_is_no_date(self, tmp_path):
+        # date_original is set but matches neither supported format: the photo has
+        # no usable capture date, and the file's own time is not used instead.
         f = tmp_path / "img.jpg"
         f.touch()
         exif = self._exif(date="not-a-valid-date-format")
-        # File was just created, so a wide date_from well in the past should pass.
-        assert passes_date_filter(exif, f, date_from="2000-01-01") is True
+        assert passes_date_filter(exif, f, date_from="2000-01-01") is False

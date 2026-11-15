@@ -26,6 +26,7 @@ import subprocess  # nosec B404 — fixed argv, never a shell string
 import tempfile
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -149,8 +150,39 @@ def probe(file_path: str | Path) -> VideoInfo:
         height=stream.get("height"),
         # QuickTime/MP4 keeps the capture time here, which is what makes a
         # video show up correctly in the timeline and the date filters.
-        creation_time=tags.get("creation_time") or tags.get("com.apple.quicktime.creationdate"),
+        creation_time=capture_time(
+            tags.get("com.apple.quicktime.creationdate"), tags.get("creation_time")
+        ),
     )
+
+
+def capture_time(local_tag: str | None, utc_tag: str | None) -> str | None:
+    """A clip's capture time as ``YYYY-MM-DD HH:MM:SS`` wall-clock, like EXIF.
+
+    EXIF dates are the camera's local wall-clock time with no zone, and every
+    stored ``image_date`` must compare with every other one. Apple's
+    ``com.apple.quicktime.creationdate`` is local time with an offset, so its
+    wall clock is kept as written; the generic ``creation_time`` is UTC, so it
+    is converted to this machine's local time.
+
+    Args:
+        local_tag: ``com.apple.quicktime.creationdate``, when present.
+        utc_tag: ``creation_time``, when present.
+
+    Returns:
+        The naive local time, or None when neither tag parses.
+    """
+    for raw, is_local in ((local_tag, True), (utc_tag, False)):
+        if not raw:
+            continue
+        try:
+            when = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if when.tzinfo is not None:
+            when = when.replace(tzinfo=None) if is_local else when.astimezone().replace(tzinfo=None)
+        return when.strftime("%Y-%m-%d %H:%M:%S")
+    return None
 
 
 def sample_positions(duration_sec: float | None, count: int) -> list[float]:
