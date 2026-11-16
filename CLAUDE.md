@@ -4,7 +4,7 @@ macOS image tagger using local Ollama Gemma vision model with EXIF GPS reverse g
 
 ## Tech Stack
 
-- Python 3.11–3.14, requests, Pillow
+- Python 3.12+ (`requires-python = ">=3.12"`), requests, Pillow
 - Ollama HTTP API (gemma4:e4b default model)
 - Nominatim reverse geocoding with disk cache
 - Optional: pillow-heif (HEIC), exiftool (reliable HEIC EXIF)
@@ -298,6 +298,17 @@ PR description must use the repo template (`.github/pull_request_template.md`):
 - Nominatim rate limit: max 1 request/sec
 - exiftool preferred for HEIC EXIF; Pillow is fallback
 - Never commit `.env` or secrets
-- Release: update version in `pyproject.toml` AND `src/pyimgtag/__init__.py`, run `uv lock` to refresh `uv.lock`, and check that `SECURITY.md` (supported versions) is still accurate
-- Release automation triggers on `v*` tags
+- Release: the version comes from the git tag through setuptools-scm (`dynamic = ["version"]`,
+  written to `src/pyimgtag/_version.py` at build time). There is no version string to edit in
+  `pyproject.toml` or `src/pyimgtag/__init__.py`, and `uv.lock` records `pyimgtag` as an editable
+  source with no version, so neither changes. Steps:
+  1. On a `release/` branch, move the `[Unreleased]` CHANGELOG entries into `## [X.Y.Z] - YYYY-MM-DD`
+     (add any merged PRs it misses) and open a PR. `SECURITY.md` states a policy ("only the most
+     recent minor release"), not a version list, so it needs no edit.
+  2. After the PR merges, tag the merge commit and push the tag:
+     `git tag -a vX.Y.Z -m "pyimgtag X.Y.Z" <merge-sha> && git push origin vX.Y.Z`
+  3. The `v*` tag triggers `release.yml` (GitHub release) and `publish.yml` (PyPI). Check both runs
+     and the PyPI version.
+- Merged PR branches are not always deleted on the remote: check that a `release/vX.Y.Z` name is
+  free before pushing one.
 - Bandit skips: B404/B603/B607 (exiftool subprocess with fixed args)
