@@ -164,7 +164,7 @@ exclude_lines = [
 [tool.mypy]
 # The declared floor, not the newest supported version: checking against the
 # oldest runtime is what catches syntax or stdlib that would break there.
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false

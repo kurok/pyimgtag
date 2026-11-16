@@ -151,7 +151,7 @@ tests/                 Unit tests (no network, no Ollama required)
 
 ## Code Style
 
-- ruff for linting & formatting (line length: 100, target py311)
+- ruff for linting & formatting (line length: 100, target py312)
 - Type hints on all public functions/methods
 - Google-style docstrings on public API; not required on private helpers where the name is self-explanatory
 - Import sorting via ruff (isort rules)
