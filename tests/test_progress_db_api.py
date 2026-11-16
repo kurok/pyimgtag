@@ -32,6 +32,7 @@ from pyimgtag.progress_db import ProgressDB
 # which pins the kept copy from a group's first action on.
 EXPECTED_PUBLIC_API = [
     "all_phashes",
+    "capture_date_rows",
     "clear_auto_persons",
     "clear_dedup_action",
     "clear_embeddings",
@@ -135,6 +136,7 @@ EXPECTED_PUBLIC_API = [
     "undo_dedup_group",
     "unnamed_events",
     "update_image_cleanup",
+    "update_image_dates",
     "update_image_tags",
     "update_missing_fields",
     "update_person_label",
