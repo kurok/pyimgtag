@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`--country` takes any two-letter code**: the ISO 3166-1 code Nominatim returns is now stored next to the country name (schema v19, new `nearest_country_code` column) and kept in the geocode cache, so `query --country KE` finds Kenya without a name table. Photos tagged earlier have no code and still match through the built-in alias table; `run --resume-from-db` fills the code in when a lookup provides one.
+
 ## [0.30.0] - 2026-11-15
 
 ### Added

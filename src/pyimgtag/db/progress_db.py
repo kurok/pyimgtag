@@ -400,6 +400,13 @@ class ProgressDB:
         (18, _first_name_update("nearest_country", "country")),
         (18, _first_name_update("nearest_region", "region")),
         (18, _first_name_update("nearest_city", "locality")),
+        # 0.35.0: the ISO 3166-1 alpha-2 code Nominatim returns with every
+        # reply, so `--country KE` matches without a name table. Older rows
+        # stay NULL and keep matching through the alias table: the geocode
+        # cache they came from never stored the code, so there is nothing
+        # local to backfill from, and a migration makes no network calls.
+        # `run --resume-from-db` fills the gap once a lookup carries a code.
+        (19, "ALTER TABLE processed_images ADD COLUMN nearest_country_code TEXT"),
     )
 
     def __init__(self, db_path: str | Path | None = None, *, must_exist: bool = False) -> None:
@@ -442,6 +449,8 @@ class ProgressDB:
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         # The --city/--country match: accent/case folding plus name aliases.
         self._conn.create_function(PLACE_MATCH_SQL, 3, place_matches, deterministic=True)
+        # The --country form also takes the row's stored ISO code.
+        self._conn.create_function(PLACE_MATCH_SQL, 4, place_matches, deterministic=True)
         try:
             self._conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
             # Checked before anything writes to the file, WAL mode included.

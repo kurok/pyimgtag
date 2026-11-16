@@ -87,8 +87,9 @@ class ImageDB:
                  scene_category, emotional_tone, cleanup_class, has_text,
                  text_summary, event_hint, significance,
                  nearest_city, nearest_region, nearest_country, image_date,
-                 phash, gps_lat, gps_lon, media_type, duration_sec)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 phash, gps_lat, gps_lon, media_type, duration_sec,
+                 nearest_country_code)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(file_path),
@@ -120,6 +121,7 @@ class ImageDB:
                 # 'image' unless the pipeline aggregated keyframes for a clip.
                 getattr(result, "media_type", "image") or "image",
                 getattr(result, "duration_sec", None),
+                getattr(result, "nearest_country_code", None),
             ),
         )
         self._conn.commit()
@@ -265,16 +267,17 @@ class ImageDB:
         if scene_category is not None:
             conditions.append("pi.scene_category = ?")
             params.append(scene_category)
-        for column, typed, kind in (
-            ("pi.nearest_city", city, "city"),
-            ("pi.nearest_country", country, "country"),
-        ):
-            if typed is None:
-                continue
-            # Accent- and case-insensitive, and an English name or a country
-            # code also finds the stored native one (see place_terms).
-            conditions.append(f"{PLACE_MATCH_SQL}({column}, ?, ?)")
-            params.extend([typed, kind])
+        # Accent- and case-insensitive, and an English name or a country code
+        # also finds the stored native one (see place_terms). A country code
+        # is compared with the stored ISO code where the row has one.
+        if city is not None:
+            conditions.append(f"{PLACE_MATCH_SQL}(pi.nearest_city, ?, ?)")
+            params.extend([city, "city"])
+        if country is not None:
+            conditions.append(
+                f"{PLACE_MATCH_SQL}(pi.nearest_country, ?, ?, pi.nearest_country_code)"
+            )
+            params.extend([country, "country"])
         if status is not None:
             conditions.append("pi.status = ?")
             params.append(status)
@@ -1105,7 +1108,8 @@ class ImageDB:
                 event_hint     = COALESCE(event_hint,     ?),
                 significance   = COALESCE(significance,   ?),
                 gps_lat        = COALESCE(gps_lat,        ?),
-                gps_lon        = COALESCE(gps_lon,        ?)
+                gps_lon        = COALESCE(gps_lon,        ?),
+                nearest_country_code = COALESCE(nearest_country_code, ?)
             WHERE file_path = ?
             """,
             (
@@ -1119,6 +1123,7 @@ class ImageDB:
                 result.significance,
                 result.gps_lat,
                 result.gps_lon,
+                result.nearest_country_code,
                 str(file_path),
             ),
         )
