@@ -77,6 +77,9 @@ class GeoResult:
     nearest_city: str | None = None
     nearest_region: str | None = None
     nearest_country: str | None = None
+    #: Lowercase ISO 3166-1 alpha-2 code from Nominatim (``"ke"``), so a
+    #: ``--country KE`` filter needs no name table.
+    nearest_country_code: str | None = None
     error: str | None = None
 
 
@@ -97,6 +100,7 @@ class ImageResult:
     nearest_city: str | None = None
     nearest_region: str | None = None
     nearest_country: str | None = None
+    nearest_country_code: str | None = None
     processing_status: str = "ok"
     error_message: str | None = None
     phash: str | None = None

@@ -28,6 +28,7 @@ from pyimgtag.place_names import (
     COUNTRY_SEPARATORS,
     LOCALITY_SEPARATORS,
     REGION_SEPARATORS,
+    country_code,
     native_name,
 )
 
@@ -42,6 +43,7 @@ def _normalise(result: GeoResult) -> GeoResult:
     result.nearest_city = native_name(result.nearest_city, LOCALITY_SEPARATORS)
     result.nearest_region = native_name(result.nearest_region, REGION_SEPARATORS)
     result.nearest_country = native_name(result.nearest_country, COUNTRY_SEPARATORS)
+    result.nearest_country_code = country_code(result.nearest_country_code)
     return result
 
 
@@ -113,6 +115,7 @@ class ReverseGeocoder:
                         "nearest_city": result.nearest_city,
                         "nearest_region": result.nearest_region,
                         "nearest_country": result.nearest_country,
+                        "nearest_country_code": result.nearest_country_code,
                     },
                 )
         return result
@@ -122,6 +125,8 @@ class ReverseGeocoder:
         if cached is None:
             return None
         try:
+            # Entries written before the country code was cached have no
+            # "nearest_country_code" key; they load with the code unset.
             return _normalise(GeoResult(**cached))
         except TypeError:
             return None  # stale cache entry with unexpected keys — re-fetch
@@ -167,6 +172,7 @@ class ReverseGeocoder:
                 nearest_city=addr.get("city") or addr.get("town") or addr.get("municipality"),
                 nearest_region=addr.get("state") or addr.get("region"),
                 nearest_country=addr.get("country"),
+                nearest_country_code=addr.get("country_code"),
             )
         )
 

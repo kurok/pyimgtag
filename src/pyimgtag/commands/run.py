@@ -1023,6 +1023,7 @@ def _prepare_one(
             result.nearest_city = geo.nearest_city
             result.nearest_region = geo.nearest_region
             result.nearest_country = geo.nearest_country
+            result.nearest_country_code = geo.nearest_country_code
 
     # --- build context for model ---
     context: dict = {}
@@ -1204,6 +1205,7 @@ def _hydrate_from_db(
             result.nearest_city = geo.nearest_city
             result.nearest_region = geo.nearest_region
             result.nearest_country = geo.nearest_country
+            result.nearest_country_code = geo.nearest_country_code
         else:
             stats["geocode_failures"] += 1
 
