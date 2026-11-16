@@ -857,6 +857,28 @@ class ImageDB:
         )
         self._conn.commit()
 
+    def capture_date_rows(self) -> list[tuple[str, str | None, str]]:
+        """Every row's ``(file_path, image_date, media_type)``, ordered by path."""
+        rows = self._conn.execute(
+            "SELECT file_path, image_date, COALESCE(media_type, 'image') "
+            "FROM processed_images ORDER BY file_path"
+        ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+
+    def update_image_dates(self, changes: list[tuple[str, str | None]]) -> None:
+        """Set ``image_date`` for each ``(file_path, date)`` pair in one transaction.
+
+        Only ``image_date`` is written: ``file_size``/``file_mtime`` stay as
+        they are, so an incremental ``run`` still treats the files as done.
+        """
+        if not changes:
+            return
+        self._conn.executemany(
+            "UPDATE processed_images SET image_date = ? WHERE file_path = ?",
+            [(date, path) for path, date in changes],
+        )
+        self._conn.commit()
+
     def update_image_cleanup(self, file_path: str, cleanup_class: str | None) -> None:
         """Set or clear the cleanup_class for an image."""
         self._conn.execute(

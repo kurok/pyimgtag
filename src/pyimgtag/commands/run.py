@@ -817,15 +817,28 @@ def _read_capture_metadata(file_path: Path, args: argparse.Namespace) -> ExifDat
         logger.debug("EXIF read failed for %s: %s", file_path, exc)
         exif = ExifData()
     if exif.date_original is None and _is_video(file_path, args):
-        from pyimgtag.video import VideoToolError, probe
+        from pyimgtag.video import VideoToolError
 
         try:
-            created = probe(file_path).creation_time
+            created = clip_container_date(file_path)
         except VideoToolError:
             created = None
         if created:
             exif = replace(exif, date_original=created)
     return exif
+
+
+def clip_container_date(file_path: Path) -> str | None:
+    """The capture time a clip's QuickTime/MP4 header records, or None.
+
+    Raises:
+        pyimgtag.video.VideoToolError: ffprobe is missing or cannot read the
+            file. Callers decide whether that means "undated" (tagging) or
+            "unknown, keep what is stored" (``events detect --refresh-dates``).
+    """
+    from pyimgtag.video import probe
+
+    return probe(file_path).creation_time
 
 
 def _is_video(file_path: Path, args: argparse.Namespace) -> bool:

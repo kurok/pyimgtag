@@ -92,8 +92,74 @@ def cmd_events(args: argparse.Namespace) -> int:
         return handler(args, db)
 
 
+def refresh_capture_dates(db: ProgressDB) -> dict[str, int]:
+    """Re-read every row's capture date from its file and store the result.
+
+    Rows tagged before file times stopped standing in for capture dates can
+    carry the day a file was copied. This reads the date the way ``run`` does
+    now -- :func:`~pyimgtag.exif_reader.read_exif`, plus the container date
+    for a clip -- and writes only ``image_date``. No model and no geocoder is
+    called, and the freshness columns are untouched, so ``run`` still skips
+    the files.
+
+    A row is left alone when its file is gone, or when the file cannot be
+    read (a clip without ffprobe): "unknown" is not the same as "undated".
+
+    Returns:
+        Counts: ``checked`` (files read), ``changed`` (a different date,
+        including a new one), ``undated`` (had a date, now has none),
+        ``missing`` and ``unreadable`` (rows left alone).
+    """
+    from pyimgtag.commands.run import clip_container_date
+    from pyimgtag.exif_reader import read_exif
+    from pyimgtag.video import VideoToolError
+
+    counts = {"checked": 0, "changed": 0, "undated": 0, "missing": 0, "unreadable": 0}
+    writes: list[tuple[str, str | None]] = []
+    for file_path, stored, media_type in db.capture_date_rows():
+        path = Path(file_path)
+        if not path.is_file():
+            counts["missing"] += 1
+            continue
+        try:
+            date = read_exif(path).date_original
+            if date is None and media_type == "video":
+                date = clip_container_date(path)
+        except (OSError, ValueError, VideoToolError) as exc:
+            print(f"  could not read {file_path}: {exc}", file=sys.stderr)
+            counts["unreadable"] += 1
+            continue
+        counts["checked"] += 1
+        if date == stored:
+            continue
+        writes.append((file_path, date))
+        # The stored spelling may differ (raw exiftool vs ISO) for the same
+        # instant; rewrite it, but count only a real change of date.
+        if _parse_date(stored) != _parse_date(date):
+            counts["changed"] += 1
+            if stored and date is None:
+                counts["undated"] += 1
+    db.update_image_dates(writes)
+    return counts
+
+
 def _detect(args: argparse.Namespace, db: ProgressDB) -> int:
     from pyimgtag.events import detect_events, fallback_name
+
+    if getattr(args, "refresh_dates", False):
+        counts = refresh_capture_dates(db)
+        print(
+            f"Re-read capture dates of {counts['checked']} file(s): "
+            f"{counts['changed']} changed, {counts['undated']} now undated.",
+            file=sys.stderr,
+        )
+        skipped = counts["missing"] + counts["unreadable"]
+        if skipped:
+            print(
+                f"  {counts['missing']} missing and {counts['unreadable']} unreadable "
+                "file(s) kept their stored date.",
+                file=sys.stderr,
+            )
 
     points = _points(db)
     if not points:

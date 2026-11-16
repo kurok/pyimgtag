@@ -866,6 +866,14 @@ class ProgressDB:
         """Delegate to :meth:`ImageDB.update_image_tags`."""
         self._images.update_image_tags(file_path, tags)
 
+    def capture_date_rows(self) -> list[tuple[str, str | None, str]]:
+        """Delegate to :meth:`ImageDB.capture_date_rows`."""
+        return self._images.capture_date_rows()
+
+    def update_image_dates(self, changes: list[tuple[str, str | None]]) -> None:
+        """Delegate to :meth:`ImageDB.update_image_dates`."""
+        self._images.update_image_dates(changes)
+
     def update_image_cleanup(self, file_path: str, cleanup_class: str | None) -> None:
         """Delegate to :meth:`ImageDB.update_image_cleanup`."""
         self._images.update_image_cleanup(file_path, cleanup_class)

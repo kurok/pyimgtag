@@ -912,6 +912,25 @@ week in Lisbon is one trip of seven days rather than seven unrelated events.
 | One photo missing GPS | Not treated as travel. A single missing reading must not split an afternoon in half. |
 | No capture date | Left unassigned rather than guessed at — `pyimgtag events list --unassigned`. |
 
+**Fixing dates stored by older versions.** Until #475 stopped the fallback to
+the file's own creation or modification time, a photo with no recorded capture
+date was stored with the day it was copied — two June screenshots could become a
+"15 November 2026" event and turn up under `query --year 2026`. The stored row
+cannot tell that date from a real one, so re-read them from the files:
+
+```bash
+pyimgtag events detect --refresh-dates          # re-read every capture date, then cluster
+pyimgtag events list --unassigned               # the photos that turned out to be undated
+```
+
+`--refresh-dates` reads each file's EXIF/XMP date the way `run` does now (a
+clip's QuickTime/MP4 header date when EXIF has none) and rewrites only
+`image_date`, so `query --year/--month`, the timeline and the events all follow.
+It calls no model and no geocoder, and it leaves the size/mtime columns alone,
+so the next `run` still skips the files. A file that is gone, or a clip that
+cannot be read without ffprobe, keeps its stored date. It prints how many dates
+changed and how many photos are now undated.
+
 **Names.** Every event gets a deterministic name immediately (`Lisbon — June
 2024`), so naming is optional rather than a prerequisite:
 
@@ -1455,7 +1474,7 @@ Each result (JSON/CSV) includes:
 | `file_path` | Full path to image |
 | `file_name` | Filename |
 | `source_type` | `directory` or `photos_library` |
-| `image_date` | EXIF capture date; empty when the file records none (the file's own creation or modification time is never used) |
+| `image_date` | EXIF capture date; empty when the file records none (the file's own creation or modification time is never used). Rows tagged by an older version may hold a file-copy date — `pyimgtag events detect --refresh-dates` re-reads them without the model |
 | `tags` | 1-5 vision model tags |
 | `scene_summary` | Short scene description |
 | `scene_category` | `indoor_home`, `indoor_work`, `outdoor_leisure`, `outdoor_travel`, `transport`, `other` |

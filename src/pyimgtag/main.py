@@ -213,6 +213,7 @@ Examples:
 Examples:
   pyimgtag events detect                        # cluster everything in the DB
   pyimgtag events detect --gap-hours 8 --distance-km 50
+  pyimgtag events detect --refresh-dates        # re-read capture dates first (no model)
   pyimgtag events list                          # id, name, dates, trip, count
   pyimgtag events list --unassigned             # photos with no capture date
   pyimgtag events show 12
@@ -1314,6 +1315,14 @@ def _add_events_subcommand(subparsers: Any) -> None:
         default=DEFAULT_DISTANCE_KM,
         metavar="KM",
         help=f"A jump further than this ends an event (default: {DEFAULT_DISTANCE_KM})",
+    )
+    detect.add_argument(
+        "--refresh-dates",
+        action="store_true",
+        help=(
+            "First re-read every photo's capture date from its file (no model, no "
+            "geocoding), so rows dated by file copy time become undated"
+        ),
     )
 
     listing = events_sub.add_parser("list", help="List detected events")
