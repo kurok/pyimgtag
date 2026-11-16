@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pyimgtag.db.progress_db import _first_name_update
+from pyimgtag.db.progress_db import SCHEMA_VERSION, _first_name_update
 from pyimgtag.models import ImageResult
 from pyimgtag.place_names import (
     COUNTRY_SEPARATORS,
@@ -87,7 +87,7 @@ def test_the_migration_runs_once_and_backs_up_first(tmp_path):
     migrated = _places(path)
     ProgressDB(path).close()  # reopening: nothing pending, no new backup
     with sqlite3.connect(path) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 18
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert backup.stat().st_mtime_ns == first
     assert sorted(p.name for p in tmp_path.glob("p.db.bak-*")) == ["p.db.bak-v17"]
     assert _places(path) == migrated
@@ -102,7 +102,7 @@ def test_a_data_fix_for_a_missing_column_is_skipped_not_fatal(tmp_path, monkeypa
         conn.execute("PRAGMA user_version = 17")
     ProgressDB(path).close()
     with sqlite3.connect(path) as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 18
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_a_misspelled_data_fix_column_is_never_silently_skipped(tmp_path):

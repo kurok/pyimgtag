@@ -24,6 +24,7 @@ _CSV_FIELDS = [
     "nearest_city",
     "nearest_region",
     "nearest_country",
+    "nearest_country_code",
     "processing_status",
     "error_message",
     "phash",

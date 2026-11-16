@@ -14,11 +14,13 @@ __all__ = [
     "COUNTRY_SEPARATORS",
     "LOCALITY_SEPARATORS",
     "REGION_SEPARATORS",
+    "country_code",
     "distinct_place_parts",
     "fold",
     "native_name",
     "place_matches",
     "place_terms",
+    "typed_country_codes",
 ]
 
 # Multilingual places carry every official name in their OSM ``name`` tag,
@@ -213,6 +215,19 @@ def fold(text: str | None) -> str | None:
     return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
 
 
+def country_code(value: object) -> str | None:
+    """A stored-form ISO 3166-1 alpha-2 code: ``" KE"`` -> ``"ke"``.
+
+    Nominatim sends ``address.country_code`` lowercase already; anything that
+    is not two ASCII letters (absent, empty, a non-string) becomes ``None``,
+    so a malformed reply or cache entry never stores a code that cannot match.
+    """
+    if not isinstance(value, str):
+        return None
+    code = value.strip().lower()
+    return code if len(code) == 2 and code.isascii() and code.isalpha() else None
+
+
 def _alias_index(entries: Iterable[tuple[str, Iterable[str]]]) -> dict[str, tuple[str, ...]]:
     index: dict[str, list[str]] = {}
     for native, names in entries:
@@ -225,6 +240,7 @@ def _alias_index(entries: Iterable[tuple[str, Iterable[str]]]) -> dict[str, tupl
 
 _COUNTRY_INDEX = _alias_index((native, names) for _, native, names in _COUNTRIES)
 _COUNTRY_CODES = {code: native for code, native, _ in _COUNTRIES}
+_NATIVE_CODES = {native: code for code, native, _ in _COUNTRIES}
 _CITY_INDEX = _alias_index(_CITIES)
 
 
@@ -263,20 +279,57 @@ def place_terms(typed: str, kind: str) -> tuple[frozenset[str], tuple[str, ...]]
     return (frozenset({key}) if whole else frozenset()), tuple(substrings)
 
 
-def place_matches(stored: str | None, typed: str, kind: str) -> bool:
-    """True when the *stored* place name answers a filter for *typed*.
+@functools.lru_cache(maxsize=256)
+def typed_country_codes(typed: str) -> frozenset[str]:
+    """ISO codes a ``--country`` filter means when it is typed as a code.
+
+    A two-letter value is taken as a code (``"KE"`` -> ``{"ke"}``); a short
+    alias that the table resolves to a country adds that country's code, so
+    ``"UK"`` also gives ``"gb"``. Anything else (a name) gives an empty set
+    and is matched by name only.
+
+    Args:
+        typed: The filter value as the user gave it.
+
+    Returns:
+        Lowercase alpha-2 codes; empty when *typed* is not a code.
+    """
+    key = fold(typed.strip()) or ""
+    if not (len(key) == 2 and key.isascii() and key.isalpha()):
+        return frozenset()
+    codes = {key}
+    for native in _COUNTRY_INDEX.get(key, ()):
+        if native in _NATIVE_CODES:
+            codes.add(_NATIVE_CODES[native])
+    return frozenset(codes)
+
+
+def place_matches(
+    stored: str | None, typed: str, kind: str, stored_code: str | None = None
+) -> bool:
+    """True when the *stored* place answers a filter for *typed*.
 
     Registered as an SQL function by the progress DB, so each row's name is
     folded once however many spellings the filter accepts.
+
+    A country typed as a two-letter code is compared with the row's stored
+    ISO code when it has one, so ``KE`` finds Kenya with no name table. A row
+    without a code (geocoded before the code was stored) falls back to the
+    name aliases of :func:`place_terms`.
 
     Args:
         stored: The place name in the DB (may be None).
         typed: The filter value as the user gave it.
         kind: ``"country"`` or ``"city"``.
+        stored_code: The row's ISO 3166-1 alpha-2 country code, if any.
 
     Returns:
-        Whether the row matches; a row with no name never does.
+        Whether the row matches; a row with no name and no code never does.
     """
+    if kind == "country" and stored_code:
+        codes = typed_country_codes(typed)
+        if codes:
+            return stored_code.strip().lower() in codes
     if not stored:
         return False
     exact, substrings = place_terms(typed, kind)

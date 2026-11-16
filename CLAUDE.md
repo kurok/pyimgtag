@@ -70,7 +70,8 @@ src/pyimgtag/
   progress_db.py       Compatibility re-export of ProgressDB (real code lives in db/)
   db_location.py       resolve_db_path(): --db, then PYIMGTAG_DB, then the default
   db/                  SQLite persistence package: progress_db (ProgressDB facade, schema +
-                       versioned migrations via PRAGMA user_version — latest is v18, which
+                       versioned migrations via PRAGMA user_version — latest is v19, which
+                       adds nearest_country_code (ISO alpha-2 from Nominatim); v18
                        rewrites stored place names to one name; v17 adds media_type/
                        duration_sec for video),
                        image_db (ImageDB — incl. the bbox / ISO date-prefix query filters),

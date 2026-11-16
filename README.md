@@ -549,12 +549,15 @@ pyimgtag query --tag sunset
 
 # Search by city / country. Places are stored under their native name
 # ("Italia", "München"); the filter ignores case and accents and also takes
-# the English name or a two-letter country code. A miss lists the names the
-# library has.
+# the English name or a two-letter country code. A code is compared with the
+# ISO code stored next to the name, so any country works; photos tagged
+# before that code was stored match through a built-in table of common
+# countries. A miss lists the names the library has.
 pyimgtag query --city "San Francisco"
 pyimgtag query --city Munich          # finds München
 pyimgtag query --country Italy        # finds Italia
 pyimgtag query --country CH           # finds Schweiz
+pyimgtag query --country KE           # finds Kenya
 
 # Filter by scene / cleanup / status
 pyimgtag query --scene-category outdoor_travel --status ok
@@ -1489,6 +1492,7 @@ Each result (JSON/CSV) includes:
 | `nearest_city` | City |
 | `nearest_region` | State/region |
 | `nearest_country` | Country |
+| `nearest_country_code` | ISO 3166-1 alpha-2 code, lowercase (`ch`) |
 | `processing_status` | `ok` or `error` |
 | `error_message` | Error details if any |
 | `phash` | Perceptual hash (when `--dedup` used) |
@@ -1617,7 +1621,7 @@ An older pyimgtag refuses a database written by a newer one rather than
 running against a schema it does not know:
 
 ```text
-Error: database ~/.cache/pyimgtag/progress.db has schema v19, but this pyimgtag supports up to v18. Upgrade pyimgtag, or point --db at another file.
+Error: database ~/.cache/pyimgtag/progress.db has schema v20, but this pyimgtag supports up to v19. Upgrade pyimgtag, or point --db at another file.
 ```
 
 To go back to an older release, stop every pyimgtag process (CLI, dashboard,
