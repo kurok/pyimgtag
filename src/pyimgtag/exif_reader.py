@@ -251,10 +251,3 @@ def _parse_exif_date(date_str: str | None) -> str | None:
         return datetime(year, month, day, hour, minute, second).strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None
-    date_str = date_str.strip()
-    for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
-        try:
-            return datetime.strptime(date_str, fmt).strftime("%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            continue
-    return None
