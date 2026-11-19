@@ -14,6 +14,11 @@ updates:
     commit-message:
       prefix: "ci"
     open-pull-requests-limit: 5
+    groups:
+      # init, autobuild and analyze must share one version, or CodeQL fails.
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
